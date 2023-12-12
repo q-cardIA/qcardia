@@ -1,13 +1,15 @@
-
-
+import numpy as np
+import pydicom
+from natsort import natsorted
 
 class BaseSequence():
     
-    def __init__(self):
+    def __init__(self, folder):
+        self.folder = folder
+        self.slice_data, self.number_of_slices = self._load_data()
         
         
-        
-    def load_data(folder):
+    def _load_data(self):
         """
         Load DICOM data from a specified folder.
 
@@ -32,7 +34,7 @@ class BaseSequence():
             [
                 # Loop through each file in the folder
                 f
-                for f in folder.iterdir()
+                for f in self.folder.iterdir()
                 if (
                     # Check if the path is a file
                     f.is_file()
@@ -62,7 +64,7 @@ class BaseSequence():
 
         # Gets unique positions from given positions and orientations.
         # assigns a slice index to each image based on its position.
-        indices_of_slices, the_slice_positions = _get_slices_from_positions(
+        indices_of_slices, the_slice_positions = self._get_slices_from_positions(
             slice_position, slice_orientation
         )
 
@@ -101,37 +103,37 @@ class BaseSequence():
                 "meta_data": sorted_list_of_meta_data,
             }
 
-        return slices_dict
+        return slices_dict, number_of_slices
 
-        def _get_slices_from_positions(positions, orientations):
-            """
-            Get slice indices and unique positions from given positions and orientations.
+    def _get_slices_from_positions(self, positions, orientations):
+        """
+        Get slice indices and unique positions from given positions and orientations.
 
-            This function calculates the true positions by taking the dot product of each position
-            and the cross product of the orientation vectors. It then finds the unique positions,
-            sorts them in descending order, and assigns a slice index to each position.
+        This function calculates the true positions by taking the dot product of each position
+        and the cross product of the orientation vectors. It then finds the unique positions,
+        sorts them in descending order, and assigns a slice index to each position.
 
-            Args:
-                positions (list): A list of positions.
-                orientations (list): A list of orientations.
+        Args:
+            positions (list): A list of positions.
+            orientations (list): A list of orientations.
 
-            Returns:
-                tuple: A tuple containing a list of slice indices and a list of unique positions.
+        Returns:
+            tuple: A tuple containing a list of slice indices and a list of unique positions.
 
-            """
+        """
 
-            true_positions = []
-            for i in range(len(positions)):
-                true_positions.append(
-                    np.dot(positions[i], np.cross(orientations[i][0:3], orientations[i][3:6]))
-                )
+        true_positions = []
+        for i in range(len(positions)):
+            true_positions.append(
+                np.dot(positions[i], np.cross(orientations[i][0:3], orientations[i][3:6]))
+            )
 
-            # find unique positions, these are the slices 
-            unique_positions = np.unique(true_positions)
-            unique_positions = np.sort(unique_positions)[::-1] # sort in descending order
-            slice_index = np.zeros(len(true_positions))
-            # give a slice index to each image based on its position
-            for i in range(len(unique_positions)):
-                slice_index[np.where(true_positions == unique_positions[i])] = i
+        # find unique positions, these are the slices 
+        unique_positions = np.unique(true_positions)
+        unique_positions = np.sort(unique_positions)[::-1] # sort in descending order
+        slice_index = np.zeros(len(true_positions))
+        # give a slice index to each image based on its position
+        for i in range(len(unique_positions)):
+            slice_index[np.where(true_positions == unique_positions[i])] = i
 
-            return slice_index, unique_positions
+        return slice_index, unique_positions
