@@ -2,33 +2,52 @@ import numpy as np
 import pydicom
 from natsort import natsorted
 
-class BaseSequence():
-    
+
+class BaseSequence:
+    """
+    The base class used to represent the DICOM data of a CMR sequence acquisition.
+
+    This class provides methods to load DICOM data from a specified folder and
+    organize it into a dictionary. The dictionary keys are the slice numbers and
+    the values are another dictionary containing the pixel array, slice position,
+    and meta data for each slice.
+
+    Attributes:
+        folder (Path): The folder path where the DICOM files are located.
+        slice_data (dict): A dictionary where the keys are the slice numbers and
+        the values are another dictionary containing the pixel array, slice
+        position, and meta data for each slice.
+        number_of_slices (int): The total number of slices in the DICOM data.
+    Methods:
+        _load_data: Load DICOM data from a specified folder.
+        _get_slices_from_positions: Get slice indices and unique positions from
+        given positions and orientations.
+    """
+
     def __init__(self, folder):
         self.folder = folder
         self.slice_data, self.number_of_slices = self._load_data()
-        
-        
+
     def _load_data(self):
         """
         Load DICOM data from a specified folder.
 
         This function reads DICOM files from the given folder, extracts relevant
-        information such as slice position, slice orientation, and temporal 
-        positions, and organizes the data into a dictionary. The dictionary keys 
-        are the slice numbers and the values are another dictionary containing the 
+        information such as slice position, slice orientation, and temporal
+        positions, and organizes the data into a dictionary. The dictionary keys
+        are the slice numbers and the values are another dictionary containing the
         pixel array, slice position, and meta data for each slice.
 
         Args:
             folder (Path): The folder path where the DICOM files are located.
 
         Returns:
-            dict: A dictionary where the keys are the slice numbers and the values 
-            are another dictionary containing the pixel array, slice position, and 
+            dict: A dictionary where the keys are the slice numbers and the values
+            are another dictionary containing the pixel array, slice position, and
             meta data for each slice.
 
         """
-        
+
         # Use natsorted to sort the files in the folder in natural order
         files = natsorted(
             [
@@ -50,7 +69,7 @@ class BaseSequence():
         slice_position = []
         slice_orientation = []
         temporal_positions = []
-        
+
         # Read DICOM files and extract relevant information
         for file in files:
             the_ds = pydicom.read_file(file)
@@ -70,8 +89,8 @@ class BaseSequence():
 
         slices_dict = {}
         number_of_slices = len(the_slice_positions)
-        
-        # for each slice store the pixel array, slice position, and meta data 
+
+        # for each slice store the pixel array, slice position, and meta data
         # order based on temporal position
         for i in range(number_of_slices):
             image_array = []
@@ -94,11 +113,11 @@ class BaseSequence():
                     zip(slice_tmp_position, image_array), key=lambda pair: pair[0]
                 )
             ]
-            
-            # store the list of meta data for each slice in a dict with the slice number as 
+
+            # store the list of meta data for each slice in a dict with the slice number as
             # the key, along with the pixel array and slice position
             slices_dict[f"slice{i+1:02}"] = {
-                "pixel_array": np.transpose(sorted_image_array, (1, 2, 0)),
+                "pixel_array": sorted_image_array,
                 "slice_position": the_slice_positions[i],
                 "meta_data": sorted_list_of_meta_data,
             }
@@ -125,15 +144,35 @@ class BaseSequence():
         true_positions = []
         for i in range(len(positions)):
             true_positions.append(
-                np.dot(positions[i], np.cross(orientations[i][0:3], orientations[i][3:6]))
+                np.dot(
+                    positions[i], np.cross(orientations[i][0:3], orientations[i][3:6])
+                )
             )
 
-        # find unique positions, these are the slices 
+        # find unique positions, these are the slices
         unique_positions = np.unique(true_positions)
-        unique_positions = np.sort(unique_positions)[::-1] # sort in descending order
+        unique_positions = np.sort(unique_positions)[::-1]  # sort in descending order
         slice_index = np.zeros(len(true_positions))
         # give a slice index to each image based on its position
         for i in range(len(unique_positions)):
             slice_index[np.where(true_positions == unique_positions[i])] = i
 
         return slice_index, unique_positions
+
+    def get_array(self):
+        """
+        Get the pixel array for each slice.
+
+        This function returns the pixel array for each slice in the DICOM data.
+
+        Returns:
+            list: A list of pixel arrays for each slice.
+
+        """
+
+        return np.asarray(
+            [
+                self.slice_data[f"slice{i+1:02}"]["pixel_array"]
+                for i in range(self.number_of_slices)
+            ]
+        )
