@@ -18,7 +18,6 @@ cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
 
 cine_seq = BaseSequence(cine_dir)
 
-# cine = cine_seq.slice_data["slice06"]["pixel_array"][..., np.newaxis]
 cine = cine_seq.get_array()
 
 cine_img_summed = np.sum(cine, axis=(0, 1))
@@ -38,12 +37,11 @@ reshaped_cine_borderless = cine_borderless.reshape(
 )
 reshaped_cine_borderless -= np.amin(reshaped_cine_borderless)
 
-data_dict = {}
-data_dict["sa_cine"] = torch.tensor(reshaped_cine_borderless.astype(np.float32))
-data_dict["sa_cine_meta_dict"] = {}
-data_dict["sa_cine_meta_dict"]["mean_intensity"] = np.mean(reshaped_cine_borderless)
-data_dict["sa_cine_meta_dict"]["std_intensity"] = np.std(reshaped_cine_borderless)
-data_dict["sa_cine_meta_dict"]["pixdim"] = torch.tensor(
+config_path = WANDB_RUN_PATH / "files" / "config-copy.yaml"
+config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+
+cine_torch_tensor = torch.tensor(reshaped_cine_borderless.astype(np.float32))
+cine_pixdim = torch.tensor(
     [
         float(cine_seq.slice_data["slice01"]["meta_data"][0].PixelSpacing[0]),
         float(cine_seq.slice_data["slice01"]["meta_data"][0].PixelSpacing[1]),
@@ -51,19 +49,12 @@ data_dict["sa_cine_meta_dict"]["pixdim"] = torch.tensor(
     ],
     dtype=torch.float32,
 )
-
-config_path = WANDB_RUN_PATH / "files" / "config-copy.yaml"
-config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
-
-key = "sa_cine"
-d = deepcopy(data_dict)
-nr_slices = d[key].shape[0]
+nr_slices = cine_torch_tensor.shape[0]
 target_pixdim = torch.tensor(config["data"]["target_pixdim"])
 target_size = torch.tensor(config["data"]["target_size"])
 grid_sample_modes = [config["data"]["image_grid_sample_mode"]]
 
 
-# def PredictionResample3Dd():
 def T_2D_scale(scales):
     T_scale = torch.tensor(
         [
@@ -76,22 +67,25 @@ def T_2D_scale(scales):
     return T_scale
 
 
-source_shape = torch.tensor(d[key].shape[2:], dtype=torch.float32)
-real_source_size = d[f"{key}_meta_dict"]["pixdim"][:2] * source_shape
+source_shape = torch.tensor(cine_torch_tensor.shape[2:], dtype=torch.float32)
+real_source_size = cine_pixdim[:2] * source_shape
 real_target_size = target_pixdim * target_size
 dimension_scale_factor = real_target_size / real_source_size
 T = T_2D_scale(dimension_scale_factor)
 
-
 grid_size = [nr_slices, 1, target_size[0], target_size[1]]
+
+
+print(cine_torch_tensor.shape)
+print(grid_size)
 
 grid = F.affine_grid(
     theta=torch.repeat_interleave(T[:-1, :].unsqueeze(0), nr_slices, dim=0),
     size=grid_size,
     align_corners=False,
 )
-d[key] = F.grid_sample(
-    d[key],
+cine_torch_tensor = F.grid_sample(
+    cine_torch_tensor,
     grid,
     align_corners=False,
     mode=grid_sample_modes[0],
@@ -99,8 +93,9 @@ d[key] = F.grid_sample(
 )
 
 
-d[key] -= d[f"{key}_meta_dict"]["mean_intensity"]
-d[key] /= d[f"{key}_meta_dict"]["std_intensity"]
+cine_torch_tensor -= np.mean(reshaped_cine_borderless)
+cine_torch_tensor /= np.std(reshaped_cine_borderless)
+
 
 model = UNet2d(
     nr_input_channels=config["unet"]["nr_image_channels"],
@@ -119,7 +114,7 @@ batch_size = 50
 with torch.no_grad():
     for i in range(0, nr_slices // batch_size + 1):
         model_output[i * batch_size : (i + 1) * batch_size] = model(
-            d[key][i * batch_size : (i + 1) * batch_size]
+            cine_torch_tensor[i * batch_size : (i + 1) * batch_size]
         )[0]
 
 dimension_rescale_factor = 1 / dimension_scale_factor
