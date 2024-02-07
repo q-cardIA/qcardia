@@ -1,4 +1,3 @@
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -15,10 +14,13 @@ PATH_TO_DATASET = Path.cwd() / "data"
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 patient = patient_list[0]
 cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
+# scar_dir = Path(list(patient.glob("*[sS][cC][aA][rR]*"))[0])
 
 cine_seq = BaseSequence(cine_dir)
 
-cine = cine_seq.get_array()
+cine = cine_seq.preprocessed_pixel_array
+print(cine.shape)
+print(cine.shape[100000])
 
 cine_img_summed = np.sum(cine, axis=(0, 1))
 borderless_idxs_0 = np.nonzero(np.any(cine_img_summed, axis=1))[0]
@@ -74,10 +76,6 @@ dimension_scale_factor = real_target_size / real_source_size
 T = T_2D_scale(dimension_scale_factor)
 
 grid_size = [nr_slices, 1, target_size[0], target_size[1]]
-
-
-print(cine_torch_tensor.shape)
-print(grid_size)
 
 grid = F.affine_grid(
     theta=torch.repeat_interleave(T[:-1, :].unsqueeze(0), nr_slices, dim=0),

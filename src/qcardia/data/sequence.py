@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 import pydicom
 from natsort import natsorted
@@ -27,6 +29,12 @@ class BaseSequence:
     def __init__(self, folder):
         self.folder = folder
         self.slice_data, self.number_of_slices = self._load_data()
+        self.pixel_array = self._get_array()
+        reshaped_pixel_array = self._reshape_array()
+        self.start_idx_0, self.stop_idx_0, self.start_idx_1, self.stop_idx_1 = (
+            self._get_borders(reshaped_pixel_array)
+        )
+        self.preprocessed_pixel_array = self._strip_borders(reshaped_pixel_array)
 
     def _load_data(self):
         """
@@ -159,15 +167,14 @@ class BaseSequence:
 
         return slice_index, unique_positions
 
-    def get_array(self):
+    def _get_array(self):
         """
-        Get the pixel array for each slice.
+        Get the pixel array for all slice/times.
 
-        This function returns the pixel array for each slice in the DICOM data.
+        Shape depends on the number of slices/frames and the size of the pixel arrays.
 
         Returns:
-            list: A list of pixel arrays for each slice.
-
+            ndarray: The pixel array for all slices/times.
         """
 
         return np.asarray(
@@ -176,3 +183,44 @@ class BaseSequence:
                 for i in range(self.number_of_slices)
             ]
         )
+
+    def _reshape_array(self):
+        """
+        Reshape the pixel array to have all the times/slices in the
+        batch dimension. With one channel.
+
+        The pixel array is reshaped to have the following dimensions:
+        (number_of_slices, 1, height, width).
+
+        Returns:
+            ndarray: The reshaped pixel array.
+        """
+
+        return self.pixel_array.reshape(
+            -1,
+            1,
+            self.pixel_array.shape[-2],
+            self.pixel_array.shape[-1],
+        )
+
+    def _get_borders(self, reshaped_pixel_array):
+        summed_pixel_array = np.sum(reshaped_pixel_array, axis=(0, 1))
+        borderless_idxs_0 = np.nonzero(np.any(summed_pixel_array, axis=1))[0]
+        borderless_idxs_1 = np.nonzero(np.any(summed_pixel_array, axis=0))[0]
+
+        start_idx_0, stop_idx_0 = borderless_idxs_0[0], borderless_idxs_0[-1] + 1
+        start_idx_1, stop_idx_1 = borderless_idxs_1[0], borderless_idxs_1[-1] + 1
+
+        return start_idx_0, stop_idx_0, start_idx_1, stop_idx_1
+
+    def _strip_borders(self, reshaped_pixel_array):
+        """
+        Strip the borders from the pixel array.
+
+        Returns:
+            ndarray: The borderless pixel array.
+        """
+
+        return reshaped_pixel_array[
+            ..., self.start_idx_0 : self.stop_idx_0, self.start_idx_1 : self.stop_idx_1
+        ]
