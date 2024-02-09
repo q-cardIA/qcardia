@@ -1,8 +1,16 @@
 from copy import deepcopy
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pydicom
+import torch
+import yaml
 from natsort import natsorted
+from qcardia_models.models import UNet2d
+from torch.nn import functional as F
+
+import src.qcardia.data.utils as utils
 
 
 class BaseSequence:
@@ -29,12 +37,43 @@ class BaseSequence:
     def __init__(self, folder):
         self.folder = folder
         self.slice_data, self.number_of_slices = self._load_data()
-        self.pixel_array = self._get_array()
-        reshaped_pixel_array = self._reshape_array()
-        self.start_idx_0, self.stop_idx_0, self.start_idx_1, self.stop_idx_1 = (
-            self._get_borders(reshaped_pixel_array)
+        self.inference_dict = {}
+        self.batch_size = 50
+
+    def run_model(self, wandb_run_path):
+
+        preprocessed_slices = self._preproccess_slices()
+        config = self._get_config(wandb_run_path)
+        self.inference_dict["target_pixdim"] = torch.tensor(
+            config["data"]["target_pixdim"]
         )
-        self.preprocessed_pixel_array = self._strip_borders(reshaped_pixel_array)
+        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+        self.inference_dict["grid_sample_modes"] = [
+            config["data"]["image_grid_sample_mode"]
+        ]
+        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
+        the_model = UNet2d(
+            nr_input_channels=config["unet"]["nr_image_channels"],
+            channels_list=config["unet"]["channels_list"],
+            nr_output_classes=config["unet"]["nr_output_classes"],
+            nr_output_scales=config["unet"]["nr_output_scales"],
+        ).to("cpu")
+        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
+        the_model.load_state_dict(model_weights)
+
+        self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
+            self._rescale_tensor(preprocessed_slices)
+        )
+        standardised_tensor = utils.standardise(rescaled_tensor)
+        model_output = self._forward_model(the_model, standardised_tensor)
+        rescale_model_output = self._invert_rescale_tensor(model_output)
+        model_prediction = torch.argmax(
+            rescale_model_output, dim=1, keepdim=True
+        ).float()
+
+        output_model_prediction = self._postprocess_output(model_prediction)
+
+        return output_model_prediction
 
     def _load_data(self):
         """
@@ -167,6 +206,34 @@ class BaseSequence:
 
         return slice_index, unique_positions
 
+    def _preproccess_slices(self):
+        """
+        Preprocess the pixel array for inference.
+        """
+        pixel_array = self._get_array()
+        self.inference_dict["original_shape"] = torch.tensor(pixel_array.shape)
+        reshaped_pixel_array = self._reshape_array(pixel_array)
+        start0, stop0, start1, stop1, borderless_pixel_array = self._strip_borders(
+            reshaped_pixel_array
+        )
+        self.inference_dict["border_indices"] = [
+            start0,
+            stop0,
+            start1,
+            stop1,
+        ]
+        borderless_pixel_array -= np.amin(borderless_pixel_array)
+        borderless_pixel_tensor = torch.tensor(
+            borderless_pixel_array.astype(np.float32)
+        )
+        self.inference_dict["source_shape"] = torch.tensor(
+            borderless_pixel_array.shape[-2:], dtype=torch.float32
+        )
+        self.inference_dict["number_of_slices"] = reshaped_pixel_array.shape[0]
+        self.inference_dict["pixdims"] = self._get_pixel_spacing()
+
+        return borderless_pixel_tensor
+
     def _get_array(self):
         """
         Get the pixel array for all slice/times.
@@ -184,7 +251,7 @@ class BaseSequence:
             ]
         )
 
-    def _reshape_array(self):
+    def _reshape_array(self, pa):
         """
         Reshape the pixel array to have all the times/slices in the
         batch dimension. With one channel.
@@ -196,31 +263,175 @@ class BaseSequence:
             ndarray: The reshaped pixel array.
         """
 
-        return self.pixel_array.reshape(
+        return pa.reshape(
             -1,
             1,
-            self.pixel_array.shape[-2],
-            self.pixel_array.shape[-1],
+            pa.shape[-2],
+            pa.shape[-1],
         )
 
-    def _get_borders(self, reshaped_pixel_array):
-        summed_pixel_array = np.sum(reshaped_pixel_array, axis=(0, 1))
-        borderless_idxs_0 = np.nonzero(np.any(summed_pixel_array, axis=1))[0]
-        borderless_idxs_1 = np.nonzero(np.any(summed_pixel_array, axis=0))[0]
-
-        start_idx_0, stop_idx_0 = borderless_idxs_0[0], borderless_idxs_0[-1] + 1
-        start_idx_1, stop_idx_1 = borderless_idxs_1[0], borderless_idxs_1[-1] + 1
-
-        return start_idx_0, stop_idx_0, start_idx_1, stop_idx_1
-
-    def _strip_borders(self, reshaped_pixel_array):
+    def _strip_borders(self, reshape_pa):
         """
         Strip the borders from the pixel array.
 
         Returns:
             ndarray: The borderless pixel array.
         """
+        summed_pixel_array = np.sum(reshape_pa, axis=(0, 1))
+        borderless_idxs_0 = np.nonzero(np.any(summed_pixel_array, axis=1))[0]
+        borderless_idxs_1 = np.nonzero(np.any(summed_pixel_array, axis=0))[0]
 
-        return reshaped_pixel_array[
-            ..., self.start_idx_0 : self.stop_idx_0, self.start_idx_1 : self.stop_idx_1
+        start_idx_0, stop_idx_0 = borderless_idxs_0[0], borderless_idxs_0[-1] + 1
+        start_idx_1, stop_idx_1 = borderless_idxs_1[0], borderless_idxs_1[-1] + 1
+
+        return (
+            start_idx_0,
+            stop_idx_0,
+            start_idx_1,
+            stop_idx_1,
+            reshape_pa[..., start_idx_0:stop_idx_0, start_idx_1:stop_idx_1],
+        )
+
+    def _get_config(self, wandb_run_path):
+
+        config_path = wandb_run_path / "files" / "config-copy.yaml"
+        return yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+
+    def _get_pixel_spacing(self):
+        """
+        Get the pixel spacing of the pixel array.
+        """
+        return torch.tensor(
+            [
+                float(self.slice_data["slice01"]["meta_data"][0].PixelSpacing[0]),
+                float(self.slice_data["slice01"]["meta_data"][0].PixelSpacing[1]),
+                float(self.slice_data["slice01"]["meta_data"][0].SliceThickness),
+            ],
+            dtype=torch.float32,
+        )
+
+    def _rescale_tensor(self, pixel_tensor):
+        """
+        Rescale the pixel array to the target pixel dimensions and size.
+
+        Returns:
+            ndarray: The rescaled pixel array.
+        """
+
+        real_source_size = (
+            self.inference_dict["pixdims"][:2] * self.inference_dict["source_shape"]
+        )
+        real_target_size = (
+            self.inference_dict["target_pixdim"] * self.inference_dict["target_size"]
+        )
+        dimension_scale_factor = real_target_size / real_source_size
+        scale_t = utils.t_2d_scale(dimension_scale_factor)
+
+        grid_size = [
+            self.inference_dict["number_of_slices"],
+            1,
+            self.inference_dict["target_size"][0],
+            self.inference_dict["target_size"][1],
         ]
+
+        grid = F.affine_grid(
+            theta=torch.repeat_interleave(
+                scale_t[:-1, :].unsqueeze(0),
+                self.inference_dict["number_of_slices"],
+                dim=0,
+            ),
+            size=grid_size,
+            align_corners=False,
+        )
+        return dimension_scale_factor, F.grid_sample(
+            pixel_tensor,
+            grid,
+            align_corners=False,
+            mode=self.inference_dict["grid_sample_modes"][0],
+            padding_mode="zeros",
+        )
+
+    def _forward_model(self, model, tensor):
+        """
+        Forward the pixel array through the model.
+
+        Args:
+            model (torch.nn.Module): The model to use for inference.
+            tensor (torch.Tensor): The pixel array to forward through the model.
+
+        Returns:
+            torch.Tensor: The output of the model.
+        """
+        model_output = torch.zeros(
+            self.inference_dict["number_of_slices"],
+            self.inference_dict["nr_output_classes"],
+            self.inference_dict["target_size"][0],
+            self.inference_dict["target_size"][1],
+        )
+
+        model.eval()
+        with torch.no_grad():
+            for i in range(
+                0, self.inference_dict["number_of_slices"] // self.batch_size + 1
+            ):
+                model_output[i * self.batch_size : (i + 1) * self.batch_size] = model(
+                    tensor[i * self.batch_size : (i + 1) * self.batch_size]
+                )[0]
+
+        return model_output
+
+    def _invert_rescale_tensor(self, model_output):
+
+        inv_scale_t = utils.t_2d_scale(
+            1 / self.inference_dict["dimension_scale_factor"]
+        )
+
+        inv_grid_size = [
+            self.inference_dict["number_of_slices"],
+            self.inference_dict["nr_output_classes"],
+            int(self.inference_dict["source_shape"][0]),
+            int(self.inference_dict["source_shape"][1]),
+        ]
+        grid = F.affine_grid(
+            theta=torch.repeat_interleave(
+                inv_scale_t[:-1, :].unsqueeze(0),
+                self.inference_dict["number_of_slices"],
+                dim=0,
+            ),
+            size=inv_grid_size,
+            align_corners=False,
+        )
+        return F.grid_sample(
+            model_output,
+            grid,
+            align_corners=False,
+            mode="bicubic",
+            padding_mode="border",
+        )
+
+    def _postprocess_output(self, tensor):
+
+        original_shape_segmentation = np.zeros(
+            (
+                self.inference_dict["number_of_slices"],
+                self.inference_dict["original_shape"][-2],
+                self.inference_dict["original_shape"][-1],
+            ),
+            dtype=np.uint8,
+        )
+
+        original_shape_segmentation[
+            ...,
+            self.inference_dict["border_indices"][0] : self.inference_dict[
+                "border_indices"
+            ][1],
+            self.inference_dict["border_indices"][2] : self.inference_dict[
+                "border_indices"
+            ][3],
+        ] = (
+            tensor.squeeze().numpy().astype(np.uint8)
+        )
+
+        return original_shape_segmentation.reshape(
+            self.inference_dict["original_shape"].tolist()
+        )
