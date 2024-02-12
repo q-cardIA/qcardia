@@ -1,6 +1,4 @@
-from copy import deepcopy
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pydicom
@@ -34,11 +32,11 @@ class BaseSequence:
         given positions and orientations.
     """
 
-    def __init__(self, folder):
+    def __init__(self, folder, batch_size=50):
         self.folder = folder
         self.slice_data, self.number_of_slices = self._load_data()
         self.inference_dict = {}
-        self.batch_size = 50
+        self.batch_size = batch_size
 
     def run_model(self, wandb_run_path):
 
@@ -213,6 +211,7 @@ class BaseSequence:
         pixel_array = self._get_array()
         self.inference_dict["original_shape"] = torch.tensor(pixel_array.shape)
         reshaped_pixel_array = self._reshape_array(pixel_array)
+
         start0, stop0, start1, stop1, borderless_pixel_array = self._strip_borders(
             reshaped_pixel_array
         )
