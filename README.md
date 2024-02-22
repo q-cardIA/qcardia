@@ -1,3 +1,3 @@
 # qcardia
 
-Code for an quantitative cardiac image analysis package
+Code for an AI-based quantitative cardiac image analysis package
