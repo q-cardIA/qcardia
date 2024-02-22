@@ -18,7 +18,10 @@ cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
 cine_seq = BaseSequence(cine_dir)
 cine_segmentation = cine_seq.run_model(WANDB_RUN_PATH)
 
-# quick check, look here to improve- https://github.com/moralesq/DeepStrain/blob/main/utils/visualizer.py
+
+
+
+# quick check
 from matplotlib import pyplot as plt
 from skimage import measure
 

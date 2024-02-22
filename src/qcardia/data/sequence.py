@@ -1,6 +1,20 @@
+"""
+This module contains the BaseSequence class which is used for handling sequences of 
+DICOM images.
+
+The BaseSequence class provides methods for loading DICOM data from a folder, 
+preprocessing the data, running a model on the data, and postprocessing the model 
+output. The model is specified by a path to a Weights & Biases run.
+
+Classes:
+    BaseSequence: A base class for handling sequences of DICOM images.
+"""
+
 from pathlib import Path
+from typing import List
 
 import numpy as np
+import numpy.typing as npt
 import pydicom
 import torch
 import yaml
@@ -13,33 +27,39 @@ import src.qcardia.data.utils as utils
 
 class BaseSequence:
     """
-    The base class used to represent the DICOM data of a CMR sequence acquisition.
+    A base class for handling sequences of DICOM images.
 
-    This class provides methods to load DICOM data from a specified folder and
-    organize it into a dictionary. The dictionary keys are the slice numbers and
-    the values are another dictionary containing the pixel array, slice position,
-    and meta data for each slice.
+    This class provides methods for loading DICOM data from a folder, preprocessing the data,
+    running a model on the data, and postprocessing the model output. The model is specified
+    by a path to a Weights & Biases run.
 
     Attributes:
-        folder (Path): The folder path where the DICOM files are located.
-        slice_data (dict): A dictionary where the keys are the slice numbers and
-        the values are another dictionary containing the pixel array, slice
-        position, and meta data for each slice.
-        number_of_slices (int): The total number of slices in the DICOM data.
-    Methods:
-        _load_data: Load DICOM data from a specified folder.
-        _get_slices_from_positions: Get slice indices and unique positions from
-        given positions and orientations.
+        folder (Path): The folder where the DICOM files are located.
+        batch_size (int): The batch size to use when running the model.
+        slice_data (dict): A dictionary where the keys are the slice numbers and the values
+            are another dictionary containing the pixel array, slice position, and
+            meta data for each slice.
+        number_of_slices (int): The number of slices in the DICOM data.
+        inference_dict (dict): A dictionary used to store various parameters and data needed
+            for inference.
     """
 
-    def __init__(self, folder, batch_size=50):
+    def __init__(self, folder: Path, batch_size: int = 50):
         self.folder = folder
         self.slice_data, self.number_of_slices = self._load_data()
         self.inference_dict = {}
         self.batch_size = batch_size
 
-    def run_model(self, wandb_run_path):
+    def run_model(self, wandb_run_path: Path):
+        """
+        Runs the model inference on preprocessed slices.
 
+        Args:
+            wandb_run_path (Path): The path to the WandB run directory.
+
+        Returns:
+            torch.Tensor: The output model prediction after post-processing.
+        """
         preprocessed_slices = self._preproccess_slices()
         config = self._get_config(wandb_run_path)
         self.inference_dict["target_pixdim"] = torch.tensor(
@@ -75,21 +95,16 @@ class BaseSequence:
 
     def _load_data(self):
         """
-        Load DICOM data from a specified folder.
-
-        This function reads DICOM files from the given folder, extracts relevant
-        information such as slice position, slice orientation, and temporal
-        positions, and organizes the data into a dictionary. The dictionary keys
-        are the slice numbers and the values are another dictionary containing the
-        pixel array, slice position, and meta data for each slice.
-
-        Args:
-            folder (Path): The folder path where the DICOM files are located.
+        Load DICOM data from a folder and extract relevant information.
 
         Returns:
-            dict: A dictionary where the keys are the slice numbers and the values
-            are another dictionary containing the pixel array, slice position, and
-            meta data for each slice.
+            slices_dict (dict): A dictionary containing information for each slice.
+                Each key represents a slice number, and the corresponding value is a dictionary
+                with the following keys:
+                    - "pixel_array": A list of pixel arrays for each image in the slice.
+                    - "slice_position": The position of the slice.
+                    - "meta_data": A list of meta data objects for each image in the slice.
+            number_of_slices (int): The total number of slices.
 
         """
 
@@ -169,23 +184,19 @@ class BaseSequence:
 
         return slices_dict, number_of_slices
 
-    def _get_slices_from_positions(self, positions, orientations):
+    def _get_slices_from_positions(
+        self, positions: List[List[float]], orientations: List[List[float]]
+    ):
         """
-        Get slice indices and unique positions from given positions and orientations.
-
-        This function calculates the true positions by taking the dot product of each position
-        and the cross product of the orientation vectors. It then finds the unique positions,
-        sorts them in descending order, and assigns a slice index to each position.
+        Calculate slice index and unique positions based on given positions and orientations.
 
         Args:
-            positions (list): A list of positions.
-            orientations (list): A list of orientations.
+            positions (list): List of positions.
+            orientations (list): List of orientations.
 
         Returns:
-            tuple: A tuple containing a list of slice indices and a list of unique positions.
-
+            tuple: A tuple containing slice index and unique positions (both ndarray).
         """
-
         true_positions = []
         for i in range(len(positions)):
             true_positions.append(
@@ -206,7 +217,11 @@ class BaseSequence:
 
     def _preproccess_slices(self):
         """
-        Preprocess the pixel array for inference.
+        Preprocesses the slices by performing various operations such as reshaping,
+        border stripping, normalization, and conversion to tensors.
+
+        Returns:
+            torch.Tensor: The preprocessed pixel array without borders.
         """
         pixel_array = self._get_array()
         self.inference_dict["original_shape"] = torch.tensor(pixel_array.shape)
@@ -250,7 +265,7 @@ class BaseSequence:
             ]
         )
 
-    def _reshape_array(self, pa):
+    def _reshape_array(self, pa: npt.NDArray):
         """
         Reshape the pixel array to have all the times/slices in the
         batch dimension. With one channel.
@@ -269,7 +284,7 @@ class BaseSequence:
             pa.shape[-1],
         )
 
-    def _strip_borders(self, reshape_pa):
+    def _strip_borders(self, reshape_pa: npt.NDArray):
         """
         Strip the borders from the pixel array.
 
@@ -291,14 +306,26 @@ class BaseSequence:
             reshape_pa[..., start_idx_0:stop_idx_0, start_idx_1:stop_idx_1],
         )
 
-    def _get_config(self, wandb_run_path):
+    def _get_config(self, wandb_run_path: Path):
+        """
+        Get the config file from the specified WandB run path.
+
+        Args:
+            wandb_run_path (Path): The path to the WandB run.
+
+        Returns:
+            dict: The configuration loaded from the specified path.
+        """
 
         config_path = wandb_run_path / "files" / "config-copy.yaml"
         return yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
 
     def _get_pixel_spacing(self):
         """
-        Get the pixel spacing of the pixel array.
+        Get the pixel spacing of the slice data.
+
+        Returns:
+            torch.Tensor: A tensor containing the pixel spacing values.
         """
         return torch.tensor(
             [
@@ -309,14 +336,16 @@ class BaseSequence:
             dtype=torch.float32,
         )
 
-    def _rescale_tensor(self, pixel_tensor):
+    def _rescale_tensor(self, pixel_tensor: torch.Tensor):
         """
-        Rescale the pixel array to the target pixel dimensions and size.
+        Rescales the input pixel tensor based on the inference dictionary.
+
+        Args:
+            pixel_tensor (torch.Tensor): The input pixel tensor.
 
         Returns:
-            ndarray: The rescaled pixel array.
+            Tuple[float, torch.Tensor]: A tuple containing the dimension scale factor and the rescaled pixel tensor.
         """
-
         real_source_size = (
             self.inference_dict["pixdims"][:2] * self.inference_dict["source_shape"]
         )
@@ -350,7 +379,7 @@ class BaseSequence:
             padding_mode="zeros",
         )
 
-    def _forward_model(self, model, tensor):
+    def _forward_model(self, model: torch.nn.Module, tensor: torch.Tensor):
         """
         Forward the pixel array through the model.
 
@@ -379,8 +408,16 @@ class BaseSequence:
 
         return model_output
 
-    def _invert_rescale_tensor(self, model_output):
+    def _invert_rescale_tensor(self, model_output: torch.Tensor):
+        """
+        Inverts the rescaling operation applied to the model output tensor.
 
+        Args:
+            model_output (torch.Tensor): The model output tensor.
+
+        Returns:
+            torch.Tensor: The inverted rescaled tensor.
+        """
         inv_scale_t = utils.t_2d_scale(
             1 / self.inference_dict["dimension_scale_factor"]
         )
@@ -408,7 +445,17 @@ class BaseSequence:
             padding_mode="border",
         )
 
-    def _postprocess_output(self, tensor):
+    def _postprocess_output(self, tensor: torch.Tensor):
+        """
+        Postprocesses the output tensor and returns the segmentation in the
+        original shape.
+
+        Args:
+            tensor (torch.Tensor): The output tensor from the model.
+
+        Returns:
+            np.ndarray: The segmentation in the original shape.
+        """
 
         original_shape_segmentation = np.zeros(
             (
