@@ -5,7 +5,7 @@ import torch
 import yaml
 from natsort import natsorted
 
-from src.qcardia.data.sequence import BaseSequence
+from src.qcardia.sequence import BaseSequence
 
 WANDB_RUN_PATH = Path.cwd() / "wandb"
 PATH_TO_DATASET = Path.cwd() / "data"
@@ -17,8 +17,6 @@ cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
 
 cine_seq = BaseSequence(cine_dir)
 cine_segmentation = cine_seq.run_model(WANDB_RUN_PATH)
-
-
 
 
 # quick check
