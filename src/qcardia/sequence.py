@@ -22,7 +22,7 @@ from natsort import natsorted
 from qcardia_models.models import UNet2d
 from torch.nn import functional as F
 
-import src.qcardia.data.utils as utils
+import src.qcardia.utils as utils
 
 
 class BaseSequence:
