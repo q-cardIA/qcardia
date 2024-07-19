@@ -2,7 +2,7 @@
 name = "qcardia-models"
 version = "1.0.0"
 dependencies = [
-    "numpy>=1.26.3",
+    "numpy==1.26.3",
     "torch>=2.3.1",
 ]
 
