@@ -1,0 +1,14 @@
+[project]
+name = "qcardia-models"
+version = "1.0.0"
+dependencies = [
+    "numpy>=1.26.3",
+    "torch>=2.3.1+cu118",
+]
+
+[build-system]
+requires = [
+    "setuptools>=69.5.1",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
