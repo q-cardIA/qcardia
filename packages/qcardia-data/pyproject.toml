@@ -1,0 +1,25 @@
+[project]
+name = "qcardia-data"
+version = "1.0.0"
+dependencies = [
+    "jupyter>=1.0.0",
+    "matplotlib>=3.9.1",
+    "monai>=1.3.2",
+    "nibabel>=5.2.1",
+    "numpy>=1.26.3",
+    "pandas>=2.2.2",
+    "Pillow>=10.2.0",
+    "PyYAML>=6.0.1",
+    "smallestenclosingcircle>=0.0.1",
+    "torch>=2.3.1+cu118 ",
+    "tqdm>=4.66.4",
+    "pydicom>=2.4.4",
+    "natsort>=8.4.0"
+]
+
+[project.optional-dependencies]
+nnunet = ["nnunetv2 @ git+https://git@github.com/MIC-DKFZ/nnUNet"]
+
+[build-system]
+requires = ["setuptools>=69.5.1", "wheel"]
+build-backend = "setuptools.build_meta"
