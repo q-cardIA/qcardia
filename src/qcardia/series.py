@@ -1,33 +1,33 @@
 """
-This module contains the BaseSequence class which is used for handling sequences of 
+This module contains the BaseSeries class which is used for handling series of 
 DICOM images.
 
-The BaseSequence class provides methods for loading DICOM data from a folder, 
+The BaseSeries class provides methods for loading DICOM data from a folder, 
 preprocessing the data, running a model on the data, and postprocessing the model 
 output. The model is specified by a path to a Weights & Biases run.
 
 Classes:
-    BaseSequence: A base class for handling sequences of DICOM images.
+    BaseSeries: A base class for handling sequences of DICOM images.
 """
 
 from pathlib import Path
 from typing import List
 
 import numpy as np
-import numpy.typing as npt
 import pydicom
 import torch
 import yaml
 from natsort import natsorted
 from qcardia_models.models import UNet2d
+from skimage.measure import find_contours
 from torch.nn import functional as F
 
 import src.qcardia.utils as utils
 
 
-class BaseSequence:
+class BaseSeries:
     """
-    A base class for handling sequences of DICOM images.
+    A base class for handling series of DICOM images.
 
     This class provides methods for loading DICOM data from a folder, preprocessing the data,
     running a model on the data, and postprocessing the model output. The model is specified
@@ -46,19 +46,39 @@ class BaseSequence:
 
     def __init__(self, folder: Path, batch_size: int = 50):
         self.folder = folder
-        self.slice_data, self.number_of_slices = self._load_data()
+        self.slice_data, self.number_of_slices, self.rows, self.columns = (
+            self._load_data()
+        )
         self.inference_dict = {}
         self.batch_size = batch_size
+        self.base_slice_num = 1
+        self.mid_slice_num = 2
+        self.apex_slice_num = 3
+        self.rv_insertion_points = [[0, 0], [self.rows, 0]]
+        self.lv_center_point = [[self.rows // 2, self.columns // 2]]
 
-    def run_model(self, wandb_run_path: Path):
+    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
         """
-        Runs the model inference on preprocessed slices.
+        Predict the segmentation for the DICOM data using the specified model.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
 
         Returns:
-            torch.Tensor: The output model prediction after post-processing.
+            np.ndarray: The predicted segmentation for the DICOM data.
+        """
+        self._run_model(wandb_run_path)
+        self._lv = 1.0 * (self._segmentation_prediction == 1)
+        self._myo = 1.0 * (self._segmentation_prediction == 2)
+        self._rv = 1.0 * (self._segmentation_prediction == 3)
+        return self._segmentation_prediction
+
+    def _run_model(self, wandb_run_path: Path) -> None:
+        """
+        Runs the model inference on preprocessed slices.
+
+        Args:
+            wandb_run_path (Path): The path to the WandB run directory.
         """
         preprocessed_slices = self._preproccess_slices()
         config = self._get_config(wandb_run_path)
@@ -89,9 +109,7 @@ class BaseSequence:
             rescale_model_output, dim=1, keepdim=True
         ).float()
 
-        output_model_prediction = self._postprocess_output(model_prediction)
-
-        return output_model_prediction
+        self._segmentation_prediction = self._postprocess_output(model_prediction)
 
     def _load_data(self):
         """
@@ -182,7 +200,12 @@ class BaseSequence:
                 "meta_data": sorted_list_of_meta_data,
             }
 
-        return slices_dict, number_of_slices
+        return (
+            slices_dict,
+            number_of_slices,
+            all_dicom_data[0].Rows,
+            all_dicom_data[0].Columns,
+        )
 
     def _get_slices_from_positions(
         self, positions: List[List[float]], orientations: List[List[float]]
@@ -265,7 +288,7 @@ class BaseSequence:
             ]
         )
 
-    def _reshape_array(self, pa: npt.NDArray):
+    def _reshape_array(self, pa: np.ndarray):
         """
         Reshape the pixel array to have all the times/slices in the
         batch dimension. With one channel.
@@ -284,7 +307,7 @@ class BaseSequence:
             pa.shape[-1],
         )
 
-    def _strip_borders(self, reshape_pa: npt.NDArray):
+    def _strip_borders(self, reshape_pa: np.ndarray):
         """
         Strip the borders from the pixel array.
 
@@ -481,3 +504,43 @@ class BaseSequence:
         return original_shape_segmentation.reshape(
             self.inference_dict["original_shape"].tolist()
         )
+
+
+class CineSeries(BaseSeries):
+
+    def __init__(self, folder: Path, batch_size: int = 50):
+        super().__init__(folder, batch_size)
+
+    def _compute_primary_slices(self):
+        self.base_slice_num = 4
+        self.mid_slice_num = 6
+        self.apex_slice_num = 10
+
+    def _compute_rv_insertion_points(self):
+        self.lv_center_point = []
+        for slice_num in [self.base_slice_num, self.mid_slice_num, self.apex_slice_num]:
+            tmp_center_pts = []
+            for t in range(self._segmentation_prediction.shape[1]):
+                the_myo = self._myo[slice_num, t]
+                the_rv = self._rv[slice_num, t]
+                the_lv = self._lv[slice_num, t]
+                find_contours(the_myo + the_lv)
+                tmp_center_pts.append(
+                    [
+                        int(np.mean(np.where(the_lv > 0)[2])),
+                        int(np.mean(np.where(the_lv > 0)[3])),
+                    ]
+                )
+            self.lv_center_point.append(tmp_center_pts)
+        self._rv_insertion_points = [[0, 0], [1, 1]]
+
+    def get_rv_insertion_points(self):
+        """
+        Find the right ventricular insertion point.
+
+        Returns:
+            List[int]: The x and y coordinates of the right ventricular insertion point.
+        """
+
+        self._compute_rv_insertion_points()
+        return self._rv_insertion_points
