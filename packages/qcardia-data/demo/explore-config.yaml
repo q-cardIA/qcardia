@@ -14,5 +14,4 @@ dataset:
 
 
 paths:
-  # data: "/home/bme001/shared/qcardia/data"
-  data: "C:/Users/rob_d/qcardia/data"
+  data: "/home/bme001/shared/qcardia/data"  
