@@ -200,11 +200,14 @@ class DatasetCacher:
         image_keys, label_keys = process_key_pairs(
             self.config["dataset"]["key_pairs"],
             separate_key_pairs=True,
-        )
+        )        
         all_keys = image_keys + label_keys
 
-        meta_only_labels = self.config["dataset"]["meta_only_labels"]
+        meta_only_labels = self.config["dataset"]["meta_only_labels"]  
         dimensionality_keys = image_keys if meta_only_labels else all_keys
+        ignore_selected_frames = meta_only_labels or any(
+            [label_key is None for label_key in label_keys]
+        )
 
         # slice to target dimensionality
         dimensionality = self.config["data"]["dimensionality"]
@@ -212,13 +215,13 @@ class DatasetCacher:
             dimensions_transform = DimensionsTo2Dd(
                 keys=dimensionality_keys,
                 allow_missing_keys=True,
-                ignore_selected_frames=meta_only_labels,
+                ignore_selected_frames=ignore_selected_frames,
             )
         elif dimensionality == "3D":
             dimensions_transform = DimensionsTo3Dd(
                 keys=dimensionality_keys,
                 allow_missing_keys=True,
-                ignore_selected_frames=meta_only_labels,
+                ignore_selected_frames=ignore_selected_frames,
             )
         # elif dimensionality == "2D+T":
         # elif dimensionality == "3D+T":
