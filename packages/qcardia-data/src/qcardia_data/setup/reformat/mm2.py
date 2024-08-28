@@ -71,7 +71,6 @@ def reformat_mm2(
 
         nib.save(cine_processed, subject_path / f"{subject_name}_sa_cine.nii.gz")
         nib.save(gt_processed, subject_path / f"{subject_name}_sa_cine_gt.nii.gz")
-        print("=", end="", flush=True)
 
     csv_df = csv_df.rename(
         columns={
