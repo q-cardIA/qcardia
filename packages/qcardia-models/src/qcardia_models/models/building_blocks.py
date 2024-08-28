@@ -122,7 +122,6 @@ class Decoder(nn.Module):
         block in the decoder.
     - num_classes (int): The number of output classes of the segmentation.
     - nr_output_scales (int): The number of output scales to use. Defaults to 1.
-    - dropout (float): The dropout probability to use before the output convolutions. Defaults to 0.0.
 
     Methods:
     - forward(x, encoder_features): Performs the forward pass for all blocks in the decoder.
@@ -134,7 +133,6 @@ class Decoder(nn.Module):
         channels: list[int],
         num_classes: int,
         nr_output_scales: int = 1,
-        dropout: float = 0.0,
     ) -> None:
         super().__init__()
 
@@ -167,7 +165,6 @@ class Decoder(nn.Module):
             ]
         )
         self.output_threshold_idx = self.nr_blocks - nr_output_convs
-        self.dropout = nn.Dropout2d(dropout)
 
     def forward(self, x: Tensor, encoder_features: list[Tensor]) -> list[Tensor]:
         """Performs the forward pass for all blocks in the decoder.
@@ -184,9 +181,7 @@ class Decoder(nn.Module):
         outputs = []
         for i in range(self.nr_blocks - 1):
             if i >= self.output_threshold_idx:
-                outputs.append(
-                    self.output_convs[i - self.output_threshold_idx](self.dropout(x))
-                )
+                outputs.append(self.output_convs[i - self.output_threshold_idx](x))
 
             # transposed convolution
             x = self.upconvs[i](x)
@@ -194,7 +189,9 @@ class Decoder(nn.Module):
             # concatenate features from the corresponding level of the encoder to x
             x = torch.cat([x, encoder_features[i]], dim=1)
             x = self.dec_blocks[i](x)
-        outputs.append(self.output_convs[-1](self.dropout(x)))
+
+        # final output
+        outputs.append(self.output_convs[-1](x))
 
         return outputs[::-1]
 
