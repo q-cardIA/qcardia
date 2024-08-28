@@ -106,7 +106,7 @@ dataset:
 
 dataloader:
   train:
-    batch_size: 4
+    batch_size: 32
     drop_last: True
     shuffle: True
     augmentation: True
@@ -166,5 +166,5 @@ general:
   verbosity: 1
   
 paths:
-  data: "C:/Users/rob_d/qcardia/data"
+  data: "/home/bme001/shared/qcardia/data"
   
