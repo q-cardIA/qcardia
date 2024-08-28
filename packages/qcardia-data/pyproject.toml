@@ -17,9 +17,6 @@ dependencies = [
     "natsort==8.4.0"
 ]
 
-[project.optional-dependencies]
-nnunet = ["nnunetv2 @ git+https://git@github.com/MIC-DKFZ/nnUNet"]
-
 [build-system]
 requires = ["setuptools==69.5.1", "wheel"]
 build-backend = "setuptools.build_meta"
