@@ -1,0 +1,29 @@
+encoder:
+  nr_image_channels: 1
+  channels_list:
+  - 32
+  - 64
+  - 128
+  - 256
+  - 512
+  - 512
+  - 512
+mlp:
+  channels_list:
+  - 512
+  - 512
+  - 512
+
+
+loss:
+  ntxent_temperature: 0.1
+  ntxent_supervised_threshold: 0.1
+  ntxent_supervised_cyclic_labels: False
+
+
+training:
+  nr_epochs_frozen_encoder: 0
+  early_stopping:
+    active: False
+    patience: 4
+    min_delta: 0.001

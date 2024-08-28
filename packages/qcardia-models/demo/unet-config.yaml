@@ -1,0 +1,38 @@
+unet:
+  nr_image_channels: 1
+  channels_list:
+  - 32
+  - 64
+  - 128
+  - 256
+  - 512
+  - 512
+  - 512
+  nr_output_classes: 4
+  nr_output_scales: -1
+  weights_path: None # provide path to weights file for model finetuning
+
+
+loss:
+  cross_entropy_loss_weight: 0.5
+  dice_loss_weight: 0.5
+  dice_classes_weights:
+  - 0.0
+  - 1.0
+  - 1.0
+  - 1.0
+
+
+metrics:
+  dice_class_idxs:
+  - 1
+  - 2
+  - 3
+
+
+training:
+  nr_epochs_frozen_encoder: 0
+  early_stopping:
+    active: False
+    patience: 4
+    min_delta: 0.001
