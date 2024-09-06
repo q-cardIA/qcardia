@@ -36,8 +36,12 @@ def main():
     image_key, label_key = config["dataset"]["key_pairs"][0]  # get dict key pairs
 
     # the device is set to GPU if available, otherwise CPU is used
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if not torch.cuda.is_available():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")  # Windows/Linux
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")  # MacOS
+    else:
+        device = torch.device("cpu")
         warnings.warn("No GPU available; using CPU", stacklevel=1)
 
     # get custom loss function and model from qcardia-models
