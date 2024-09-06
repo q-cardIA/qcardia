@@ -106,7 +106,7 @@ dataset:
 
 dataloader:
   train:
-    batch_size: 32
+    batch_size: 8
     drop_last: True
     shuffle: True
     augmentation: True
