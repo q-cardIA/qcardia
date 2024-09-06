@@ -9,7 +9,7 @@ A PyTorch and MONAI based library to build and handle medical imaging data pipel
 
 ### Installation
 #### Environment and PyTorch
-It is recommended to make a new environment (tested for Python 3.11.9) and first installing PyTorch and checking GPU availability. It is recommended to install the PyTorch version the package was tested for ([PyTorch 2.3.1](https://pytorch.org/get-started/previous-versions/#v231)), which should limit warnings or unexpected behaviours. Alternatively, installation instructions for the latest stable PyTorch version can also be found in [their "get started" guide](https://pytorch.org/get-started/locally/).
+It is recommended to make a new environment (requires Python>=3.10 but only extensively tested for Python 3.11.9) and first installing PyTorch and checking GPU availability. It is recommended to install the PyTorch version the package was tested for ([PyTorch 2.3.1](https://pytorch.org/get-started/previous-versions/#v231)), which should limit warnings or unexpected behaviours. Alternatively, installation instructions for the latest stable PyTorch version can also be found in [their "get started" guide](https://pytorch.org/get-started/locally/).
 
 #### Stable version of `qcardia-data`
 Install from GitHub using pip to get the latest version:
