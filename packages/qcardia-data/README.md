@@ -29,7 +29,7 @@ You can install a local copy in `editable` mode to make changes to the package t
 ```
 pip install -e "path/to/qcardia-data"
 ```
-
+(It may be neccessary to first upgrade pip using `python3 -m pip install --upgrade pip`)
 
 ### Getting started
 The qcardia-data package uses a configuration dictionary. Dataloaders can then be initialized as shown below:
