@@ -33,7 +33,7 @@ def setup_cine(data_path: Path, overwrite: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    config_path = Path("data-config.yaml")
+    config_path = Path("demo/data-config.yaml")
     config = yaml.load(config_path.open(), Loader=yaml.FullLoader)
     data_path = Path(config["paths"]["data"])
 
