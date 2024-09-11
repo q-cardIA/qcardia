@@ -26,7 +26,7 @@ from qcardia_data.pipeline.utils import build_dataset_paths, build_sampler_weigh
 
 
 class DataModule:
-    """A representation for a 2D U-Net.
+    """A class to providing dataloaders and handle caching based on config.
 
     Attributes (relevant externally, read only):
     - config (dict): configuration dictionary used for the data module.
