@@ -30,11 +30,3 @@ def setup_cine(data_path: Path, overwrite: bool = False) -> None:
     data_to_file(test_split, split_path)
 
     print(f"Split file(s) written to '{split_path}'")
-
-
-if __name__ == "__main__":
-    config_path = Path("demo/data-config.yaml")
-    config = yaml.load(config_path.open(), Loader=yaml.FullLoader)
-    data_path = Path(config["paths"]["data"])
-
-    setup_cine(data_path)

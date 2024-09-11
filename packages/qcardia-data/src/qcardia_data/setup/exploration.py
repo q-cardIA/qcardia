@@ -104,8 +104,3 @@ def get_exploration_df(
     exploration_df = pd.DataFrame.from_dict(exploration_dict, orient="index")
     exploration_df.columns = columns
     return exploration_df
-
-
-if __name__ == "__main__":
-    config_path = Path("data-config.yaml")
-    explore_development_data_from_config(config_path)
