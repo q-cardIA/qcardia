@@ -128,5 +128,4 @@ general:
 
 
 paths:
-  data: "/home/bme001/shared/qcardia/data"  
-  
+  data: "/home/bme001/shared/qcardia/data"
