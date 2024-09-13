@@ -26,7 +26,7 @@ def fix_orientation_mm1(orientations, example_data: nib.Nifti1Image):
     return orientations
 
 
-def reformat_mm1(
+def _reformat_mm1(
     original_data_folder_path: Path,
     original_csv_file_path: Path,
     reformatted_data_folder_path: Path,

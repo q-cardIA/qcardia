@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from qcardia_data.setup.reformat.mm1 import reformat_mm1 as reformat_mm1_base
-from qcardia_data.setup.reformat.mm2 import reformat_mm2 as reformat_mm2_base
+from qcardia_data.setup.reformat.mm1 import _reformat_mm1
+from qcardia_data.setup.reformat.mm2 import _reformat_mm2
 
 
 def remove_folder(path: Path) -> None:
@@ -68,9 +68,10 @@ def reformat_mm1(data_path: Path, overwrite: bool = False) -> None:
     reformatted_data_path = data_path / "reformatted_data"
 
     if reformat_dataset_bool(reformatted_data_path, "mm1", overwrite):
-        reformat_mm1_base(
+        _reformat_mm1(
             original_data_path / "MnM" / "dataset",
             original_data_path / "MnM" / "dataset_information.csv",
+            reformatted_data_path,
         )
 
 
@@ -86,7 +87,7 @@ def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
     reformatted_data_path = data_path / "reformatted_data"
 
     if reformat_dataset_bool(reformatted_data_path, "mm2", overwrite):
-        reformat_mm2_base(
+        _reformat_mm2(
             original_data_path / "MnMs2" / "dataset",
             original_data_path / "MnMs2" / "dataset_information.csv",
             reformatted_data_path,
