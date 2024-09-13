@@ -69,10 +69,8 @@ def reformat_mm1(data_path: Path, overwrite: bool = False) -> None:
 
     if reformat_dataset_bool(reformatted_data_path, "mm1", overwrite):
         reformat_mm1_base(
-            original_data_path / "MnM",
-            original_data_path
-            / "211230_M&Ms_Dataset_information_diagnosis_opendataset.csv",
-            reformatted_data_path,
+            original_data_path / "MnM" / "dataset",
+            original_data_path / "MnM" / "dataset_information.csv",
         )
 
 
