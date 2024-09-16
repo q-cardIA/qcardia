@@ -73,14 +73,14 @@ class BaseSeries:
         self._rv = 1.0 * (self._segmentation_prediction == 3)
         return self._segmentation_prediction
 
-    def _run_model(self, wandb_run_path: Path) -> None:
+    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
         """
         Runs the model inference on preprocessed slices.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
         """
-        preprocessed_slices = self._preproccess_slices()
+        preprocessed_slices = self._preproccess_slices(image_type)
         config = self._get_config(wandb_run_path)
         self.inference_dict["target_pixdim"] = torch.tensor(
             config["data"]["target_pixdim"]
@@ -238,7 +238,7 @@ class BaseSeries:
 
         return slice_index, unique_positions
 
-    def _preproccess_slices(self):
+    def _preproccess_slices(self, image_type: str = "pixel"):
         """
         Preprocesses the slices by performing various operations such as reshaping,
         border stripping, normalization, and conversion to tensors.
@@ -246,7 +246,7 @@ class BaseSeries:
         Returns:
             torch.Tensor: The preprocessed pixel array without borders.
         """
-        pixel_array = self._get_array()
+        pixel_array = self._get_array(image_type)
         self.inference_dict["original_shape"] = torch.tensor(pixel_array.shape)
         reshaped_pixel_array = self._reshape_array(pixel_array)
 
@@ -271,7 +271,7 @@ class BaseSeries:
 
         return borderless_pixel_tensor
 
-    def _get_array(self):
+    def _get_array(self, image_type="pixel"):
         """
         Get the pixel array for all slice/times.
 
@@ -283,7 +283,7 @@ class BaseSeries:
 
         return np.asarray(
             [
-                self.slice_data[f"slice{i+1:02}"]["pixel_array"]
+                self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
                 for i in range(self.number_of_slices)
             ]
         )
@@ -544,3 +544,44 @@ class CineSeries(BaseSeries):
 
         self._compute_rv_insertion_points()
         return self._rv_insertion_points
+
+
+class LGESeries(BaseSeries):
+
+    def __init__(self, folder: Path, batch_size: int = 50):
+        super().__init__(folder, batch_size)
+        self._extract_psir()
+
+    def _compute_primary_slices(self):
+        self.base_slice_num = 4
+        self.mid_slice_num = 6
+        self.apex_slice_num = 10
+
+    def _extract_psir(self):
+        for i in range(self.number_of_slices):
+            for j in range(len(self.slice_data[f"slice{i+1:02}"]["pixel_array"])):
+                if (
+                    "m"
+                    not in self.slice_data[f"slice{i+1:02}"]["meta_data"][j]
+                    .ImageType[2][0]
+                    .lower()
+                ):
+                    self.slice_data[f"slice{i+1:02}"]["psir_array"] = self.slice_data[
+                        f"slice{i+1:02}"
+                    ]["pixel_array"][j]
+
+    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+        """
+        Predict the segmentation for the DICOM data using the specified model.
+
+        Args:
+            wandb_run_path (Path): The path to the WandB run directory.
+
+        Returns:
+            np.ndarray: The predicted segmentation for the DICOM data.
+        """
+        self._run_model(wandb_run_path, image_type="psir")
+        self._lv = 1.0 * (self._segmentation_prediction == 1)
+        self._myo = 1.0 * (self._segmentation_prediction == 2)
+        self._rv = 1.0 * (self._segmentation_prediction == 3)
+        return self._segmentation_prediction
