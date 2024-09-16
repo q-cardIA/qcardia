@@ -106,7 +106,7 @@ dataset:
 
 dataloader:
   train:
-    batch_size: 8
+    batch_size: 4
     drop_last: True
     shuffle: True
     augmentation: True
@@ -144,6 +144,7 @@ optimizer:
 
 
 training:  
+  max_nr_epochs: 10 # 1000
   polynomial_scheduler_power: 0.9
 
 

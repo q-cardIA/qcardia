@@ -4,6 +4,7 @@ from pathlib import Path
 import torch
 import yaml
 from qcardia_data import DataModule
+from tqdm import tqdm
 
 from qcardia_models.losses import DiceCELoss
 from qcardia_models.models import UNet2d
@@ -69,9 +70,17 @@ def main():
         optimizer, max_epochs, config["training"]["polynomial_scheduler_power"]
     )
 
-    # training loop
-    for epoch_nr in range(max_epochs):
-        for x in train_dataloader:
+    # # training loop
+    # for epoch_nr in range(max_epochs):
+    #     for x in train_dataloader:
+
+    # DEMO: tqdm progress bar for training loop
+    for epoch_nr in tqdm(range(max_epochs)):
+        for batch_nr, x in enumerate(train_dataloader):
+            # DEMO: force short epochs with a break statement + batch_nr from enumerate
+            if batch_nr >= 4:
+                break
+
             # training step
             optimizer.zero_grad()  # reset gradients
             outputs = unet_model(x[image_key].to(device))
