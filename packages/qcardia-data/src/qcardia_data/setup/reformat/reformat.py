@@ -88,7 +88,7 @@ def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
 
     if reformat_dataset_bool(reformatted_data_path, "mm2", overwrite):
         _reformat_mm2(
-            original_data_path / "MnMs2" / "dataset",
-            original_data_path / "MnMs2" / "dataset_information.csv",
+            original_data_path / "MnM2" / "dataset",
+            original_data_path / "MnM2" / "dataset_information.csv",
             reformatted_data_path,
         )
