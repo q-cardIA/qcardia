@@ -124,7 +124,6 @@ unet:
   - 512
   nr_output_classes: 4
   nr_output_scales: -1
-  weights_path: None # provide path to weights file for model finetuning
 
 
 loss:
@@ -138,21 +137,14 @@ loss:
 
 
 optimizer:  
-  learning_rate: 0.01 # lower learning rate to 0.005 for finetuning
+  learning_rate: 0.01
   momentum: 0.99
   nesterov: True
   weight_decay: 0.00003
 
 
-training:
-  nr_epochs_frozen_encoder: 0
-  lr_scheduler_type: poly
-  max_nr_epochs: 1000
+training:  
   polynomial_scheduler_power: 0.9
-  early_stopping:
-    active: False
-    patience: 4
-    min_delta: 0.001
 
 
 experiment:
