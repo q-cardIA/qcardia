@@ -7,7 +7,7 @@ from natsort import natsorted
 
 from src.qcardia.series import LGESeries
 
-WANDB_RUN_PATH = Path.cwd() / "wandb"
+WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-center"
 PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
@@ -40,11 +40,11 @@ from skimage import measure
 # # contour_epi = measure.find_contours(test_myo1)[0]
 # # contour_endo = measure.find_contours(test_myo1)[1]
 # # contour_scar = measure.find_contours(test_scar2)[0]
-# # plt.imshow(test_myo1, cmap="gray")
-# plt.show()
-contour_lv = measure.find_contours(cine_segmentation[5] == 1)[0]
-contour_myo = measure.find_contours(cine_segmentation[5] == 2)[0]
-contour_rv = measure.find_contours(cine_segmentation[5] == 3)[0]
+plt.imshow(cine_segmentation[5], cmap="gray")
+plt.show()
+# contour_lv = measure.find_contours(cine_segmentation[5] == 1)[0]
+# contour_myo = measure.find_contours(cine_segmentation[5] == 2)[0]
+# contour_rv = measure.find_contours(cine_segmentation[5] == 3)[0]
 
 
 # # import imgaug.augmenters as iaa

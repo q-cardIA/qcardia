@@ -82,6 +82,7 @@ class BaseSeries:
         """
         preprocessed_slices = self._preproccess_slices(image_type)
         config = self._get_config(wandb_run_path)
+        print(config["data"])
         self.inference_dict["target_pixdim"] = torch.tensor(
             config["data"]["target_pixdim"]
         )
@@ -569,6 +570,8 @@ class LGESeries(BaseSeries):
                     self.slice_data[f"slice{i+1:02}"]["psir_array"] = self.slice_data[
                         f"slice{i+1:02}"
                     ]["pixel_array"][j]
+
+    # def _find_center_point(self, wandb_run_path: Path) -> np.ndarray:
 
     def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
         """
