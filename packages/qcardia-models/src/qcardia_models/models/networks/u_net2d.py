@@ -67,5 +67,3 @@ class UNet2d(nn.Module):
         """
         for param in self.encoder.parameters():
             param.requires_grad = requires_grad
-        if requires_grad:  # release unoccupied cached memory
-            torch.cuda.empty_cache()
