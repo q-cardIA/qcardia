@@ -18,12 +18,16 @@ def remove_folder(path: Path) -> None:
         path.rmdir()
 
 
-def reformat_dataset_bool(
-    reformatted_data_path: Path, dataset_name: str, overwrite: bool
+def reformat_check(
+    original_data_path: Path,
+    reformatted_data_path: Path,
+    dataset_name: str,
+    overwrite: bool,
 ) -> bool:
-    """Check if the dataset should be reformatted
+    """Check if the dataset can and should be reformatted
 
     Args:
+        original_data_path (Path): path to the original data folder
         reformatted_data_path (Path): path to the reformatted data folder
         dataset_name (str): name of the dataset
         overwrite (bool): whether to force overwrite the reformatted data
@@ -32,6 +36,10 @@ def reformat_dataset_bool(
         bool: whether the dataset should be reformatted
     """
     print(f"Checking dataset '{dataset_name}'", end=" | ")
+    if not original_data_path.exists():
+        print(f"original data folder not found: '{original_data_path}'")
+        return False
+
     reformatted_dataset_folder_path = reformatted_data_path / dataset_name
     reformatted_dataset_csv_path = reformatted_data_path / f"{dataset_name}.csv"
     if reformatted_dataset_csv_path.exists():
@@ -46,6 +54,7 @@ def reformat_dataset_bool(
         else:
             print(f"Skipping {dataset_name}")
             return False
+
     if reformatted_dataset_folder_path.exists():
         print(
             "Found data folder, but no .csv file"
@@ -64,15 +73,11 @@ def reformat_mm1(data_path: Path, overwrite: bool = False) -> None:
         overwrite (bool, optional): whether to force overwrite the reformatted version.
             Defaults to False.
     """
-    original_data_path = data_path / "original_data"
+    original_data_path = data_path / "original_data" / "MnM"
     reformatted_data_path = data_path / "reformatted_data"
 
-    if reformat_dataset_bool(reformatted_data_path, "mm1", overwrite):
-        _reformat_mm1(
-            original_data_path / "MnM" / "dataset",
-            original_data_path / "MnM" / "dataset_information.csv",
-            reformatted_data_path,
-        )
+    if reformat_check(original_data_path, reformatted_data_path, "mm1", overwrite):
+        _reformat_mm1(original_data_path, reformatted_data_path)
 
 
 def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
@@ -83,12 +88,8 @@ def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
         overwrite (bool, optional): whether to force overwrite the reformatted version.
             Defaults to False.
     """
-    original_data_path = data_path / "original_data"
+    original_data_path = data_path / "original_data" / "MnM2"
     reformatted_data_path = data_path / "reformatted_data"
 
-    if reformat_dataset_bool(reformatted_data_path, "mm2", overwrite):
-        _reformat_mm2(
-            original_data_path / "MnM2" / "dataset",
-            original_data_path / "MnM2" / "dataset_information.csv",
-            reformatted_data_path,
-        )
+    if reformat_check(original_data_path, reformatted_data_path, "mm2", overwrite):
+        _reformat_mm2(original_data_path, reformatted_data_path)
