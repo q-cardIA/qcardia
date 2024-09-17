@@ -87,7 +87,7 @@ data:
 
 
 dataset:
-  split_file: default-cine-split.yaml
+  split_file: default-cine-test-split.yaml
   subsets:
   - mm1       # possible keys: sa_cine/sa_cine_gt
   - mm2       # possible keys: sa_cine/sa_cine_gt (la_cine/la_cine_gt)
