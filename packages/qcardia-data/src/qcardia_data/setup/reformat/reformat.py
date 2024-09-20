@@ -23,8 +23,12 @@ def reformat_check(
     reformatted_data_path: Path,
     dataset_name: str,
     overwrite: bool,
-) -> bool:
-    """Check if the dataset can and should be reformatted
+) -> int:
+    """Check if the dataset can and should be reformatted.
+
+    Assumes no manual changes have been made to already reformatted data. If manual
+    changes have been made that result in errors, removing the .csv will trigger a
+    re-reformatted.
 
     Args:
         original_data_path (Path): path to the original data folder
@@ -33,15 +37,18 @@ def reformat_check(
         overwrite (bool): whether to force overwrite the reformatted data
 
     Returns:
-        bool: whether the dataset should be reformatted
+        int: state of the dataset, either -1, 0, or 1:
+            -1: unuseable (original dataset unavailable, and isn't yet reformatted)
+             0: directly useable (reformatted dataset is already present)
+             1: requires reformatting (reformatted dataset unavailable, invalid, or
+                should be overwritten)
+
     """
     print(f"Checking dataset '{dataset_name}'", end=" | ")
-    if not original_data_path.exists():
-        print(f"original data folder not found: '{original_data_path}'")
-        return False
 
     reformatted_dataset_folder_path = reformatted_data_path / dataset_name
     reformatted_dataset_csv_path = reformatted_data_path / f"{dataset_name}.csv"
+
     if reformatted_dataset_csv_path.exists():
         print(f"csv file found, overwrite = {overwrite}", end=" | ")
         if overwrite:
@@ -53,7 +60,7 @@ def reformat_check(
             reformatted_dataset_csv_path.unlink()
         else:
             print(f"Skipping {dataset_name}")
-            return False
+            return 0  # directly useable
 
     if reformatted_dataset_folder_path.exists():
         print(
@@ -61,8 +68,13 @@ def reformat_check(
             + f" | Removing '{reformatted_dataset_folder_path}'"
         )
         remove_folder(reformatted_dataset_folder_path)
+
+    if not original_data_path.exists():
+        print(f"original data folder not found: '{original_data_path}'")
+        return -1  # unuseable
+
     print(f"Reformatting dataset `{dataset_name}` into `{reformatted_data_path}`:")
-    return True
+    return 1  # useable after reformatting
 
 
 def reformat_mm1(data_path: Path, overwrite: bool = False) -> bool:
@@ -79,15 +91,21 @@ def reformat_mm1(data_path: Path, overwrite: bool = False) -> bool:
     original_data_path = data_path / "original_data" / "MnM"
     reformatted_data_path = data_path / "reformatted_data"
 
-    if reformat_check(original_data_path, reformatted_data_path, "mm1", overwrite):
+    reformat_state = reformat_check(
+        original_data_path, reformatted_data_path, "mm1", overwrite
+    )
+
+    if reformat_state < 0:
+        return False
+
+    if reformat_state > 0:
         _reformat_mm1(
             original_data_path / "dataset",
             original_data_path
             / "211230_M&Ms_Dataset_information_diagnosis_opendataset.csv",
             reformatted_data_path,
         )
-        return True
-    return False
+    return True
 
 
 def reformat_mm2(data_path: Path, overwrite: bool = False) -> bool:
@@ -104,11 +122,17 @@ def reformat_mm2(data_path: Path, overwrite: bool = False) -> bool:
     original_data_path = data_path / "original_data" / "MnM2"
     reformatted_data_path = data_path / "reformatted_data"
 
-    if reformat_check(original_data_path, reformatted_data_path, "mm2", overwrite):
+    reformat_state = reformat_check(
+        original_data_path, reformatted_data_path, "mm2", overwrite
+    )
+
+    if reformat_state < 0:
+        return False
+
+    if reformat_state > 0:
         _reformat_mm2(
             original_data_path / "dataset",
             original_data_path / "dataset_information.csv",
             reformatted_data_path,
         )
-        return True
-    return False
+    return True
