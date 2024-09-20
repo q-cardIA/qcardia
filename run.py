@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import yaml
 from natsort import natsorted
+from scipy.ndimage import binary_fill_holes, distance_transform_edt, label
 
 from src.qcardia.series import LGESeries
 
@@ -39,9 +40,40 @@ from skimage import measure
 
 # # contour_epi = measure.find_contours(test_myo1)[0]
 # # contour_endo = measure.find_contours(test_myo1)[1]
-# # contour_scar = measure.find_contours(test_scar2)[0]
+# # # contour_scar = measure.find_contours(test_scar2)[0]
+# plt.imshow(cine_segmentation[5], cmap="gray")
+# plt.show()
+
+pred_R = (cine_segmentation[5] == 1) + (cine_segmentation[5] == 2)
+pred_R = binary_fill_holes(pred_R)
+distance_R = distance_transform_edt(pred_R)
+distance_R[distance_R != 1] = 0
+
+pred_L = (cine_segmentation[5] == 2) + (cine_segmentation[5] == 3)
+pred_L = binary_fill_holes(pred_L)
+distance_L = distance_transform_edt(pred_L)
+distance_L[distance_L != 1] = 0
+
+# Find the intersection of the two lines to find the center of the label
+list_L = np.where(distance_L == 1)
+list_R = np.where(distance_R == 1)
+
+b_L = 1
+b_R = -1
+a_L = np.mean(list_L[0]) - b_L * np.mean(list_L[1])
+a_R = np.mean(list_R[0]) - b_R * np.mean(list_R[1])
+
+
+inter_R = int((a_L - a_R) / (b_R - b_L))
+inter_C = int(a_L + b_L * inter_R)
+
+print(inter_R, inter_C)
+
 plt.imshow(cine_segmentation[5], cmap="gray")
+plt.plot(inter_R, inter_C, "bo")
+
 plt.show()
+
 # contour_lv = measure.find_contours(cine_segmentation[5] == 1)[0]
 # contour_myo = measure.find_contours(cine_segmentation[5] == 2)[0]
 # contour_rv = measure.find_contours(cine_segmentation[5] == 3)[0]

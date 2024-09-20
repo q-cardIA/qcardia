@@ -82,7 +82,7 @@ class BaseSeries:
         """
         preprocessed_slices = self._preproccess_slices(image_type)
         config = self._get_config(wandb_run_path)
-        print(config["data"])
+
         self.inference_dict["target_pixdim"] = torch.tensor(
             config["data"]["target_pixdim"]
         )
