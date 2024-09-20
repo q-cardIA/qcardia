@@ -77,7 +77,12 @@ def reformat_mm1(data_path: Path, overwrite: bool = False) -> None:
     reformatted_data_path = data_path / "reformatted_data"
 
     if reformat_check(original_data_path, reformatted_data_path, "mm1", overwrite):
-        _reformat_mm1(original_data_path, reformatted_data_path)
+        _reformat_mm1(
+            original_data_path / "dataset",
+            original_data_path
+            / "211230_M&Ms_Dataset_information_diagnosis_opendataset.csv",
+            reformatted_data_path,
+        )
 
 
 def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
@@ -92,4 +97,8 @@ def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
     reformatted_data_path = data_path / "reformatted_data"
 
     if reformat_check(original_data_path, reformatted_data_path, "mm2", overwrite):
-        _reformat_mm2(original_data_path, reformatted_data_path)
+        _reformat_mm2(
+            original_data_path / "dataset",
+            original_data_path / "dataset_information.csv",
+            reformatted_data_path,
+        )
