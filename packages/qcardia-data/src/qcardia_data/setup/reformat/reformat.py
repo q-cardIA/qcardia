@@ -65,13 +65,16 @@ def reformat_check(
     return True
 
 
-def reformat_mm1(data_path: Path, overwrite: bool = False) -> None:
+def reformat_mm1(data_path: Path, overwrite: bool = False) -> bool:
     """Reformat the M&Ms dataset from the original format to the reformatted format
 
     Args:
         data_path (Path): path to the data folder
         overwrite (bool, optional): whether to force overwrite the reformatted version.
             Defaults to False.
+
+    Returns:
+        bool: whether the M&Ms dataset was reformatted succesfully
     """
     original_data_path = data_path / "original_data" / "MnM"
     reformatted_data_path = data_path / "reformatted_data"
@@ -83,15 +86,20 @@ def reformat_mm1(data_path: Path, overwrite: bool = False) -> None:
             / "211230_M&Ms_Dataset_information_diagnosis_opendataset.csv",
             reformatted_data_path,
         )
+        return True
+    return False
 
 
-def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
+def reformat_mm2(data_path: Path, overwrite: bool = False) -> bool:
     """Reformat the M&Ms-2 dataset from the original format to the reformatted format
 
     Args:
         data_path (Path): path to the data folder
         overwrite (bool, optional): whether to force overwrite the reformatted version.
             Defaults to False.
+
+    Returns:
+        bool: whether the M&Ms-2 dataset was reformatted succesfully
     """
     original_data_path = data_path / "original_data" / "MnM2"
     reformatted_data_path = data_path / "reformatted_data"
@@ -102,3 +110,5 @@ def reformat_mm2(data_path: Path, overwrite: bool = False) -> None:
             original_data_path / "dataset_information.csv",
             reformatted_data_path,
         )
+        return True
+    return False
