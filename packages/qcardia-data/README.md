@@ -101,7 +101,7 @@ valid_dataloader = data.valid_dataloader()
 ```
 *Note that this code snippet assumes a current working directory that contains the example config file*
 
-You can take a look in the included demo folder for a notebook with more information and examples. To find the config files, the notebook assumes that the demo folder (where the notebook is located in) is the current working directory.
+You can take a look in the included demo folder for a notebook with more information and examples. To find the config files, the notebook assumes that the demo folder (where the notebook is located in) is the current working directory. Make sure to update your file/folder hierarchy and current working directories when running the notebook that cannot find config files, or change config paths in the code directly to reflect the correct (global) path of the config.
 
 #### Custom dataset
 Datasets that aren't supported first need their own reformatting to work with the `qcardia-data` pipeline. You can look at the reformatting scripts (`qcardia_data\setup\reformat\...`) of supported public datasets for inspiration, as well as the folder hierarchy of reformatted datasets below. Note that the reformatted dataset folder and file names determine how they can be selected in a `qcardia-data` config.
