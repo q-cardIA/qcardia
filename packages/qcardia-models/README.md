@@ -32,7 +32,7 @@ pip install -e "path/to/qcardia-models"
 
 
 ### Getting started
-While it is recommended to use a confgiuration file to initialize models, models can be initialized as shown below:
+While it is recommended to use a configuration file to initialize models, models can be initialized as shown below:
 
 ```python
 from qcardia_models.models import EncoderMLP2d, UNet2d
