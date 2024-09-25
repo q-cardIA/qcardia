@@ -130,4 +130,4 @@ def load_file(file_path: Path):
 
 
 def read_dataset_csv(csv_path):
-    return pd.read_csv(csv_path, index_col=0, converters={1: str})
+    return pd.read_csv(csv_path, index_col=0, dtype={"SubjectID": str})
