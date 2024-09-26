@@ -8,17 +8,23 @@ from scipy.ndimage import binary_fill_holes, distance_transform_edt, label
 
 from src.qcardia.series import LGESeries
 
-WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-center"
+WANDB_RUN_PATH_CENTER = Path.cwd() / "wandb" / "lge-center"
+WANDB_RUN_PATH_SEG = Path.cwd() / "wandb" / "lge-seg"
+
 PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
 patient = patient_list[0]
 lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
+# lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
 lge_seq = LGESeries(lge_dir)
 
 
-cine_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH)
+lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)
+lge_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH_SEG, lge_center[5])
+
+
 # # number of slices is first?
 
 # # cine_rvs = cine_seq.get_rv_insertion_points()
@@ -69,7 +75,10 @@ inter_C = int(a_L + b_L * inter_R)
 
 print(inter_R, inter_C)
 
-plt.imshow(cine_segmentation[5], cmap="gray")
+plt.imshow(
+    lge_seq.slice_data["slice06"]["pixel_array"][0] / 300 + cine_segmentation[5],
+    cmap="gray",
+)
 plt.plot(inter_R, inter_C, "bo")
 
 plt.show()

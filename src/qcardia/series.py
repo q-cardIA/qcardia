@@ -19,6 +19,7 @@ import torch
 import yaml
 from natsort import natsorted
 from qcardia_models.models import UNet2d
+from scipy.ndimage import binary_fill_holes, distance_transform_edt
 from skimage.measure import find_contours
 from torch.nn import functional as F
 
@@ -571,9 +572,141 @@ class LGESeries(BaseSeries):
                         f"slice{i+1:02}"
                     ]["pixel_array"][j]
 
-    # def _find_center_point(self, wandb_run_path: Path) -> np.ndarray:
+    def _rescale_image(self, image, dimension_scale_factor):
 
-    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+        print(image.shape)
+        print(dimension_scale_factor)
+        scale_t = utils.t_2d_scale(dimension_scale_factor)
+        grid_size = [
+            1,
+            1,
+            int(self.inference_dict["source_shape"][0]),
+            int(self.inference_dict["source_shape"][1]),
+        ]
+
+        grid = F.affine_grid(
+            theta=torch.repeat_interleave(
+                scale_t[:-1, :].unsqueeze(0),
+                1,
+                dim=0,
+            ),
+            size=grid_size,
+            align_corners=False,
+        )
+        return F.grid_sample(
+            image,
+            grid,
+            align_corners=False,
+            mode="nearest",
+            padding_mode="border",
+        )[0, 0, ...]
+
+    def _find_landmark(self, quadrant_image):
+
+        pred_r = (quadrant_image == 1) + (quadrant_image == 2)
+        pred_r = binary_fill_holes(pred_r)
+        distance_r = distance_transform_edt(pred_r)
+        distance_r[distance_r != 1] = 0
+
+        pred_l = (quadrant_image == 2) + (quadrant_image == 3)
+        pred_l = binary_fill_holes(pred_l)
+        distance_l = distance_transform_edt(pred_l)
+        distance_l[distance_l != 1] = 0
+
+        # Find the intersection of the two lines to find the center of the label
+        list_l = np.where(distance_l == 1)
+        list_r = np.where(distance_r == 1)
+
+        skip_l = int(len(list_l[0]) / 10)
+        skip_r = int(len(list_r[0]) / 10)
+
+        b_l = 1
+        b_r = -1
+        a_l = np.mean(list_l[0][skip_l:-skip_l]) - b_l * np.mean(
+            list_l[1][skip_l:-skip_l]
+        )
+        a_r = np.mean(list_r[0][skip_r:-skip_r]) - b_r * np.mean(
+            list_r[1][skip_r:-skip_r]
+        )
+
+        inter_r = int((a_l - a_r) / (b_r - b_l))
+        inter_c = int(a_l + b_l * inter_r)
+
+        return [inter_r, inter_c]
+
+    def _run_crop_model(
+        self, wandb_run_path: Path, center_image: np.ndarray, image_type: str = "pixel"
+    ) -> None:
+        """
+        Runs the model inference on preprocessed slices.
+
+        This method loads the model weights, preprocesses the input data, runs the model and
+        postprocesses the output.
+
+        Args:
+            wandb_run_path (Path): The path to the WandB run directory.
+        """
+        preprocessed_slices = self._preproccess_slices(image_type)
+        preprocessed_center_image = center_image[
+            self.inference_dict["border_indices"][0] : self.inference_dict[
+                "border_indices"
+            ][1],
+            self.inference_dict["border_indices"][2] : self.inference_dict[
+                "border_indices"
+            ][3],
+        ]
+        config = self._get_config(wandb_run_path)
+
+        # Load the model weights
+        self.inference_dict["target_pixdim"] = torch.tensor(
+            config["data"]["target_pixdim"]
+        )
+        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+        self.inference_dict["grid_sample_modes"] = [
+            config["data"]["image_grid_sample_mode"]
+        ]
+        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
+        the_model = UNet2d(
+            nr_input_channels=config["unet"]["nr_image_channels"],
+            channels_list=config["unet"]["channels_list"],
+            nr_output_classes=config["unet"]["nr_output_classes"],
+            nr_output_scales=config["unet"]["nr_output_scales"],
+        ).to("cpu")
+        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
+        the_model.load_state_dict(model_weights)
+
+        # Preprocess the input data
+        self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
+            self._rescale_tensor(preprocessed_slices)
+        )
+        standardised_tensor = utils.standardise(rescaled_tensor)
+
+        rescale_center_image = self._rescale_image(
+            torch.Tensor(preprocessed_center_image[np.newaxis, np.newaxis, ...]),
+            self.inference_dict["dimension_scale_factor"],
+        )
+        center_point = self._find_landmark(rescale_center_image)
+
+        from matplotlib import pyplot as plt
+
+        plt.imshow(rescale_center_image)
+        plt.plot(center_point[0], center_point[1], "ro")
+        plt.show()
+
+        # Run the model
+        model_output = self._forward_model(the_model, standardised_tensor)
+
+        # Postprocess the output
+        rescale_model_output = self._invert_rescale_tensor(model_output)
+        model_prediction = torch.argmax(
+            rescale_model_output, dim=1, keepdim=True
+        ).float()
+
+        self._segmentation_prediction = self._postprocess_output(model_prediction)
+
+    def predict_segmentation(
+        self, wandb_run_path: Path, center_image: np.ndarray = None
+    ) -> np.ndarray:
         """
         Predict the segmentation for the DICOM data using the specified model.
 
@@ -583,8 +716,9 @@ class LGESeries(BaseSeries):
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path, image_type="psir")
-        self._lv = 1.0 * (self._segmentation_prediction == 1)
-        self._myo = 1.0 * (self._segmentation_prediction == 2)
-        self._rv = 1.0 * (self._segmentation_prediction == 3)
+        if center_image is not None:
+            self._run_crop_model(wandb_run_path, center_image, image_type="psir")
+        else:
+            self._run_model(wandb_run_path, image_type="psir")
+
         return self._segmentation_prediction
