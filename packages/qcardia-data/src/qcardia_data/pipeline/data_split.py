@@ -60,6 +60,7 @@ def split_data_from_config(config: dict):
 
         development_subjects = set(dataset_subjects) - set(test_subjects)
 
+        # account for possible overlap between M&Ms and M&Ms-2 -> limit M&Ms-2 subjects
         if dataset_name == "mm2" and "mm1" in dataset_names:
             overlap_subjects = set(get_mm2_overlap_mm1(reformatted_data_path))
             development_subjects = development_subjects - overlap_subjects

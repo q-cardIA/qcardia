@@ -159,7 +159,7 @@ class LoadCachedDatad(MapTransform):
     def __call__(self, data):
         data_dict = {}
         for cached_key in self.key_iterator(data):
-            cached_data = torch.load(data[cached_key])
+            cached_data = torch.load(data[cached_key], weights_only=False)
             for key in cached_data.keys():
                 if self.ignored_keys is None or key not in self.ignored_keys:
                     data_dict[key] = cached_data[key]

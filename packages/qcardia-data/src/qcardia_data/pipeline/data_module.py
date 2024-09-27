@@ -26,6 +26,21 @@ from qcardia_data.pipeline.utils import build_dataset_paths, build_sampler_weigh
 
 
 class DataModule:
+    """A class to providing dataloaders and handle caching based on config.
+
+    Attributes (relevant externally, read only):
+    - config (dict): configuration dictionary used for the data module.
+    - data_split (dict): dictionary containing the subject split of the data into train,
+        valid, and test, seperated by data subset.
+    - data_cacher (DatasetCacher): a DatasetCacher object that handles data caching.
+
+    Methods:
+    - train_dataloader(): Build a monai DataLoader object for the training dataset.
+    - valid_dataloader(): Build a monai DataLoader object for the validation dataset.
+    - test_dataloader(): Build a monai DataLoader object for the test dataset, must be
+        used separately from the training and validation dataloaders.
+    """
+
     def __init__(self, config: dict):
         # split data into train/valid/test for data subsettype selection
         self.data_split, development_split_dict = split_data_from_config(config)
