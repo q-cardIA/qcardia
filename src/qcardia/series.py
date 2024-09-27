@@ -88,6 +88,7 @@ class BaseSeries:
             config["data"]["target_pixdim"]
         )
         self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+
         self.inference_dict["grid_sample_modes"] = [
             config["data"]["image_grid_sample_mode"]
         ]
@@ -106,6 +107,8 @@ class BaseSeries:
         )
         standardised_tensor = utils.standardise(rescaled_tensor)
         model_output = self._forward_model(the_model, standardised_tensor)
+        print(model_output.shape)
+
         rescale_model_output = self._invert_rescale_tensor(model_output)
         model_prediction = torch.argmax(
             rescale_model_output, dim=1, keepdim=True
@@ -418,8 +421,8 @@ class BaseSeries:
         model_output = torch.zeros(
             self.inference_dict["number_of_slices"],
             self.inference_dict["nr_output_classes"],
-            self.inference_dict["target_size"][0],
-            self.inference_dict["target_size"][1],
+            tensor.shape[-2],
+            tensor.shape[-1],
         )
 
         model.eval()
@@ -433,7 +436,7 @@ class BaseSeries:
 
         return model_output
 
-    def _invert_rescale_tensor(self, model_output: torch.Tensor):
+    def _invert_rescale_tensor(self, model_output: torch.Tensor, mode: str = "bicubic"):
         """
         Inverts the rescaling operation applied to the model output tensor.
 
@@ -466,7 +469,7 @@ class BaseSeries:
             model_output,
             grid,
             align_corners=False,
-            mode="bicubic",
+            mode=mode,
             padding_mode="border",
         )
 
@@ -574,8 +577,6 @@ class LGESeries(BaseSeries):
 
     def _rescale_image(self, image, dimension_scale_factor):
 
-        print(image.shape)
-        print(dimension_scale_factor)
         scale_t = utils.t_2d_scale(dimension_scale_factor)
         grid_size = [
             1,
@@ -617,8 +618,8 @@ class LGESeries(BaseSeries):
         list_l = np.where(distance_l == 1)
         list_r = np.where(distance_r == 1)
 
-        skip_l = int(len(list_l[0]) / 10)
-        skip_r = int(len(list_r[0]) / 10)
+        skip_l = int(len(list_l[0]) / 5)
+        skip_r = int(len(list_r[0]) / 5)
 
         b_l = 1
         b_r = -1
@@ -647,6 +648,7 @@ class LGESeries(BaseSeries):
             wandb_run_path (Path): The path to the WandB run directory.
         """
         preprocessed_slices = self._preproccess_slices(image_type)
+
         preprocessed_center_image = center_image[
             self.inference_dict["border_indices"][0] : self.inference_dict[
                 "border_indices"
@@ -662,6 +664,9 @@ class LGESeries(BaseSeries):
             config["data"]["target_pixdim"]
         )
         self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+        self.inference_dict["original_target_size"] = torch.tensor(
+            config["data"]["target_size"]
+        )
         self.inference_dict["grid_sample_modes"] = [
             config["data"]["image_grid_sample_mode"]
         ]
@@ -675,11 +680,14 @@ class LGESeries(BaseSeries):
         model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
         the_model.load_state_dict(model_weights)
 
+        self.inference_dict["target_size"] = self.inference_dict["source_shape"].to(
+            torch.int32
+        )
+
         # Preprocess the input data
         self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
             self._rescale_tensor(preprocessed_slices)
         )
-        standardised_tensor = utils.standardise(rescaled_tensor)
 
         rescale_center_image = self._rescale_image(
             torch.Tensor(preprocessed_center_image[np.newaxis, np.newaxis, ...]),
@@ -687,22 +695,50 @@ class LGESeries(BaseSeries):
         )
         center_point = self._find_landmark(rescale_center_image)
 
-        from matplotlib import pyplot as plt
-
-        plt.imshow(rescale_center_image)
-        plt.plot(center_point[0], center_point[1], "ro")
-        plt.show()
+        # Crop the input data
+        rescaled_tensor = rescaled_tensor[
+            :,
+            :,
+            center_point[0]
+            - self.inference_dict["original_target_size"][0] // 2 : center_point[0]
+            + self.inference_dict["original_target_size"][0] // 2,
+            center_point[1]
+            - self.inference_dict["original_target_size"][1] // 2 : center_point[1]
+            + self.inference_dict["original_target_size"][1] // 2,
+        ]
+        standardised_tensor = utils.standardise(rescaled_tensor)
 
         # Run the model
         model_output = self._forward_model(the_model, standardised_tensor)
 
-        # Postprocess the output
-        rescale_model_output = self._invert_rescale_tensor(model_output)
-        model_prediction = torch.argmax(
-            rescale_model_output, dim=1, keepdim=True
-        ).float()
+        model_prediction = torch.argmax(model_output, dim=1, keepdim=True).float()
 
-        self._segmentation_prediction = self._postprocess_output(model_prediction)
+        full_size_prediction = torch.zeros(
+            self.inference_dict["number_of_slices"],
+            1,
+            self.inference_dict["target_size"][0],
+            self.inference_dict["target_size"][1],
+        )
+
+        full_size_prediction[
+            :,
+            :,
+            center_point[0]
+            - self.inference_dict["original_target_size"][0] // 2 : center_point[0]
+            + self.inference_dict["original_target_size"][0] // 2,
+            center_point[1]
+            - self.inference_dict["original_target_size"][1] // 2 : center_point[1]
+            + self.inference_dict["original_target_size"][1] // 2,
+        ] = model_prediction
+
+        # Postprocess the output
+        rescale_model_prediction = self._invert_rescale_tensor(
+            full_size_prediction, mode="nearest"
+        )
+
+        self._segmentation_prediction = self._postprocess_output(
+            rescale_model_prediction
+        )
 
     def predict_segmentation(
         self, wandb_run_path: Path, center_image: np.ndarray = None
