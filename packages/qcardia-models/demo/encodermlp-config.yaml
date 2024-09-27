@@ -19,11 +19,3 @@ loss:
   ntxent_temperature: 0.1
   ntxent_supervised_threshold: 0.1
   ntxent_supervised_cyclic_labels: False
-
-
-training:
-  nr_epochs_frozen_encoder: 0
-  early_stopping:
-    active: False
-    patience: 4
-    min_delta: 0.001
