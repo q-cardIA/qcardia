@@ -26,7 +26,6 @@ class UNet2d(nn.Module):
         output encoder/input decoder.
     - nr_output_classes (int): The number of output classes of the segmentation.
     - nr_output_scales (int): The number of output scales to use. Defaults to 1.
-    - dropout (float): The dropout probability to use before the output convolutions. Defaults to 0.0.
 
     Methods:
     - forward(x): Performs the forward pass of the U-Net.
@@ -38,13 +37,10 @@ class UNet2d(nn.Module):
         channels_list: list[int],
         nr_output_classes: int,
         nr_output_scales: int = 1,
-        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.encoder = Encoder(nr_input_channels, channels_list)
-        self.decoder = Decoder(
-            channels_list[::-1], nr_output_classes, nr_output_scales, dropout
-        )
+        self.decoder = Decoder(channels_list[::-1], nr_output_classes, nr_output_scales)
 
     def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
         """Performs the forward pass of the U-Net.
@@ -71,5 +67,3 @@ class UNet2d(nn.Module):
         """
         for param in self.encoder.parameters():
             param.requires_grad = requires_grad
-        if requires_grad:  # release unoccupied cached memory
-            torch.cuda.empty_cache()

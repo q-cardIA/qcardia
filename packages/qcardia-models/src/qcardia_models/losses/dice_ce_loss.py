@@ -71,7 +71,7 @@ class DiceLoss(nn.Module):
         """
         if outputs.get_device() >= 0:
             # Move the class weights to the same device as the predicted masks.
-            self.class_weights = self.class_weights.to(outputs.get_device())
+            self.class_weights = self.class_weights.to(outputs.device)
         if self.logits_to_probabilities:
             if self.class_weights.shape[1] == 1:
                 # sigmoid activation for binary classification
