@@ -13,6 +13,7 @@ Classes:
 from pathlib import Path
 from typing import List
 
+import nibabel as nib
 import numpy as np
 import pydicom
 import torch
@@ -69,10 +70,21 @@ class BaseSeries:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
         self._run_model(wandb_run_path)
-        self._lv = 1.0 * (self._segmentation_prediction == 1)
-        self._myo = 1.0 * (self._segmentation_prediction == 2)
-        self._rv = 1.0 * (self._segmentation_prediction == 3)
         return self._segmentation_prediction
+
+    def save_predictions(self, output_path: Path) -> None:
+        """
+        Saves the segmentation predictions to the specified path.
+
+        Args:
+            output_path (Path): The path to save the segmentation predictions.
+        """
+        output_path.mkdir(parents=True, exist_ok=True)
+        seg_prediction = self._segmentation_prediction.astype(np.uint8).transpose(
+            2, 1, 0
+        )[..., ::-1]
+        seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
+        nib.save(seg_nib, output_path / "segmentation.nii")
 
     def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
         """
@@ -107,7 +119,6 @@ class BaseSeries:
         )
         standardised_tensor = utils.standardise(rescaled_tensor)
         model_output = self._forward_model(the_model, standardised_tensor)
-        print(model_output.shape)
 
         rescale_model_output = self._invert_rescale_tensor(model_output)
         model_prediction = torch.argmax(
@@ -380,16 +391,16 @@ class BaseSeries:
         real_target_size = (
             self.inference_dict["target_pixdim"] * self.inference_dict["target_size"]
         )
+
         dimension_scale_factor = real_target_size / real_source_size
         scale_t = utils.t_2d_scale(dimension_scale_factor)
 
         grid_size = [
             self.inference_dict["number_of_slices"],
             1,
-            self.inference_dict["target_size"][0],
-            self.inference_dict["target_size"][1],
+            int(self.inference_dict["target_size"][0]),
+            int(self.inference_dict["target_size"][1]),
         ]
-
         grid = F.affine_grid(
             theta=torch.repeat_interleave(
                 scale_t[:-1, :].unsqueeze(0),
@@ -516,6 +527,22 @@ class CineSeries(BaseSeries):
     def __init__(self, folder: Path, batch_size: int = 50):
         super().__init__(folder, batch_size)
 
+    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+        """
+        Predict the segmentation for the DICOM data using the specified model.
+
+        Args:
+            wandb_run_path (Path): The path to the WandB run directory.
+
+        Returns:
+            np.ndarray: The predicted segmentation for the DICOM data.
+        """
+        self._run_model(wandb_run_path)
+        self._lv = 1.0 * (self._segmentation_prediction == 1)
+        self._myo = 1.0 * (self._segmentation_prediction == 2)
+        self._rv = 1.0 * (self._segmentation_prediction == 3)
+        return self._segmentation_prediction
+
     def _compute_primary_slices(self):
         self.base_slice_num = 4
         self.mid_slice_num = 6
@@ -581,8 +608,8 @@ class LGESeries(BaseSeries):
         grid_size = [
             1,
             1,
-            int(self.inference_dict["source_shape"][0]),
-            int(self.inference_dict["source_shape"][1]),
+            int(self.inference_dict["target_size"][0]),
+            int(self.inference_dict["target_size"][1]),
         ]
 
         grid = F.affine_grid(
@@ -680,9 +707,7 @@ class LGESeries(BaseSeries):
         model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
         the_model.load_state_dict(model_weights)
 
-        self.inference_dict["target_size"] = self.inference_dict["source_shape"].to(
-            torch.int32
-        )
+        self.inference_dict["target_size"] = torch.tensor([480, 480]).to(torch.int32)
 
         # Preprocess the input data
         self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
@@ -699,11 +724,11 @@ class LGESeries(BaseSeries):
         rescaled_tensor = rescaled_tensor[
             :,
             :,
-            center_point[0]
-            - self.inference_dict["original_target_size"][0] // 2 : center_point[0]
-            + self.inference_dict["original_target_size"][0] // 2,
             center_point[1]
-            - self.inference_dict["original_target_size"][1] // 2 : center_point[1]
+            - self.inference_dict["original_target_size"][0] // 2 : center_point[1]
+            + self.inference_dict["original_target_size"][0] // 2,
+            center_point[0]
+            - self.inference_dict["original_target_size"][1] // 2 : center_point[0]
             + self.inference_dict["original_target_size"][1] // 2,
         ]
         standardised_tensor = utils.standardise(rescaled_tensor)
@@ -723,11 +748,11 @@ class LGESeries(BaseSeries):
         full_size_prediction[
             :,
             :,
-            center_point[0]
-            - self.inference_dict["original_target_size"][0] // 2 : center_point[0]
-            + self.inference_dict["original_target_size"][0] // 2,
             center_point[1]
-            - self.inference_dict["original_target_size"][1] // 2 : center_point[1]
+            - self.inference_dict["original_target_size"][0] // 2 : center_point[1]
+            + self.inference_dict["original_target_size"][0] // 2,
+            center_point[0]
+            - self.inference_dict["original_target_size"][1] // 2 : center_point[0]
             + self.inference_dict["original_target_size"][1] // 2,
         ] = model_prediction
 

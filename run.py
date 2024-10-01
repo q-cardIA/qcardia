@@ -16,16 +16,17 @@ PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
-patient = patient_list[0]
-lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
-# lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
-lge_seq = LGESeries(lge_dir)
+for patient in patient_list:
+    lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
+    # lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
+    lge_seq = LGESeries(lge_dir)
 
+    lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)
+    lge_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH_SEG, lge_center[5])
 
-lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)
-lge_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH_SEG, lge_center[5])
+    lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
 
-
+see_num = 7
 # # number of slices is first?
 
 # # cine_rvs = cine_seq.get_rv_insertion_points()
@@ -42,7 +43,7 @@ from skimage import measure
 # plt.imshow(cine_segmentation[5], cmap="gray")
 # plt.show()
 
-myo = (lge_segmentation[5] == 2) + (lge_segmentation[5] == 1)
+myo = (lge_segmentation[see_num] == 2) + (lge_segmentation[see_num] == 1)
 
 
 lv = binary_fill_holes(myo) * 1 - myo
@@ -60,7 +61,7 @@ lv = getLargestCC(lv)
 
 contour_lv = measure.find_contours(lv == 1)[0]
 contour_myo = measure.find_contours(myo == 1)[0]
-contour_scar = measure.find_contours(lge_segmentation[5] == 2)[0]
+contour_scar = measure.find_contours(lge_segmentation[see_num] == 2)[0]
 # contour_rv = measure.find_contours(cine_segmentation[5] == 3)[0]
 
 
@@ -100,7 +101,7 @@ contour_scar = measure.find_contours(lge_segmentation[5] == 2)[0]
 
 # # Display the image and plot all contours found
 fig, ax = plt.subplots()
-ax.imshow(lge_seq.slice_data["slice06"]["psir_array"] / 300, cmap="gray")
+ax.imshow(lge_seq.slice_data[f"slice0{see_num+1}"]["psir_array"] / 300, cmap="gray")
 # # ax.imshow(lge_seq.slice_data["slice06"]["pixel_array"][1] / 300, cmap="gray")
 
 ax.plot(contour_lv[:, 1], contour_lv[:, 0], linewidth=2.5, color="tab:blue")
