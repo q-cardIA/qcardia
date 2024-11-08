@@ -720,8 +720,9 @@ class LGESeries(BaseSeries):
         )
         center_point = self._find_landmark(rescale_center_image)
 
+        standardised_tensor = utils.standardise(rescaled_tensor)
         # Crop the input data
-        rescaled_tensor = rescaled_tensor[
+        standardised_tensor = standardised_tensor[
             :,
             :,
             center_point[1]
@@ -731,7 +732,6 @@ class LGESeries(BaseSeries):
             - self.inference_dict["original_target_size"][1] // 2 : center_point[0]
             + self.inference_dict["original_target_size"][1] // 2,
         ]
-        standardised_tensor = utils.standardise(rescaled_tensor)
 
         # Run the model
         model_output = self._forward_model(the_model, standardised_tensor)

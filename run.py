@@ -26,6 +26,8 @@ for patient in patient_list:
 
     lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
 
+
+
 see_num = 7
 # # number of slices is first?
 
