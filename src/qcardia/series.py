@@ -22,7 +22,7 @@ from qcardia_models.models import UNet2d
 from skimage.measure import find_contours
 from torch.nn import functional as F
 
-import src.qcardia.utils as utils
+import qcardia.utils as utils
 
 
 class BaseSeries:

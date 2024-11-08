@@ -5,9 +5,9 @@ import torch
 import yaml
 from natsort import natsorted
 
-from src.qcardia.series import CineSeries
+from qcardia.series import CineSeries
 
-WANDB_RUN_PATH = Path.cwd() / "wandb"
+WANDB_RUN_PATH = Path.cwd() / "wandb" / "cine-seg"
 PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
