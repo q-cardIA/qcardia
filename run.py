@@ -12,7 +12,7 @@ PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
-patient = patient_list[0]
+patient = patient_list[3]
 cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
 cine_seq = CineSeries(cine_dir)
 cine_segmentation = cine_seq.predict_segmentation(WANDB_RUN_PATH)
@@ -40,9 +40,9 @@ from skimage import measure
 # contour_scar = measure.find_contours(test_scar2)[0]
 # plt.imshow(test_myo1, cmap="gray")
 # plt.show()
-contour_lv = measure.find_contours(cine_segmentation[5, 1] == 1)[0]
-contour_myo = measure.find_contours(cine_segmentation[5, 1] == 2)[0]
-contour_rv = measure.find_contours(cine_segmentation[5, 1] == 3)[0]
+contour_lv = measure.find_contours(cine_segmentation[5, 10] == 1)[0]
+contour_myo = measure.find_contours(cine_segmentation[5, 10] == 2)[0]
+contour_rv = measure.find_contours(cine_segmentation[5, 10] == 3)[0]
 
 # import imgaug.augmenters as iaa
 
@@ -80,7 +80,7 @@ contour_rv = measure.find_contours(cine_segmentation[5, 1] == 3)[0]
 
 # Display the image and plot all contours found
 fig, ax = plt.subplots()
-ax.imshow(cine_seq.slice_data["slice06"]["pixel_array"][1] / 300, cmap="gray")
+ax.imshow(cine_seq.slice_data["slice06"]["pixel_array"][10] / 300, cmap="gray")
 # ax.imshow(lge_seq.slice_data["slice06"]["pixel_array"][1] / 300, cmap="gray")
 
 ax.plot(contour_rv[:, 1], contour_rv[:, 0], linewidth=2.5, color="tab:blue")
@@ -90,4 +90,21 @@ ax.plot(contour_myo[:, 1], contour_myo[:, 0], linewidth=2.5, color="tab:orange")
 # ax.plot(contour_endo[:, 1], contour_endo[:, 0], linewidth=2.5, color="tab:orange")
 # ax.plot(contour_scar[:, 1], contour_scar[:, 0], linewidth=2.5, color="tab:red")
 plt.axis("off")
+plt.show()
+
+lv = cine_segmentation[5, 10] == 1
+
+from skimage.segmentation import morphological_chan_vese
+
+ls = morphological_chan_vese(
+    cine_seq.slice_data["slice06"]["pixel_array"][10] / 1000,
+    num_iter=50,
+    init_level_set=lv,
+    smoothing=1,
+    lambda1=12,
+)
+
+plt.imshow(cine_seq.slice_data["slice06"]["pixel_array"][10] / 1000, cmap="gray")
+plt.axis("off")
+plt.contour(ls, [0.5], colors="r")
 plt.show()
