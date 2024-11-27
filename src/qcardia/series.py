@@ -13,6 +13,7 @@ Classes:
 from pathlib import Path
 from typing import List
 
+import nibabel as nib
 import numpy as np
 import pydicom
 import torch
@@ -72,6 +73,26 @@ class BaseSeries:
         self._myo = 1.0 * (self._segmentation_prediction == 2)
         self._rv = 1.0 * (self._segmentation_prediction == 3)
         return self._segmentation_prediction
+
+    def save_predictions(self, output_path: Path) -> None:
+        """
+        Saves the segmentation predictions to the specified path.
+
+        Args:
+            output_path (Path): The path to save the segmentation predictions.
+        """
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        seg_prediction = np.transpose(self._segmentation_prediction).astype(np.uint8)[
+            ..., ::-1
+        ]
+        if len(seg_prediction.shape) == 4:
+            for i in range(seg_prediction.shape[-2]):
+                seg_nib = nib.Nifti1Image(seg_prediction[..., i, :], np.eye(4))
+                nib.save(seg_nib, output_path / f"segmentation_{i+1}.nii")
+        else:
+            seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
+            nib.save(seg_nib, output_path / "segmentation.nii")
 
     def _run_model(self, wandb_run_path: Path) -> None:
         """

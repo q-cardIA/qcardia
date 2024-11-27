@@ -12,10 +12,12 @@ PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
-patient = patient_list[0]
+patient = patient_list[1]
 cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
 cine_seq = CineSeries(cine_dir)
 cine_segmentation = cine_seq.predict_segmentation(WANDB_RUN_PATH)
+cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
+
 # number of slices is first?
 
 # cine_rvs = cine_seq.get_rv_insertion_points()
