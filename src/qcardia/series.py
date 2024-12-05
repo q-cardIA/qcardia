@@ -537,6 +537,24 @@ class CineSeries(BaseSeries):
         self.mid_slice_num = 6
         self.apex_slice_num = 10
 
+    def compute_volume_curve(self, structure="lv"):
+
+        pixdim = self._get_pixel_spacing()
+        scale_factor = 0.001 * pixdim[0] * pixdim[1] * pixdim[2]
+        if structure == "lv":
+            return np.sum(self._lv, axis=(0, 2, 3)) * scale_factor.numpy()
+        elif structure == "rv":
+            return np.sum(self._rv, axis=(0, 2, 3)) * scale_factor.numpy()
+        elif structure == "myo":
+            return np.sum(self._myo, axis=(0, 2, 3)) * scale_factor.numpy()
+        else:
+            raise ValueError(f"Unknown structure: {structure}, should be lv, rv or myo")
+
+    def compute_ejection_fraction(self, curve):
+        ed_vol = curve[0]
+        es_vol = np.amin(curve)
+        return (ed_vol - es_vol) / ed_vol
+
     def _compute_rv_insertion_points(self):
         self.lv_center_point = []
         for slice_num in [self.base_slice_num, self.mid_slice_num, self.apex_slice_num]:

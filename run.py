@@ -12,11 +12,19 @@ PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
-patient = patient_list[1]
-cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
-cine_seq = CineSeries(cine_dir)
-cine_segmentation = cine_seq.predict_segmentation(WANDB_RUN_PATH)
-cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
+for patient in patient_list:
+    cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
+    cine_seq = CineSeries(cine_dir)
+    cine_segmentation = cine_seq.predict_segmentation(WANDB_RUN_PATH)
+    cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
+    lv_vol_curve = cine_seq.compute_volume_curve()
+    ef = cine_seq.compute_ejection_fraction(lv_vol_curve)
+    from matplotlib import pyplot as plt
+
+    plt.plot(lv_vol_curve)
+    plt.show()
+
+    print(patient, ef)
 
 # number of slices is first?
 
@@ -46,27 +54,44 @@ contour_lv = measure.find_contours(cine_segmentation[5, 1] == 1)[0]
 contour_myo = measure.find_contours(cine_segmentation[5, 1] == 2)[0]
 contour_rv = measure.find_contours(cine_segmentation[5, 1] == 3)[0]
 
-# import imgaug.augmenters as iaa
+lv = cine_segmentation == 1
+myo = cine_segmentation == 2
+rv = cine_segmentation == 3
+
+lv_pix_vol = np.sum(lv, axis=(0, 2, 3))
 
 
-# def get_offset(seg, RV):
-#     RVinsertionx = RV[0]
-#     RVinsertiony = RV[1]
-#     [xs, ys] = np.where(seg > 0)
-#     centx = np.mean(xs)
-#     centy = np.mean(ys)
-
-#     spoke1m = (centy - RVinsertiony) / (centx - RVinsertionx)
-
-#     return np.arctan(spoke1m)
+plt.plot(lv_pix_vol)
+plt.show()
 
 
-# def rotate_to_rv(image, rv, interp_order=3):
-#     angle = np.pi - get_offset(image > 0, rv)
-#     rotate_im = iaa.Affine(rotate=np.rad2deg(angle), order=interp_order)
-#     rotated_image = rotate_im.augment_image(image)
+def ejection_fraction(volume_ed, volume_es):
+    stroke_volume = volume_ed - volume_es
+    ejection_frac = (stroke_volume / volume_ed) * 100
+    return ejection_frac
 
-#     return rotated_image
+
+import imgaug.augmenters as iaa
+
+
+def get_offset(seg, RV):
+    RVinsertionx = RV[0]
+    RVinsertiony = RV[1]
+    [xs, ys] = np.where(seg > 0)
+    centx = np.mean(xs)
+    centy = np.mean(ys)
+
+    spoke1m = (centy - RVinsertiony) / (centx - RVinsertionx)
+
+    return np.arctan(spoke1m)
+
+
+def rotate_to_rv(image, rv, interp_order=3):
+    angle = np.pi - get_offset(image > 0, rv)
+    rotate_im = iaa.Affine(rotate=np.rad2deg(angle), order=interp_order)
+    rotated_image = rotate_im.augment_image(image)
+
+    return rotated_image
 
 
 # plt.subplot(1, 2, 1)
