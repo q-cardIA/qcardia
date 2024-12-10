@@ -24,7 +24,7 @@ from scipy.ndimage import binary_fill_holes, distance_transform_edt
 from skimage.measure import find_contours
 from torch.nn import functional as F
 
-import src.qcardia.utils as utils
+import qcardia.utils as utils
 
 
 class BaseSeries:

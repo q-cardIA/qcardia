@@ -11,21 +11,20 @@ from src.qcardia.series import LGESeries
 WANDB_RUN_PATH_CENTER = Path.cwd() / "wandb" / "lge-center"
 WANDB_RUN_PATH_SEG = Path.cwd() / "wandb" / "lge-seg"
 
-PATH_TO_DATASET = Path.cwd() / "data"
-# PATH_TO_DATASET = Path.cwd() / "siemens-data"
+# PATH_TO_DATASET = Path.cwd() / "data"
+PATH_TO_DATASET = Path.cwd() / "vida-data-combined"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
 for patient in patient_list:
-    lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
-    # lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
+    # lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
+    lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
     lge_seq = LGESeries(lge_dir)
 
     lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)
     lge_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH_SEG, lge_center[5])
 
     lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
-
 
 
 see_num = 7
