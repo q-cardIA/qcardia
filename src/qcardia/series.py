@@ -14,6 +14,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List
 
+import cv2
 import nibabel as nib
 import numpy as np
 import pydicom
@@ -692,25 +693,72 @@ class CineSeries(BaseSeries):
 
     def _compute_marker_points(self):
         self._lv_center_points = []
+        self._rv_center_points = []
+        self._rv_insertion_points = []
         for slice_num in [self.base_slice_num, self.mid_slice_num, self.apex_slice_num]:
-            tmp_center_pts = []
+            tmp_lv_center_pts = []
+            tmp_rv_center_pts = []
+            tmp_rv_insertion_pts = []
             for t in range(self._segmentation_prediction.shape[1]):
                 the_myo = self._myo[slice_num, t]
                 the_rv = self._rv[slice_num, t]
                 the_lv = self._lv[slice_num, t]
 
-                find_contours(the_myo + the_lv)
                 try:
-                    tmp_center_pts.append(
+                    tmp_lv_center_pts.append(
                         [
                             int(np.mean(np.where(the_lv > 0)[0])),
                             int(np.mean(np.where(the_lv > 0)[1])),
                         ]
                     )
+                    tmp_rv_center_pts.append(
+                        [
+                            int(np.mean(np.where(the_rv > 0)[0])),
+                            int(np.mean(np.where(the_rv > 0)[1])),
+                        ]
+                    )
                 except:
-                    tmp_center_pts.append([0, 0])
-            self._lv_center_points.append(tmp_center_pts)
-        self._rv_insertion_points = [[0, 0], [1, 1]]
+                    tmp_lv_center_pts.append([0, 0])
+                    tmp_rv_center_pts.append([0, 0])
+
+                self._lv_center_points.append(tmp_lv_center_pts)
+                self._rv_center_points.append(tmp_rv_center_pts)
+
+                epi = the_lv + the_myo
+                # Extract epicardial contour
+                contours, _ = cv2.findContours(
+                    cv2.inRange(epi, 1, 1), cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE
+                )
+                epi_contour = contours[0][:, 0, :]
+                septum = []
+                dilate_iter = 1
+                while len(septum) == 0 and dilate_iter < 6:
+                    # Dilate the RV till it intersects with LV epicardium.
+                    # Normally, this is fulfilled after just one iteration.
+                    rv_dilate = cv2.dilate(
+                        the_rv,
+                        np.ones((3, 3), dtype=np.uint8),
+                        iterations=dilate_iter,
+                    )
+                    dilate_iter += 1
+                    for y, x in epi_contour:
+                        if rv_dilate[x, y] == 1:
+                            septum += [[x, y]]
+                try:
+                    tmp_rv_insertion_pts.append(
+                        [
+                            [septum[0][1], septum[0][0]],
+                            [septum[-1][1], septum[-1][0]],
+                        ]
+                    )
+                except:
+                    tmp_rv_insertion_pts.append(
+                        [
+                            [0, 0],
+                            [0, 0],
+                        ]
+                    )
+            self._rv_insertion_points.append(tmp_rv_insertion_pts)
 
     def get_lv_center_points(self):
         """
@@ -720,6 +768,15 @@ class CineSeries(BaseSeries):
         """
 
         return self._lv_center_points
+
+    def get_rv_center_points(self):
+        """
+        Find the right ventricular center points.
+        Returns:
+            List[int]: The x and y coordinates of the right ventricular center points.
+        """
+
+        return self._rv_center_points
 
     def get_rv_insertion_points(self):
         """

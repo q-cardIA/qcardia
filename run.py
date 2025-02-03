@@ -69,6 +69,76 @@ def get_polar_points(myo, lv, rv, num_spokes=60):
     return all_intersections
 
 
+def get_rv_polar_points(myo, lv, rv_pt, num_spokes=60):
+
+    cy = lv[0]
+    cx = lv[1]
+
+    # Get image dimensions
+    height, width = myo.shape
+
+    # Calculate angles for spokes (in radians)
+    angles = np.linspace(0, 2 * np.pi, num_spokes, endpoint=False)
+    # Maximum radius to check (diagonal of image)
+    max_radius = np.sqrt(width**2 + height**2)
+
+    # Store intersection points for each spoke
+    all_intersections = []
+    for angle in angles:
+        # Calculate unit vector for this angle
+        dx = np.cos(angle)
+        dy = np.sin(angle)
+
+        # Generate points along the spoke
+        num_points = int(max_radius * 4)
+        radii = np.linspace(0, max_radius, num_points)
+        spoke_points = np.array([(cx + r * dx, cy + r * dy) for r in radii])
+
+        # Find intersections with the donut
+        intersections = []
+        for i in range(len(spoke_points) - 1):
+            x1, y1 = spoke_points[i]
+            x2, y2 = spoke_points[i + 1]
+
+            # Check if we're crossing the boundary
+            if (
+                0 <= int(y1) < height
+                and 0 <= int(x1) < width
+                and 0 <= int(y2) < height
+                and 0 <= int(x2) < width
+            ):
+                val1 = myo[int(y1), int(x1)]
+                val2 = myo[int(y2), int(x2)]
+                if val1 != val2:  # We found an intersection
+                    # Use the midpoint as the intersection point
+                    intersections.append([(x1 + x2) / 2, (y1 + y2) / 2])
+
+        all_intersections.append(intersections)
+
+    return all_intersections
+
+
+import colorsys
+import random
+from typing import List, Tuple
+
+
+# from: https://github.com/riponazad/echotracker/blob/main/utils/viz_utils.py
+# Generate random colormaps for visualizing different points.
+def get_colors(num_colors: int) -> List[Tuple[int, int, int]]:
+    """Gets colormap for points."""
+    colors = []
+    for i in np.arange(0.0, 360.0, 360.0 / num_colors):
+        hue = i / 360.0
+        lightness = (50 + np.random.rand() * 10) / 100.0
+        saturation = (90 + np.random.rand() * 10) / 100.0
+        color = colorsys.hls_to_rgb(hue, lightness, saturation)
+        # colors.append((int(color[0]), int(color[1] * 255), int(color[2] * 255)))
+        colors.append((color[0], color[1], color[2]))
+    random.shuffle(colors)
+    return colors
+
+
 for patient in patient_list[2:]:
     cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
     cine_seq = CineSeries(cine_dir, batch_size=200)
@@ -101,7 +171,7 @@ for patient in patient_list[2:]:
     from skimage.transform import warp
 
     # myo = cine_segmentation[[4, 6, 10], 0] == 2
-    myo = cine_segmentation[6, :] == 2
+    myo = cine_segmentation[6, :] == 3
     # moved_myo1 = warp_layer(torch.Tensor(myo[:, None, ...]), torch.Tensor(motion))
     # moved_myo = warp(myo[1, ...], np.transpose(motion[1, ...], (1, 2, 0)), order=0)
 
@@ -111,49 +181,68 @@ for patient in patient_list[2:]:
 
     from scipy.interpolate import RegularGridInterpolator
 
-    the_pts = get_polar_points(
+    the_pts = get_rv_polar_points(
         myo[0, ...].astype(float),
-        cine_seq.get_lv_center_points()[1][0],
+        cine_seq.get_rv_center_points()[1][0],
         cine_seq.get_rv_insertion_points(),
         num_spokes=10,
     )
+    import matplotlib
     from matplotlib import pyplot as plt
     from matplotlib.animation import FuncAnimation, PillowWriter
 
+    plt.imshow(myo[1, ...])
+    plt.plot(
+        cine_seq.get_rv_insertion_points()[1][0][0],
+        cine_seq.get_rv_insertion_points()[1][0][1],
+        "ro",
+    )
+    plt.show()
+
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    colors = plt.cm.jet(np.linspace(0, 1, len(the_pts)))
-
-    im = ax.imshow(input_images[0, ...], cmap="gray")
-    for idx, pt in enumerate(the_pts):
-        ax.plot(pt[0][0], pt[0][1], "o", color=colors[idx])
-    # for i in range(motion.shape[0]):
-    ax.set_axis_off()
+    colors = get_colors(10)
 
     def animate(i):
-        the_motion = np.transpose(motion[i, ...], (1, 2, 0))
-        nx, ny = the_motion.shape[1], the_motion.shape[0]
-        X = np.arange(nx)
-        Y = np.arange(ny)
-        the_motion_x = RegularGridInterpolator((X, Y), the_motion[..., 0])
-        the_motion_y = RegularGridInterpolator((X, Y), the_motion[..., 1])
 
-        ax.clear()
-        im = ax.imshow(input_images[i + 1, ...], cmap="gray")
-        for idx, pt in enumerate(the_pts):
+        if i == 0:
+            im = ax.imshow(input_images[0, ...], cmap="gray")
+            for idx, pt in enumerate(the_pts):
+                ax.plot(
+                    pt[0][0], pt[0][1], "o", color=matplotlib.colors.to_hex(colors[idx])
+                )
+            ax.set_axis_off()
+            return [im]
 
-            deformed_pt_y = pt[0][0] - the_motion_y((pt[0][1], pt[0][0]))
-            deformed_pt_x = pt[0][1] - the_motion_x((pt[0][1], pt[0][0]))
-            ax.plot(deformed_pt_y, deformed_pt_x, "o", color=colors[idx])
+        else:
+            the_motion = np.transpose(motion[i, ...], (1, 2, 0))
+            nx, ny = the_motion.shape[1], the_motion.shape[0]
+            X = np.arange(nx)
+            Y = np.arange(ny)
+            the_motion_x = RegularGridInterpolator((X, Y), the_motion[..., 0])
+            the_motion_y = RegularGridInterpolator((X, Y), the_motion[..., 1])
 
-        ax.set_axis_off()
-        return [im]
+            ax.clear()
+            im = ax.imshow(input_images[i + 1, ...], cmap="gray")
+            for idx, pt in enumerate(the_pts):
+
+                deformed_pt_y = pt[0][0] - the_motion_y((pt[0][1], pt[0][0]))
+                deformed_pt_x = pt[0][1] - the_motion_x((pt[0][1], pt[0][0]))
+                ax.plot(
+                    deformed_pt_y,
+                    deformed_pt_x,
+                    "o",
+                    color=matplotlib.colors.to_hex(colors[idx]),
+                )
+
+            ax.set_axis_off()
+            return [im]
 
         # fig.canvas.draw()
         # plt.pause(0.2)
 
     # plt.close()
-
+    fig.tight_layout()
     anim = FuncAnimation(
         fig,
         animate,
