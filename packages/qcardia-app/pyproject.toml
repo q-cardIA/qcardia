@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "qcardia-app"
+version = "0.1.0"
+description = ""
+authors = ["Pamela Wochner <p.wochner@tudelft.nl>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+pyside6 = "^6.6.2"
+pydicom = "^2.4.4"
+numpy = "^1.26.4"
+torch = "^2.3.0"
+scipy = "^1.11.4"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
