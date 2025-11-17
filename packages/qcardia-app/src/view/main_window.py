@@ -8,8 +8,10 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -24,6 +26,7 @@ class MainWindow(QMainWindow):
 
     load_button_signal = Signal(str)
     seg_button_signal = Signal()
+    time_frame_changed_signal = Signal(int)
 
     def __init__(self):
         super(MainWindow, self).__init__()
@@ -219,6 +222,40 @@ class MainWindow(QMainWindow):
             self.right_panel_layout.setSpacing(10)
             self.right_panel_layout.setContentsMargins(10, 10, 10, 10)
 
+            # Time frame controls
+            self.time_label = QLabel("Time Frame: 0 / 0")
+            self.time_label.setStyleSheet("color: white; font-size: 12px;")
+            self.right_panel_layout.addWidget(self.time_label)
+
+            self.time_slider = QSlider(Qt.Horizontal)
+            self.time_slider.setMinimum(0)
+            self.time_slider.setMaximum(0)
+            self.time_slider.setValue(0)
+            self.time_slider.setEnabled(False)
+            self.time_slider.setStyleSheet(
+                """
+                QSlider::groove:horizontal {
+                    background: #3a3f4a;
+                    height: 8px;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background: #85aaff;
+                    width: 16px;
+                    margin: -4px 0;
+                    border-radius: 8px;
+                }
+                QSlider::handle:horizontal:hover {
+                    background: #a0c0ff;
+                }
+            """
+            )
+            self.time_slider.valueChanged.connect(self.on_time_slider_changed)
+            self.right_panel_layout.addWidget(self.time_slider)
+
+            # Add some spacing
+            self.right_panel_layout.addSpacing(20)
+
             # Button for segmentation
             self.seg_button = QPushButton("Run Segmentation")
             self.seg_button.setObjectName("segButton")
@@ -266,3 +303,20 @@ class MainWindow(QMainWindow):
     def emit_segmentation_signal(self):
         if self.has_folder_been_selected():
             self.seg_button_signal.emit()
+
+    def update_time_slider_range(self, num_frames):
+        """Update the time slider to reflect the number of temporal frames."""
+        if hasattr(self, "time_slider"):
+            self.time_slider.setMaximum(num_frames - 1)
+            self.time_slider.setValue(0)
+            self.time_slider.setEnabled(num_frames > 1)
+            self.time_label.setText(f"Time Frame: 1 / {num_frames}")
+
+    def on_time_slider_changed(self, value):
+        """Handle time slider changes and update the display."""
+        if hasattr(self, "time_slider") and hasattr(self, "time_label"):
+            max_val = self.time_slider.maximum()
+            self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}")
+            # Emit signal to controller to update the displayed volume
+            if hasattr(self, "time_frame_changed_signal"):
+                self.time_frame_changed_signal.emit(value)
