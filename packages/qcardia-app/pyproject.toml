@@ -10,7 +10,16 @@ requires-python = ">=3.9"
 dependencies = [
     "pyside6>=6.6.2",
     "pydicom>=2.4.4",
-    "numpy>=1.26.4",
+    "numpy>=1.26.3",
     "torch>=2.3.0",
     "scipy>=1.11.4",
+    "pyyaml>=6.0.1",
+    "qcardia-data",
+    "qcardia-models",
+    "qcardia",
 ]
+
+[tool.uv.sources]
+qcardia-data = { git = "https://github.com/q-cardIA/qcardia-data.git" }
+qcardia-models = { git = "https://github.com/q-cardIA/qcardia-models.git" }
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git" }
