@@ -346,8 +346,7 @@ class CentralDisplayAreaWidget(QWidget):
             # Colors for contours (semi-transparent)
             class_colors = {
                 3: (0, 0, 255, 192),  # RV - blue
-                2: (0, 255, 0, 192),  # Myocardium - green
-                1: (255, 0, 0, 192),  # LV - red
+                1: (255, 0, 0, 192),  # LV - red (endocardium)
             }
             # Generate 1-2 px thick contour for each class via morphological gradient
             for cls, color in class_colors.items():
@@ -359,6 +358,22 @@ class CentralDisplayAreaWidget(QWidget):
                 # Optional: thicken contour slightly
                 edges = binary_dilation(edges)
                 overlay[edges] = color
+
+            # Special handling for myocardium (class 2): only show epicardium (outer edge)
+            # Exclude inner edge where it borders LV (class 1)
+            myo_mask = seg_slice == 2
+            if myo_mask.any():
+                lv_mask = seg_slice == 1
+                # Dilate LV to find myocardium's inner boundary
+                lv_dilated = binary_dilation(lv_mask)
+                # Erode myocardium to get its edges
+                myo_eroded = binary_erosion(myo_mask)
+                myo_edges = myo_mask & (~myo_eroded)
+                # Remove edges that touch the LV (inner boundary)
+                myo_outer_edges = myo_edges & (~lv_dilated)
+                # Thicken contour slightly
+                myo_outer_edges = binary_dilation(myo_outer_edges)
+                overlay[myo_outer_edges] = (0, 255, 0, 192)  # Green
             # Send overlay to sagittal viewer (top-left)
             self.sagittal_viewer.update_overlay(overlay)
         except Exception as e:

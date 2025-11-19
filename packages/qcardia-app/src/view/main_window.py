@@ -1,9 +1,5 @@
-from pathlib import Path
-
-import numpy as np
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QBrush, QColor, QPalette, Qt
-from PySide6.QtUiTools import QUiLoader
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -17,7 +13,6 @@ from PySide6.QtWidgets import (
 )
 
 from view.CentralDisplayAreaWidget import CentralDisplayAreaWidget
-from view.ui_main_window import Ui_MainWindow
 from view.utils import SoftwareConfigResources
 from view.welcome_widget import WelcomeWidget
 
@@ -26,11 +21,16 @@ class MainWindow(QMainWindow):
 
     load_button_signal = Signal(str)
     seg_button_signal = Signal()
+    save_button_signal = Signal()
     time_frame_changed_signal = Signal(int)
 
     def __init__(self):
         super(MainWindow, self).__init__()
         self.folder_selected = False
+
+        # Set default window size
+        self.resize(1400, 900)
+        self.setMinimumSize(1000, 700)
 
         # Set up the stylesheet for the application using shared dark theme colors
         colors = SoftwareConfigResources.getInstance().stylesheet_components
@@ -82,17 +82,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.welcome_widget)
 
         self.welcome_widget.transition_signal.connect(self.select_folder)
-
-        # self.ui.load_button.clicked.connect(self.select_folder)
-        # self.ui.seg_button.clicked.connect(self.emit_segmentation_signal)
-
-    # def show_main_content(self):
-    #     # Replace the central widget with the main content
-
-    #     self.ui = Ui_MainWindow()
-    #     self.ui.setupUi(self)
-
-    #     self.setCentralWidget(self.ui)
 
     def set_dark_palette(self):
         palette = QPalette()
@@ -265,6 +254,7 @@ class MainWindow(QMainWindow):
             # Button for saving
             self.save_button = QPushButton("Save Results")
             self.save_button.setObjectName("saveButton")
+            self.save_button.clicked.connect(self.emit_save_signal)
             self.right_panel_layout.addWidget(self.save_button)
 
             # Add stretcher to push buttons to the top
@@ -303,6 +293,10 @@ class MainWindow(QMainWindow):
     def emit_segmentation_signal(self):
         if self.has_folder_been_selected():
             self.seg_button_signal.emit()
+
+    def emit_save_signal(self):
+        if self.has_folder_been_selected():
+            self.save_button_signal.emit()
 
     def update_time_slider_range(self, num_frames):
         """Update the time slider to reflect the number of temporal frames."""

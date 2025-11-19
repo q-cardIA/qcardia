@@ -29,6 +29,7 @@ class DICOMController:
 
         self.view.load_button_signal.connect(self.load_dicom_files)
         self.view.seg_button_signal.connect(self.run_segmentation)
+        self.view.save_button_signal.connect(self.save_segmentation)
         self.view.time_frame_changed_signal.connect(self.set_time_frame)
 
         # Store all temporal frames
@@ -39,8 +40,9 @@ class DICOMController:
         self.temporal_segmentations = []  # List of 3D label maps per time frame
 
     def load_dicom_files(self, folder_path):
+        self.folder_path = Path(folder_path)
         self.model.load_dicom_files(folder_path)
-        self.cine_seq = CineSeries(Path(folder_path))
+        self.cine_seq = CineSeries(Path(folder_path), batch_size=200)
 
         # dicom_files = self.model.dicom_files
         self.display_dicom_images()
@@ -88,33 +90,6 @@ class DICOMController:
         # Update the time slider range in the view
         if hasattr(self.view, "update_time_slider_range"):
             self.view.update_time_slider_range(self.num_time_frames)
-
-    # def display_dicom_images(self):
-
-    #     dicom_data = self.cine_seq.slice_data["slice06"]["pixel_array"][1]
-
-    #     int_min = 0
-    #     int_max = 1000
-    #     # int_min = dicom_data.WindowCenter - 0.5 * dicom_data.WindowWidth
-    #     # int_max = dicom_data.WindowCenter + 0.5 * dicom_data.WindowWidth
-    #     normalised_array = np.clip(dicom_data, int_min, int_max)
-    #     normalised_array = (
-    #         (normalised_array - int_min) / (int_max - int_min) * 255
-    #     ).astype(np.uint8)
-
-    #     dicom_scene = QGraphicsScene()
-    #     pixmap = QPixmap.fromImage(
-    #         QImage(
-    #             normalised_array,
-    #             normalised_array.shape[0],
-    #             normalised_array.shape[0],
-    #             QImage.Format_Grayscale8,
-    #         )
-    #     )
-    #     self.normalised_array = normalised_array
-    #     self.view.update_display(normalised_array)
-    #     # dicom_scene.addPixmap(pixmap)
-    #     # self.view.ui.graphicsView.setScene(dicom_scene)
 
     def run_segmentation(self):
         """Predict segmentation for the cine sequence and prepare per-time overlays.
@@ -234,11 +209,6 @@ class DICOMController:
             )
 
     # Legacy per-slice display removed; segmentation overlays update
-    # dynamically as the slice index changes in the view.
-    def display_segmentation(self, cine_segmentation):
-        """Deprecated: dynamic contour overlay handled by CentralDisplayAreaWidget."""
-        return
-
     def set_time_frame(self, time_index):
         """Update the displayed volume to the specified time frame."""
         if 0 <= time_index < self.num_time_frames and self.temporal_volumes:
@@ -262,3 +232,64 @@ class DICOMController:
                 self.view.display_area_widget.set_segmentation_volume(
                     self.temporal_segmentations[idx]
                 )
+
+    def save_segmentation(self):
+        """Save the segmentation results to default results folder."""
+        from PySide6.QtWidgets import QMessageBox
+
+        from view.utils import SoftwareConfigResources
+
+        # Get dark theme colors
+        colors = SoftwareConfigResources.getInstance().stylesheet_components
+        dialog_style = f"""
+            QMessageBox {{
+                background-color: {colors["Color2"]};
+                color: {colors["Color7"]};
+            }}
+            QMessageBox QPushButton {{
+                background-color: {colors["Color3"]};
+                color: {colors["Color7"]};
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                min-width: 80px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {colors["Color4"]};
+            }}
+            QMessageBox QLabel {{
+                color: {colors["Color7"]};
+            }}
+        """
+
+        if not hasattr(self.cine_seq, "_segmentation_prediction"):
+            msg = QMessageBox(self.view)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("No Segmentation")
+            msg.setText("No segmentation to save. Please run segmentation first.")
+            msg.setStyleSheet(dialog_style)
+            msg.exec()
+            return False
+
+        # Default to results folder next to the DICOM folder
+        output_path = self.folder_path.parent / "results" / self.folder_path.name
+
+        try:
+            self.cine_seq.save_predictions(Path(output_path))
+            logging.info(f"Segmentation saved to {output_path}")
+            msg = QMessageBox(self.view)
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("Save Successful")
+            msg.setText(f"Segmentation saved successfully to:\n{output_path}")
+            msg.setStyleSheet(dialog_style)
+            msg.exec()
+            return True
+        except Exception as e:
+            logging.error(f"Failed to save segmentation: {e}")
+            msg = QMessageBox(self.view)
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle("Save Failed")
+            msg.setText(f"Failed to save segmentation:\n{str(e)}")
+            msg.setStyleSheet(dialog_style)
+            msg.exec()
+            return False
