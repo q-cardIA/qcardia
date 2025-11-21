@@ -276,6 +276,7 @@ class MainWindow(QMainWindow):
             self.load_button_signal.emit(folder_path)
 
     def update_display(self, image_stack):
+        """Update display with new image stack, centering the view."""
         if hasattr(self, "display_area_widget"):
             self.display_area_widget.displayed_image = image_stack
             self.display_area_widget.displayed_image_uid = None
@@ -286,6 +287,32 @@ class MainWindow(QMainWindow):
             ]
             self.display_area_widget.point_clicker_position = center_indices
             self.display_area_widget.update_viewers_image()
+
+    def update_display_with_position(self, image_stack, preserve_position=False):
+        """Update display, optionally preserving crosshair position."""
+        if hasattr(self, "display_area_widget"):
+            da = self.display_area_widget
+
+            if preserve_position:
+                # Get current position and clamp to new volume bounds
+                pos = getattr(da, "point_clicker_position", [0, 0, 0])
+                x = min(max(0, pos[0]), image_stack.shape[0] - 1)
+                y = min(max(0, pos[1]), image_stack.shape[1] - 1)
+                z = min(max(0, pos[2]), image_stack.shape[2] - 1)
+                da.displayed_image = image_stack
+                da.point_clicker_position = [x, y, z]
+            else:
+                # Center the view
+                center_indices = [
+                    image_stack.shape[0] // 2,
+                    image_stack.shape[1] // 2,
+                    image_stack.shape[2] // 2,
+                ]
+                da.displayed_image = image_stack
+                da.point_clicker_position = center_indices
+
+            da.displayed_image_uid = None
+            da.update_viewers_image()
 
     def has_folder_been_selected(self):
         return self.folder_selected

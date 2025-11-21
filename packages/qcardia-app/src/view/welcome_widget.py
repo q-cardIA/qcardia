@@ -76,7 +76,7 @@ class WelcomeWidget(QWidget):
 
     def __bottom_logo_panel_interface(self):
         self.bottom_logo_panel_layout = QHBoxLayout()
-        self.bottom_logo_panel_layout.setContentsMargins(0, 20, 30, 20)
+        self.bottom_logo_panel_layout.setContentsMargins(0, 30, 30, 30)
         self.bottom_logo_panel_label = QLabel()
         self.bottom_logo_panel_label.setPixmap(
             QPixmap(
@@ -110,7 +110,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_community_layout = QHBoxLayout()
         self.right_panel_community_layout.setSpacing(5)
         self.right_panel_community_layout.setContentsMargins(50, 0, 50, 0)
-        self.right_panel_community_pushbutton = QPushButton("Research community")
+        self.right_panel_community_pushbutton = QPushButton("  Research community")
         self.right_panel_community_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -129,7 +129,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_about_layout = QHBoxLayout()
         self.right_panel_about_layout.setSpacing(5)
         self.right_panel_about_layout.setContentsMargins(50, 25, 50, 0)
-        self.right_panel_about_software_pushbutton = QPushButton("About q-cardIA")
+        self.right_panel_about_software_pushbutton = QPushButton("  About q-cardIA")
         self.right_panel_about_software_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -148,7 +148,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_helpwiki_layout = QHBoxLayout()
         self.right_panel_helpwiki_layout.setSpacing(5)
         self.right_panel_helpwiki_layout.setContentsMargins(50, 25, 50, 0)
-        self.right_panel_helpwiki_pushbutton = QPushButton("Tutorials and wiki")
+        self.right_panel_helpwiki_pushbutton = QPushButton("  Tutorials and wiki")
         self.right_panel_helpwiki_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -165,7 +165,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_issues_layout = QHBoxLayout()
         self.right_panel_issues_layout.setSpacing(5)
         self.right_panel_issues_layout.setContentsMargins(50, 25, 50, 0)
-        self.right_panel_issues_pushbutton = QPushButton("Issues and suggestions")
+        self.right_panel_issues_pushbutton = QPushButton("  Issues and suggestions")
         self.right_panel_issues_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -173,7 +173,7 @@ class WelcomeWidget(QWidget):
                         os.path.dirname(os.path.realpath(__file__)),
                         "../../assets/images/github-icon.png",
                     )
-                )
+                ).scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
         )
         self.right_panel_issues_layout.addWidget(self.right_panel_issues_pushbutton)
@@ -198,7 +198,7 @@ class WelcomeWidget(QWidget):
         self.left_panel_single_layout = QHBoxLayout()
         self.left_panel_single_layout.setSpacing(5)
         self.left_panel_single_layout.setContentsMargins(50, 0, 50, 0)
-        self.left_panel_single_patient_pushbutton = QPushButton("Single patient mode")
+        self.left_panel_single_patient_pushbutton = QPushButton("  Single patient mode")
         self.left_panel_single_patient_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -219,17 +219,17 @@ class WelcomeWidget(QWidget):
         self.setBaseSize(self.parent.baseSize())
 
         # Central area
-        self.central_label.setMinimumSize(400, 400)
+        self.central_label.setMinimumSize(400, 550)
         self.central_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # Top title
-        self.top_logo_panel_label.setMinimumSize(400, 80)
+        self.top_logo_panel_label.setMinimumSize(400, 120)
         self.top_logo_panel_label.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Fixed
         )
 
         # Bottom logo
-        self.bottom_logo_panel_label.setMinimumSize(100, 150)
+        self.bottom_logo_panel_label.setMinimumSize(100, 200)
         self.bottom_logo_panel_label.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Fixed
         )
@@ -308,9 +308,10 @@ class WelcomeWidget(QWidget):
             + software_ss["Color3"]
             + """;
         font-size: 22px;
-        text-align: center;
+        text-align: left;
         border-radius:12px;
         padding: 16px;
+        padding-left: 20px;
         margin-left:5px;
         margin-right:5px;
         font-weight:bold}
@@ -332,9 +333,10 @@ class WelcomeWidget(QWidget):
             + software_ss["Color3"]
             + """;
         font-size: 22px;
-        text-align: center;
+        text-align: left;
         border-radius:12px;
         padding: 16px;
+        padding-left: 20px;
         margin-left:5px;
         margin-right:5px;
         font-weight:bold}
@@ -356,9 +358,10 @@ class WelcomeWidget(QWidget):
             + software_ss["Color3"]
             + """;
         font-size: 22px;
-        text-align: center;
+        text-align: left;
         border-radius:12px;
         padding: 16px;
+        padding-left: 20px;
         margin-left:5px;
         margin-right:5px;
         font-weight:bold}
@@ -380,9 +383,10 @@ class WelcomeWidget(QWidget):
             + software_ss["Color3"]
             + """;
         font-size: 22px;
-        text-align: center;
+        text-align: left;
         border-radius:12px;
         padding: 16px;
+        padding-left: 20px;
         margin-left:5px;
         margin-right:5px;
         font-weight:bold}
@@ -422,9 +426,10 @@ class WelcomeWidget(QWidget):
             + software_ss["Process"]
             + """;
         font-size: 22px;
-        text-align: center;
+        text-align: left;
         border-radius:12px;
         padding: 16px;
+        padding-left: 20px;
         margin-left:5px;
         margin-right:5px;
         font-weight:bold}

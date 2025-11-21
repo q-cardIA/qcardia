@@ -372,14 +372,7 @@ class CustomQGraphicsView(QGraphicsView):
         if overlay_image is None:
             self.overlay_data = None
         else:
-            # Apply the same transform as the base image
-            # (horizontal flip for display)
-            if overlay_image.ndim == 3 and overlay_image.shape[2] in (3, 4):
-                # Color/RGBA overlay
-                self.overlay_data = overlay_image[:, ::-1, :].copy()
-            else:
-                # Unexpected shape; keep a safe copy
-                self.overlay_data = overlay_image.copy()
+            self.overlay_data = overlay_image.copy()
         # Redraw the slice view to composite overlay
         if hasattr(self, "display_2d") and self.display_2d is not None:
             self.update_slice_view(self.display_2d)
@@ -650,7 +643,9 @@ class CustomQGraphicsView(QGraphicsView):
         if self.image_item is None or self.image_item.pixmap().isNull():
             return
 
-        h, w = overlay_image.shape
+        # Mirror horizontally to match image display orientation
+        # overlay_image = np.fliplr(overlay_image)
+        h, w = overlay_image.shape  # h=rows(height), w=cols(width) in numpy
         bytes_per_line = 3 * w
         color_image = np.stack(
             [np.zeros(overlay_image.shape, dtype=np.uint8)] * 3, axis=-1
@@ -660,6 +655,7 @@ class CustomQGraphicsView(QGraphicsView):
         color_image[..., 1][overlay_image != 0] = color.green()
         color_image[..., 2][overlay_image != 0] = color.blue()
 
+        # QImage expects (width, height) but numpy shape is (height, width)
         qimage = QImage(color_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
         qimage = qimage.convertToFormat(QImage.Format_RGBA8888)
 
