@@ -1,9 +1,9 @@
 """
-This module contains the BaseSeries class which is used for handling series of 
+This module contains the BaseSeries class which is used for handling series of
 DICOM images.
 
-The BaseSeries class provides methods for loading DICOM data from a folder, 
-preprocessing the data, running a model on the data, and postprocessing the model 
+The BaseSeries class provides methods for loading DICOM data from a folder,
+preprocessing the data, running a model on the data, and postprocessing the model
 output. The model is specified by a path to a Weights & Biases run.
 
 Classes:
@@ -729,28 +729,28 @@ class CineSeries(BaseSeries):
                 contours, _ = cv2.findContours(
                     cv2.inRange(epi, 1, 1), cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE
                 )
-                epi_contour = contours[0][:, 0, :]
-                septum = []
-                dilate_iter = 1
-                while len(septum) == 0 and dilate_iter < 6:
-                    # Dilate the RV till it intersects with LV epicardium.
-                    # Normally, this is fulfilled after just one iteration.
-                    rv_dilate = cv2.dilate(
-                        the_rv,
-                        np.ones((3, 3), dtype=np.uint8),
-                        iterations=dilate_iter,
-                    )
-                    dilate_iter += 1
-                    for y, x in epi_contour:
-                        if rv_dilate[x, y] == 1:
-                            septum += [[x, y]]
                 try:
-                    tmp_rv_insertion_pts.append(
-                        [
-                            [septum[0][1], septum[0][0]],
-                            [septum[-1][1], septum[-1][0]],
-                        ]
-                    )
+                    epi_contour = contours[0][:, 0, :]
+                    septum = []
+                    dilate_iter = 1
+                    while len(septum) == 0 and dilate_iter < 6:
+                        # Dilate the RV till it intersects with LV epicardium.
+                        # Normally, this is fulfilled after just one iteration.
+                        rv_dilate = cv2.dilate(
+                            the_rv,
+                            np.ones((3, 3), dtype=np.uint8),
+                            iterations=dilate_iter,
+                        )
+                        dilate_iter += 1
+                        for y, x in epi_contour:
+                            if rv_dilate[x, y] == 1:
+                                septum += [[x, y]]
+                        tmp_rv_insertion_pts.append(
+                            [
+                                [septum[0][1], septum[0][0]],
+                                [septum[-1][1], septum[-1][0]],
+                            ]
+                        )
                 except:
                     tmp_rv_insertion_pts.append(
                         [
