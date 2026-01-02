@@ -1,18 +1,20 @@
 """
-This module contains the BaseSeries class which is used for handling series of 
+This module contains the BaseSeries class which is used for handling series of
 DICOM images.
 
-The BaseSeries class provides methods for loading DICOM data from a folder, 
-preprocessing the data, running a model on the data, and postprocessing the model 
+The BaseSeries class provides methods for loading DICOM data from a folder,
+preprocessing the data, running a model on the data, and postprocessing the model
 output. The model is specified by a path to a Weights & Biases run.
 
 Classes:
     BaseSeries: A base class for handling sequences of DICOM images.
 """
 
+from copy import deepcopy
 from pathlib import Path
 from typing import List
 
+import cv2
 import nibabel as nib
 import numpy as np
 import pydicom
@@ -47,9 +49,13 @@ class BaseSeries:
 
     def __init__(self, folder: Path, batch_size: int = 50):
         self.folder = folder
-        self.slice_data, self.number_of_slices, self.rows, self.columns = (
-            self._load_data()
-        )
+        (
+            self.slice_data,
+            self.number_of_slices,
+            self.number_of_temporal_positions,
+            self.rows,
+            self.columns,
+        ) = self._load_data()
         self.inference_dict = {}
         self.batch_size = batch_size
         self.base_slice_num = 1
@@ -101,7 +107,7 @@ class BaseSeries:
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
         """
-        preprocessed_slices = self._preproccess_slices()
+        preprocessed_slices = self._preproccess_slices(self._get_array())
         config = self._get_config(wandb_run_path)
         self.inference_dict["target_pixdim"] = torch.tensor(
             config["data"]["target_pixdim"]
@@ -188,7 +194,7 @@ class BaseSeries:
 
         slices_dict = {}
         number_of_slices = len(the_slice_positions)
-
+        number_of_temporal_positions = len(temporal_positions) // number_of_slices
         # for each slice store the pixel array, slice position, and meta data
         # order based on temporal position
         for i in range(number_of_slices):
@@ -224,6 +230,7 @@ class BaseSeries:
         return (
             slices_dict,
             number_of_slices,
+            number_of_temporal_positions,
             all_dicom_data[0].Rows,
             all_dicom_data[0].Columns,
         )
@@ -259,7 +266,7 @@ class BaseSeries:
 
         return slice_index, unique_positions
 
-    def _preproccess_slices(self):
+    def _preproccess_slices(self, pixel_array, motion_track=False):
         """
         Preprocesses the slices by performing various operations such as reshaping,
         border stripping, normalization, and conversion to tensors.
@@ -267,9 +274,11 @@ class BaseSeries:
         Returns:
             torch.Tensor: The preprocessed pixel array without borders.
         """
-        pixel_array = self._get_array()
         self.inference_dict["original_shape"] = torch.tensor(pixel_array.shape)
-        reshaped_pixel_array = self._reshape_array(pixel_array)
+        if not motion_track:
+            reshaped_pixel_array = self._reshape_array(pixel_array)
+        else:
+            reshaped_pixel_array = deepcopy(pixel_array)
 
         start0, stop0, start1, stop1, borderless_pixel_array = self._strip_borders(
             reshaped_pixel_array
@@ -489,7 +498,7 @@ class BaseSeries:
             padding_mode="border",
         )
 
-    def _postprocess_output(self, tensor: torch.Tensor):
+    def _postprocess_output(self, tensor: torch.Tensor, motion_track=False):
         """
         Postprocesses the output tensor and returns the segmentation in the
         original shape.
@@ -501,15 +510,27 @@ class BaseSeries:
             np.ndarray: The segmentation in the original shape.
         """
 
-        original_shape_segmentation = np.zeros(
-            (
-                self.inference_dict["number_of_slices"],
-                self.inference_dict["original_shape"][-2],
-                self.inference_dict["original_shape"][-1],
-            ),
-            dtype=np.uint8,
-        )
-
+        if not motion_track:
+            the_type = np.uint8
+            original_shape_segmentation = np.zeros(
+                (
+                    self.inference_dict["number_of_slices"],
+                    self.inference_dict["original_shape"][-2],
+                    self.inference_dict["original_shape"][-1],
+                ),
+                dtype=the_type,
+            )
+        else:
+            the_type = np.float32
+            original_shape_segmentation = np.zeros(
+                (
+                    self.inference_dict["number_of_slices"],
+                    2,
+                    self.inference_dict["original_shape"][-2],
+                    self.inference_dict["original_shape"][-1],
+                ),
+                dtype=the_type,
+            )
         original_shape_segmentation[
             ...,
             self.inference_dict["border_indices"][0] : self.inference_dict[
@@ -519,7 +540,7 @@ class BaseSeries:
                 "border_indices"
             ][3],
         ] = (
-            tensor.squeeze().numpy().astype(np.uint8)
+            tensor.squeeze().numpy().astype(the_type)
         )
 
         return original_shape_segmentation.reshape(
@@ -537,6 +558,120 @@ class CineSeries(BaseSeries):
         self.mid_slice_num = 6
         self.apex_slice_num = 10
 
+    def _forward_motion(self, model: torch.nn.Module, tensor: torch.Tensor):
+        """
+        Forward the pixel array through the model.
+
+        Args:
+            model (torch.nn.Module): The model to use for inference.
+            tensor (torch.Tensor): The pixel array to forward through the model.
+
+        Returns:
+            torch.Tensor: The output of the model.
+        """
+        model_output = torch.zeros(
+            self.inference_dict["number_of_slices"],
+            self.inference_dict["nr_output_classes"],
+            self.inference_dict["target_size"][0],
+            self.inference_dict["target_size"][1],
+        )
+
+        model.eval()
+        with torch.no_grad():
+            for i in range(
+                0, self.inference_dict["number_of_slices"] // self.batch_size + 1
+            ):
+                model_output[i * self.batch_size : (i + 1) * self.batch_size] = model(
+                    tensor[i * self.batch_size : (i + 1) * self.batch_size]
+                )[0]
+
+        return model_output
+
+    def _get_motion_array(self):
+        """
+        ...
+        """
+
+        # return np.asarray(
+        #     [
+        #         np.stack(
+        #             (
+        #                 self.slice_data[f"slice{i+1:02}"]["pixel_array"][0],
+        #                 self.slice_data[f"slice{i+1:02}"]["pixel_array"][self.es_time],
+        #             ),
+        #             axis=0,
+        #         )
+        #         for i in [self.base_slice_num, self.mid_slice_num, self.apex_slice_num]
+        #     ]
+        # )
+        tmp_array = np.asarray(
+            [
+                [
+                    np.stack(
+                        (
+                            self.slice_data[f"slice{i+1:02}"]["pixel_array"][0],
+                            self.slice_data[f"slice{i+1:02}"]["pixel_array"][t],
+                        ),
+                        axis=0,
+                    )
+                    for t in range(1, self.number_of_temporal_positions)
+                ]
+                for i in [self.base_slice_num, self.mid_slice_num, self.apex_slice_num]
+            ]
+        )
+
+        return tmp_array.reshape(-1, 2, self.rows, self.columns)
+
+    def _run_motion(self, wandb_run_path):
+        preprocessed_slices = self._preproccess_slices(
+            self._get_motion_array(), motion_track=True
+        )
+        config = self._get_config(wandb_run_path)
+        self.inference_dict["target_pixdim"] = torch.tensor(
+            config["data"]["target_pixdim"]
+        )
+        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+        self.inference_dict["grid_sample_modes"] = [
+            config["data"]["image_grid_sample_mode"]
+        ]
+        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
+        the_model = UNet2d(
+            nr_input_channels=config["unet"]["nr_image_channels"],
+            channels_list=config["unet"]["channels_list"],
+            nr_output_classes=config["unet"]["nr_output_classes"],
+            nr_output_scales=config["unet"]["nr_output_scales"],
+        ).to("cpu")
+        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
+        the_model.load_state_dict(model_weights)
+
+        self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
+            self._rescale_tensor(preprocessed_slices)
+        )
+        standardised_tensor = utils.standardise(rescaled_tensor)
+
+        model_output = self._forward_motion(the_model, standardised_tensor)
+        rescale_model_output = self._invert_rescale_tensor(model_output)
+
+        self._deformations = self._postprocess_output(
+            rescale_model_output, motion_track=True
+        )
+
+    def motion_track(self, wandb_run_path: Path) -> np.ndarray:
+        """
+        Predict the segmentation for the DICOM data using the specified model.
+
+        Args:
+            wandb_run_path (Path): The path to the WandB run directory.
+
+        Returns:
+            np.ndarray: ...
+        """
+        self._compute_primary_slices()
+        self._compute_marker_points()
+
+        self._run_motion(wandb_run_path)
+        return self._deformations
+
     def compute_volume_curve(self, structure="lv"):
 
         pixdim = self._get_pixel_spacing()
@@ -552,26 +687,96 @@ class CineSeries(BaseSeries):
 
     def compute_ejection_fraction(self, curve):
         ed_vol = curve[0]
-        es_vol = np.amin(curve)
+        self.es_time = np.argmin(curve)
+        es_vol = curve[self.es_time]
         return (ed_vol - es_vol) / ed_vol
 
-    def _compute_rv_insertion_points(self):
-        self.lv_center_point = []
+    def _compute_marker_points(self):
+        self._lv_center_points = []
+        self._rv_center_points = []
+        self._rv_insertion_points = []
         for slice_num in [self.base_slice_num, self.mid_slice_num, self.apex_slice_num]:
-            tmp_center_pts = []
+            tmp_lv_center_pts = []
+            tmp_rv_center_pts = []
+            tmp_rv_insertion_pts = []
             for t in range(self._segmentation_prediction.shape[1]):
                 the_myo = self._myo[slice_num, t]
                 the_rv = self._rv[slice_num, t]
                 the_lv = self._lv[slice_num, t]
-                find_contours(the_myo + the_lv)
-                tmp_center_pts.append(
-                    [
-                        int(np.mean(np.where(the_lv > 0)[2])),
-                        int(np.mean(np.where(the_lv > 0)[3])),
-                    ]
+
+                try:
+                    tmp_lv_center_pts.append(
+                        [
+                            int(np.mean(np.where(the_lv > 0)[0])),
+                            int(np.mean(np.where(the_lv > 0)[1])),
+                        ]
+                    )
+                    tmp_rv_center_pts.append(
+                        [
+                            int(np.mean(np.where(the_rv > 0)[0])),
+                            int(np.mean(np.where(the_rv > 0)[1])),
+                        ]
+                    )
+                except:
+                    tmp_lv_center_pts.append([0, 0])
+                    tmp_rv_center_pts.append([0, 0])
+
+                self._lv_center_points.append(tmp_lv_center_pts)
+                self._rv_center_points.append(tmp_rv_center_pts)
+
+                epi = the_lv + the_myo
+                # Extract epicardial contour
+                contours, _ = cv2.findContours(
+                    cv2.inRange(epi, 1, 1), cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE
                 )
-            self.lv_center_point.append(tmp_center_pts)
-        self._rv_insertion_points = [[0, 0], [1, 1]]
+                try:
+                    epi_contour = contours[0][:, 0, :]
+                    septum = []
+                    dilate_iter = 1
+                    while len(septum) == 0 and dilate_iter < 6:
+                        # Dilate the RV till it intersects with LV epicardium.
+                        # Normally, this is fulfilled after just one iteration.
+                        rv_dilate = cv2.dilate(
+                            the_rv,
+                            np.ones((3, 3), dtype=np.uint8),
+                            iterations=dilate_iter,
+                        )
+                        dilate_iter += 1
+                        for y, x in epi_contour:
+                            if rv_dilate[x, y] == 1:
+                                septum += [[x, y]]
+                        tmp_rv_insertion_pts.append(
+                            [
+                                [septum[0][1], septum[0][0]],
+                                [septum[-1][1], septum[-1][0]],
+                            ]
+                        )
+                except:
+                    tmp_rv_insertion_pts.append(
+                        [
+                            [0, 0],
+                            [0, 0],
+                        ]
+                    )
+            self._rv_insertion_points.append(tmp_rv_insertion_pts)
+
+    def get_lv_center_points(self):
+        """
+        Find the left ventricular center points.
+        Returns:
+            List[int]: The x and y coordinates of the left ventricular center points.
+        """
+
+        return self._lv_center_points
+
+    def get_rv_center_points(self):
+        """
+        Find the right ventricular center points.
+        Returns:
+            List[int]: The x and y coordinates of the right ventricular center points.
+        """
+
+        return self._rv_center_points
 
     def get_rv_insertion_points(self):
         """
@@ -581,5 +786,4 @@ class CineSeries(BaseSeries):
             List[int]: The x and y coordinates of the right ventricular insertion point.
         """
 
-        self._compute_rv_insertion_points()
         return self._rv_insertion_points
