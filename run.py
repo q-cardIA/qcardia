@@ -22,10 +22,11 @@ patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
 warp_layer = Warp()
 
-for patient in patient_list:
+for patient in patient_list[:1]:
     try:
-        # cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
-        cine_dir = Path(list(patient.glob("*[cC][iI][nN][eE]*"))[0])
+        print(patient)
+        cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
+        # cine_dir = Path(list(patient.glob("*[cC][iI][nN][eE]*"))[0])
         cine_seq = CineSeries(cine_dir, batch_size=200)
         cine_segmentation = cine_seq.predict_segmentation(WANDB_RUN_PATH)
         cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
@@ -58,14 +59,15 @@ from src.qcardia.series import LGESeries
 WANDB_RUN_PATH_CENTER = Path.cwd() / "wandb" / "lge-center"
 WANDB_RUN_PATH_SEG = Path.cwd() / "wandb" / "lge-seg"
 
-# PATH_TO_DATASET = Path.cwd() / "data"
-PATH_TO_DATASET = Path.cwd() / "vida-data-combined"
+PATH_TO_DATASET = Path.cwd() / "data"
+# PATH_TO_DATASET = Path.cwd() / "vida-data-combined"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
-for patient in patient_list:
-    # lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
-    lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
+for patient in patient_list[:1]:
+    print(patient)
+    lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
+    # lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
     lge_seq = LGESeries(lge_dir)
 
     lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)

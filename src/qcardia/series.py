@@ -98,14 +98,16 @@ class BaseSeries:
             seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
             nib.save(seg_nib, output_path / "segmentation.nii")
 
-    def _run_model(self, wandb_run_path: Path) -> None:
+    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
         """
         Runs the model inference on preprocessed slices.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
         """
-        preprocessed_slices = self._preproccess_slices(self._get_array())
+        preprocessed_slices = self._preproccess_slices(
+            self._get_array(image_type=image_type)
+        )
         config = self._get_config(wandb_run_path)
 
         self.inference_dict["target_pixdim"] = torch.tensor(
@@ -902,7 +904,9 @@ class LGESeries(BaseSeries):
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
         """
-        preprocessed_slices = self._preproccess_slices(image_type)
+        preprocessed_slices = self._preproccess_slices(
+            self._get_array(image_type=image_type)
+        )
 
         preprocessed_center_image = center_image[
             self.inference_dict["border_indices"][0] : self.inference_dict[
