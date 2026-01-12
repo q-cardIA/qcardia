@@ -136,3 +136,4 @@ dmypy.json
 *data*/
 wandb/
 *output*/
+*result*/
