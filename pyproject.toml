@@ -4,7 +4,7 @@ version = "0.0.1"
 dependencies = [
     "scipy==1.12.0",
     "scikit-image==0.22.0",
-    "qcardia-models@git+https://github.com/q-cardIA/qcardia-models@v1.0.0"
+    "qcardia-models@git+https://github.com/q-cardIA/qcardia-models@v1.0.0",
     "qcardia-data@git+https://github.com/q-cardIA/qcardia-data@v1.0.0"
 ]
 
