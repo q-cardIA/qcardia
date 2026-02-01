@@ -17,6 +17,7 @@ dependencies = [
     "qcardia-data",
     "qcardia-models",
     "qcardia",
+    "opencv-python>=4.11.0.86",
 ]
 
 [tool.uv.sources]

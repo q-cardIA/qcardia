@@ -6,7 +6,7 @@ import numpy as np
 import pydicom
 import torch
 import yaml
-from qcardia.series import CineSeries
+from qcardia.series import CineSeries, LGESeries
 from qcardia_models.models import UNet2d
 from scipy.ndimage import zoom
 
@@ -15,10 +15,14 @@ class DICOMModel:
     def __init__(self):
         self.dicom_files = []
         self.cine_seq = None
+        self.lge_seq = None
         self.folder_path = None
         self.temporal_volumes = []
         self.temporal_segmentations = []
         self.num_time_frames = 0
+        self.slice_positions = []
+        self.lge_slice_positions = []
+        self.lge_segmentation_volume = None
 
         # Load segmentation model
         self._load_segmentation_model()
@@ -59,6 +63,89 @@ class DICOMModel:
         # Create CineSeries for processing
         self.cine_seq = CineSeries(Path(folder_path), batch_size=200)
 
+    def load_lge_series(self, folder_path):
+        """Load an LGE stack via LGESeries and return a normalized volume."""
+        self.lge_seq = LGESeries(Path(folder_path))
+        volume, slice_positions = self._build_lge_volume()
+        self.lge_slice_positions = slice_positions
+        self.lge_segmentation_volume = None
+        return volume, slice_positions
+
+    def _build_lge_volume(self):
+        if self.lge_seq is None:
+            raise ValueError("No LGE data loaded")
+
+        slice_entries = []
+        for idx in range(self.lge_seq.number_of_slices):
+            key = f"slice{idx+1:02}"
+            slice_info = self.lge_seq.slice_data.get(key)
+            if not slice_info:
+                continue
+            try:
+                image = self._extract_lge_slice_image(slice_info)
+            except Exception:
+                continue
+            position = float(slice_info.get("slice_position", idx))
+            slice_entries.append((position, image))
+
+        if not slice_entries:
+            raise ValueError("LGE stack contains no readable slices")
+
+        slice_entries.sort(key=lambda item: item[0])
+        slice_positions = [float(pos) for pos, _ in slice_entries]
+        volume = np.stack([entry[1] for entry in slice_entries], axis=0)
+        normalized = self._normalize_lge_volume(volume)
+        return normalized, slice_positions
+
+    @staticmethod
+    def _extract_lge_slice_image(slice_info):
+        image = slice_info.get("psir_array")
+        if image is None:
+            pixel_array = slice_info.get("pixel_array")
+            if isinstance(pixel_array, list):
+                if not pixel_array:
+                    raise ValueError("Empty pixel array for slice")
+                image = pixel_array[0]
+            else:
+                image = pixel_array
+        return np.asarray(image, dtype=np.float32)
+
+    @staticmethod
+    def _normalize_lge_volume(volume):
+        if volume.size == 0:
+            raise ValueError("Empty LGE volume")
+
+        lower = np.percentile(volume, 1)
+        upper = np.percentile(volume, 99)
+        if np.isclose(upper, lower):
+            upper = lower + 1.0
+        clipped = np.clip(volume, lower, upper)
+        min_val = clipped.min()
+        max_val = clipped.max()
+        denom = max(max_val - min_val, 1e-6)
+        scaled = (clipped - min_val) / denom
+        return (scaled * 255.0).astype(np.uint8)
+
+    def predict_lge_segmentation(self):
+        """Run segmentation for the loaded LGE stack."""
+        if self.lge_seq is None:
+            raise ValueError("No LGE data loaded")
+
+        segmentation = self.lge_seq.predict_segmentation(self.wandb_run_path)
+        seg_arr = np.asarray(segmentation)
+
+        if seg_arr.ndim == 4:
+            seg_arr = seg_arr[:, 0, :, :]
+        seg_arr = np.squeeze(seg_arr)
+
+        if seg_arr.ndim != 3:
+            raise ValueError(
+                f"Unexpected LGE segmentation shape {seg_arr.shape}; expected (Z,H,W)"
+            )
+
+        self.lge_segmentation_volume = seg_arr.astype(np.uint8)
+        return self.lge_segmentation_volume
+
     def apply_window(self, image, center, width):
         """Apply window/level to image for display."""
         min_val = center - width / 2
@@ -80,15 +167,24 @@ class DICOMModel:
         first_key = sorted(self.cine_seq.slice_data.keys())[0]
         self.num_time_frames = len(self.cine_seq.slice_data[first_key]["pixel_array"])
 
+        # Sort slices by their physical position so scrolling respects anatomy
+        slice_entries = []
+        for idx, key in enumerate(sorted(self.cine_seq.slice_data.keys())):
+            slice_meta = self.cine_seq.slice_data[key]["meta_data"][0]
+            position = self._extract_slice_position(slice_meta, idx)
+            slice_entries.append(
+                (position, self.cine_seq.slice_data[key]["pixel_array"])
+            )
+
+        slice_entries.sort(key=lambda item: item[0])
+        self.slice_positions = [float(entry[0]) for entry in slice_entries]
+
         # Build temporal volumes
         self.temporal_volumes = []
         zoom_factors = [1.0, 1.0, 1.0]
 
         for time_idx in range(self.num_time_frames):
-            slices = [
-                self.cine_seq.slice_data[key]["pixel_array"][time_idx]
-                for key in sorted(self.cine_seq.slice_data)
-            ]
+            slices = [entry[1][time_idx] for entry in slice_entries]
             image_stack = np.stack(slices, axis=0)
             stack_resampled = self.apply_window(
                 zoom(image_stack, zoom_factors, order=1), center, width
@@ -96,6 +192,32 @@ class DICOMModel:
             self.temporal_volumes.append(stack_resampled)
 
         return self.temporal_volumes, self.num_time_frames
+
+    @staticmethod
+    def _extract_slice_position(meta, fallback_index):
+        """Compute a scalar slice position along the slice normal."""
+
+        try:
+            ipp = np.array(meta.ImagePositionPatient, dtype=float)
+            iop = np.array(meta.ImageOrientationPatient, dtype=float)
+            row = iop[:3]
+            col = iop[3:]
+            normal = np.cross(row, col)
+            norm = np.linalg.norm(normal)
+            if norm > 0:
+                normal /= norm
+                return float(np.dot(ipp, normal))
+        except Exception:
+            pass
+
+        for attr in ("SliceLocation", "InstanceNumber"):
+            if hasattr(meta, attr):
+                try:
+                    return float(getattr(meta, attr))
+                except Exception:
+                    continue
+
+        return float(fallback_index)
 
     def predict_segmentation(self):
         """Run segmentation prediction and organize results by time frame."""

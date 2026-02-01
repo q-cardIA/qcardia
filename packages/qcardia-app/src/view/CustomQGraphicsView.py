@@ -7,7 +7,6 @@ import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QGraphicsItem,
     QGraphicsOpacityEffect,
     QGraphicsPixmapItem,
     QGraphicsScene,
@@ -277,40 +276,30 @@ class CustomQGraphicsView(QGraphicsView):
         view_height = self.height()
         view_width = self.width()
 
-        # Only update lines if they exist
+        # Remove any existing crosshair lines before drawing fresh ones
         if self.vertical_line is not None:
-            if self.view_type == "sagittal":
-                # In sagittal view, vertical line moves up/down (y)
-                self.vertical_line.setLine(x, 0, x, view_height)
-            else:
-                # In axial and coronal views, vertical line moves left/right (x)
-                self.vertical_line.setLine(x, 0, x, view_height)
+            line_scene = self.vertical_line.scene()
+            if line_scene is not None:
+                line_scene.removeItem(self.vertical_line)
+            self.vertical_line = None
 
         if self.horizontal_line is not None:
-            if self.view_type == "coronal":
-                # In coronal view, horizontal line moves up/down (y)
-                self.horizontal_line.setLine(0, y, view_width, y)
-            else:
-                # In axial and sagittal views, horizontal line moves up/down (y)
-                self.horizontal_line.setLine(0, y, view_width, y)
+            line_scene = self.horizontal_line.scene()
+            if line_scene is not None:
+                line_scene.removeItem(self.horizontal_line)
+            self.horizontal_line = None
 
-        # If lines don't exist and we have a scene, create them
-        if self.scene and (self.vertical_line is None or self.horizontal_line is None):
+        # Draw fresh crosshair lines that reflect the latest position
+        if self.scene:
             pen = QPen(QColor(60, 255, 137))
             pen.setStyle(Qt.DashLine)
             pen.setWidth(2)
 
-            if self.vertical_line is None:
-                self.vertical_line = self.scene.addLine(x, 0, x, view_height, pen)
-                self.vertical_line.setFlag(QGraphicsItem.ItemIsMovable)
-                self.vertical_line.setFlag(QGraphicsItem.ItemIsSelectable)
-                self.vertical_line.setData(0, "vertical")
+            self.vertical_line = self.scene.addLine(x, 0, x, view_height, pen)
+            self.vertical_line.setZValue(100)
 
-            if self.horizontal_line is None:
-                self.horizontal_line = self.scene.addLine(0, y, view_width, y, pen)
-                self.horizontal_line.setFlag(QGraphicsItem.ItemIsMovable)
-                self.horizontal_line.setFlag(QGraphicsItem.ItemIsSelectable)
-                self.horizontal_line.setData(0, "horizontal")
+            self.horizontal_line = self.scene.addLine(0, y, view_width, y, pen)
+            self.horizontal_line.setZValue(100)
 
     def dragEnterEvent(self, event):
         entered_content_raw = event.mimeData().urls()

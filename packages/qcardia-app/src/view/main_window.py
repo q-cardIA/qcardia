@@ -13,76 +13,31 @@ from PySide6.QtWidgets import (
 )
 
 from view.CentralDisplayAreaWidget import CentralDisplayAreaWidget
-from view.utils import SoftwareConfigResources
+from view.NavigationPanelWidget import NavigationPanelWidget
+from view.SidebarWidget import SidebarWidget
 from view.welcome_widget import WelcomeWidget
 
 
 class MainWindow(QMainWindow):
 
     load_button_signal = Signal(str)
+    load_lge_button_signal = Signal(str)
     seg_button_signal = Signal()
+    lge_seg_button_signal = Signal()
     save_button_signal = Signal()
     time_frame_changed_signal = Signal(int)
 
     def __init__(self):
-        super(MainWindow, self).__init__()
+        super().__init__()
         self.folder_selected = False
-
-        # Set default window size
-        self.resize(1400, 900)
-        self.setMinimumSize(1000, 700)
-
-        # Set up the stylesheet for the application using shared dark theme colors
-        colors = SoftwareConfigResources.getInstance().stylesheet_components
-        self.setStyleSheet(
-            """
-            MainWindow {
-                background-color: %s;
-            }
-            #analysisRightPanel {
-                background-color: %s;
-                border: none;
-            }
-            QPushButton {
-                background-color: %s;
-                color: %s;
-                border: none;
-                padding: 8px;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: %s;
-            }
-            QPushButton:pressed {
-                background-color: %s;
-            }
-            #segButton {
-                background-color: %s;
-            }
-            #segButton:hover {
-                background-color: %s;
-            }
-        """
-            % (
-                colors["Color2"],
-                colors["Color2"],
-                colors["Color3"],
-                colors["Color7"],
-                colors["Color4"],
-                colors["Color5"],
-                colors["Process"],
-                colors["Process_pressed"],
-            )
-        )
-
         # Create welcome widget first, then set application palette so it applies to all widgets
         self.welcome_widget = WelcomeWidget(self)
         self.set_dark_palette()
         self.setCentralWidget(self.welcome_widget)
-
         # Welcome transitions to analysis UI (data loaded later from left panel)
         self.welcome_widget.transition_signal.connect(self.build_analysis_interface)
+        # Default to full-screen so the welcome layout fills the display
+        self.setWindowState(Qt.WindowMaximized)
 
     def set_dark_palette(self):
         palette = QPalette()
@@ -97,79 +52,111 @@ class MainWindow(QMainWindow):
 
     def build_analysis_interface(self):
         """Construct analysis UI without loading data."""
-        self.right_panel = QWidget()
-        self.right_panel.setObjectName("analysisRightPanel")
-        self.right_panel.setFixedWidth(200)
-        self.right_panel_layout = QVBoxLayout(self.right_panel)
-        self.right_panel_layout.setSpacing(10)
-        self.right_panel_layout.setContentsMargins(10, 10, 10, 10)
+        # Sidebar
+        self.sidebar = SidebarWidget(self)
+        self.sidebar.load_requested.connect(self.on_load_button_clicked)
+        self.sidebar.load_image_requested.connect(self.on_load_image_clicked)
+        self.sidebar.predict_requested.connect(self.emit_segmentation_signal)
+        self.sidebar.predict_lge_requested.connect(self.emit_lge_segmentation_signal)
+        self.sidebar.save_requested.connect(self.emit_save_signal)
 
+        # Central display (3 orthogonal viewers + empty cell)
+        self.display_area_widget = CentralDisplayAreaWidget(self)
+
+        # Navigation panel (right)
+        self.navigation_panel = NavigationPanelWidget(self)
+
+        # Time controls below central area (keep existing semantics)
+        time_controls_container = QWidget()
+        time_layout = QHBoxLayout(time_controls_container)
+        time_layout.setContentsMargins(6, 4, 6, 4)
+        time_layout.setSpacing(8)
         self.time_label = QLabel("Time Frame: 0 / 0")
-        self.time_label.setStyleSheet("color: white; font-size: 12px;")
-        self.right_panel_layout.addWidget(self.time_label)
-
+        self.time_label.setStyleSheet("color: #E6E6E6; font-size:12px")
         self.time_slider = QSlider(Qt.Horizontal)
         self.time_slider.setMinimum(0)
         self.time_slider.setMaximum(0)
-        self.time_slider.setValue(0)
         self.time_slider.setEnabled(False)
-        self.time_slider.setStyleSheet(
-            """
-            QSlider::groove:horizontal { background: #3a3f4a; height: 8px; border-radius: 4px; }
-            QSlider::handle:horizontal { background: #85aaff; width: 16px; margin: -4px 0; border-radius: 8px; }
-            QSlider::handle:horizontal:hover { background: #a0c0ff; }
-            """
-        )
         self.time_slider.valueChanged.connect(self.on_time_slider_changed)
-        self.right_panel_layout.addWidget(self.time_slider)
-        self.right_panel_layout.addSpacing(20)
+        self.time_slider.setStyleSheet(
+            """QSlider::groove:horizontal {background:#2F3440; height:6px; border-radius:3px;}\nQSlider::handle:horizontal {background:#85aaff; width:14px; margin:-4px 0; border-radius:7px;}\nQSlider::handle:horizontal:hover {background:#a0c0ff;}"""
+        )
+        time_layout.addWidget(self.time_label)
+        time_layout.addWidget(self.time_slider)
 
-        self.seg_button = QPushButton("Run Segmentation")
-        self.seg_button.setObjectName("segButton")
-        self.seg_button.clicked.connect(self.emit_segmentation_signal)
-        self.seg_button.setEnabled(False)
-        self.right_panel_layout.addWidget(self.seg_button)
+        # Top bar
+        self.top_bar = QWidget()
+        self.top_bar.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        top_layout = QHBoxLayout(self.top_bar)
+        top_layout.setContentsMargins(8, 4, 8, 4)
+        top_layout.setSpacing(12)
+        self.toggle_sidebar_btn = QPushButton("Hide Menu")
+        self.toggle_sidebar_btn.setCheckable(True)
+        self.toggle_sidebar_btn.setStyleSheet(
+            "QPushButton{background-color:#2F3440; color:#E6E6E6; border:none; padding:6px 12px; border-radius:4px;}"
+            "QPushButton:hover{background-color:#3d4450;}"
+            "QPushButton:checked{background-color:#3d4450;}"
+        )
+        self.toggle_sidebar_btn.toggled.connect(self._on_toggle_sidebar)
+        self.app_title = QLabel("q-cardIA v0.0.1")
+        self.app_title.setStyleSheet("color:#E6E6E6; font-size:18px; font-weight:bold")
+        top_layout.addWidget(self.toggle_sidebar_btn)
+        top_layout.addWidget(self.app_title)
+        top_layout.addStretch(1)
 
-        self.save_button = QPushButton("Save Results")
-        self.save_button.setObjectName("saveButton")
-        self.save_button.clicked.connect(self.emit_save_signal)
-        self.save_button.setEnabled(False)
-        self.right_panel_layout.addWidget(self.save_button)
-        self.right_panel_layout.addStretch()
+        # Assemble main layout
+        central = QWidget()
+        main_v = QVBoxLayout(central)
+        main_v.setContentsMargins(0, 0, 0, 0)
+        main_v.setSpacing(0)
+        main_v.addWidget(self.top_bar)
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(0)
+        content_row.addWidget(self.sidebar)
+        content_row.addWidget(self.display_area_widget, 1)
+        content_row.addWidget(self.navigation_panel)
+        main_v.addLayout(content_row)
+        main_v.addWidget(time_controls_container)
+        self.setCentralWidget(central)
 
-        self.left_panel = QWidget()
-        self.left_panel.setObjectName("analysisLeftPanel")
-        self.left_panel.setFixedWidth(180)
-        self.left_panel_layout = QVBoxLayout(self.left_panel)
-        self.left_panel_layout.setSpacing(10)
-        self.left_panel_layout.setContentsMargins(10, 10, 10, 10)
-
-        self.load_button = QPushButton("Load Data")
-        self.load_button.clicked.connect(self.on_load_button_clicked)
-        self.left_panel_layout.addWidget(self.load_button)
-        self.left_panel_layout.addStretch()
-
-        self.display_area_widget = CentralDisplayAreaWidget(self)
-
-        self.central_widget = QWidget()
-        self.center_panel_layout = QHBoxLayout(self.central_widget)
-        self.center_panel_layout.setSpacing(0)
-        self.center_panel_layout.setContentsMargins(0, 0, 0, 0)
-        self.center_panel_layout.addWidget(self.left_panel)
-        self.center_panel_layout.addWidget(self.display_area_widget)
-        self.center_panel_layout.addWidget(self.right_panel)
-        self.setCentralWidget(self.central_widget)
+    def _directory_dialog_options(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.ShowDirsOnly
+        options |= (
+            QFileDialog.DontUseNativeDialog
+        )  # use Qt dialog to avoid macOS NSOpenPanel crash
+        return options
 
     def on_load_button_clicked(self):
-        folder_path = QFileDialog.getExistingDirectory(self, "Select Folder")
+        folder_path = QFileDialog.getExistingDirectory(
+            self, "Select Folder", "", self._directory_dialog_options()
+        )
         if not folder_path:
             return
         self.folder_selected = True
-        self.seg_button.setEnabled(True)
-        self.save_button.setEnabled(True)
+        self.sidebar.enable_post_load()
         self.load_button_signal.emit(folder_path)
 
-    def update_display(self, image_stack):
+    def on_load_image_clicked(self):
+        """Prompt for an LGE folder and emit the selection to controllers."""
+        folder_path = QFileDialog.getExistingDirectory(
+            self, "Select DICOM Folder", "", self._directory_dialog_options()
+        )
+        if not folder_path:
+            return
+
+        self.load_lge_button_signal.emit(folder_path)
+
+    def _on_toggle_sidebar(self, checked):
+        if checked:
+            self.sidebar.hide()
+            self.toggle_sidebar_btn.setText("Show Menu")
+        else:
+            self.sidebar.show()
+            self.toggle_sidebar_btn.setText("Hide Menu")
+
+    def update_display(self, image_stack, slice_positions=None):
         """Update display with new image stack, centering the view."""
         if hasattr(self, "display_area_widget"):
             self.display_area_widget.displayed_image = image_stack
@@ -180,9 +167,20 @@ class MainWindow(QMainWindow):
                 image_stack.shape[2] // 2,
             ]
             self.display_area_widget.point_clicker_position = center_indices
+            if (
+                slice_positions is not None
+                and len(slice_positions) == image_stack.shape[0]
+            ):
+                self.display_area_widget.primary_slice_positions = [
+                    float(val) for val in slice_positions
+                ]
+            else:
+                self.display_area_widget.primary_slice_positions = None
             self.display_area_widget.update_viewers_image()
 
-    def update_display_with_position(self, image_stack, preserve_position=False):
+    def update_display_with_position(
+        self, image_stack, preserve_position=False, slice_positions=None
+    ):
         """Update display, optionally preserving crosshair position."""
         if hasattr(self, "display_area_widget"):
             da = self.display_area_widget
@@ -206,6 +204,13 @@ class MainWindow(QMainWindow):
                 da.point_clicker_position = center_indices
 
             da.displayed_image_uid = None
+            if (
+                slice_positions is not None
+                and len(slice_positions) == image_stack.shape[0]
+            ):
+                da.primary_slice_positions = [float(val) for val in slice_positions]
+            else:
+                da.primary_slice_positions = None
             da.update_viewers_image()
 
     def has_folder_been_selected(self):
@@ -214,6 +219,9 @@ class MainWindow(QMainWindow):
     def emit_segmentation_signal(self):
         if self.has_folder_been_selected():
             self.seg_button_signal.emit()
+
+    def emit_lge_segmentation_signal(self):
+        self.lge_seg_button_signal.emit()
 
     def emit_save_signal(self):
         if self.has_folder_been_selected():

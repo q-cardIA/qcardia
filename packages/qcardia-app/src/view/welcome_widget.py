@@ -216,7 +216,17 @@ class WelcomeWidget(QWidget):
         self.left_panel_layout.addStretch(1)
 
     def __set_layout_dimensions(self):
-        self.setBaseSize(self.parent.baseSize())
+        opt = SoftwareConfigResources.getInstance().get_optimal_dimensions()
+        target_size = opt
+        if self.parent is not None:
+            parent_size = self.parent.size()
+            if parent_size.width() > 0 and parent_size.height() > 0:
+                target_size = parent_size
+            else:  # Ensure the main window is at least the optimal dimensions
+                self.parent.resize(opt)
+
+        self.setMinimumSize(target_size)
+        self.resize(target_size)
 
         # Central area
         self.central_label.setMinimumSize(400, 550)

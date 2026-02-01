@@ -13,9 +13,25 @@ class DICOMController:
 
         # Connect signals
         self.view.load_button_signal.connect(self.load_dicom_files)
+        self.view.load_lge_button_signal.connect(self.load_lge_series)
         self.view.seg_button_signal.connect(self.run_segmentation)
+        self.view.lge_seg_button_signal.connect(self.run_lge_segmentation)
         self.view.save_button_signal.connect(self.save_segmentation)
         self.view.time_frame_changed_signal.connect(self.set_time_frame)
+
+    def load_lge_series(self, folder_path):
+        """Load an LGE series through the model and display it."""
+        try:
+            volume, slice_positions = self.model.load_lge_series(folder_path)
+            if hasattr(self.view, "display_area_widget"):
+                self.view.display_area_widget.set_lge_volume(
+                    volume, slice_positions=slice_positions
+                )
+        except Exception as e:
+            logging.error(f"Failed to load LGE series: {e}")
+            self._show_error_dialog(
+                "LGE Load Error", f"Failed to load LGE series:\n{str(e)}"
+            )
 
     def load_dicom_files(self, folder_path):
         """Load DICOM files through model and display."""
@@ -25,7 +41,10 @@ class DICOMController:
 
             # Display first frame
             self.current_time_index = 0
-            self.view.update_display(temporal_volumes[self.current_time_index])
+            self.view.update_display(
+                temporal_volumes[self.current_time_index],
+                slice_positions=self.model.slice_positions,
+            )
 
             # Update time slider
             if hasattr(self.view, "update_time_slider_range"):
@@ -53,6 +72,20 @@ class DICOMController:
                 "Segmentation Error", f"Failed to run segmentation:\n{str(e)}"
             )
 
+    def run_lge_segmentation(self):
+        """Predict segmentation for the currently loaded LGE stack."""
+        try:
+            seg_volume = self.model.predict_lge_segmentation()
+            if hasattr(self.view, "display_area_widget"):
+                self.view.display_area_widget.set_lge_segmentation_volume(seg_volume)
+        except ValueError as e:
+            self._show_warning_dialog("No LGE Volume", str(e))
+        except Exception as e:
+            logging.error(f"LGE segmentation failed: {e}")
+            self._show_error_dialog(
+                "LGE Segmentation Error", f"Failed to run LGE segmentation:\n{str(e)}"
+            )
+
     def set_time_frame(self, time_index):
         """Update the displayed volume to the specified time frame."""
         temporal_volumes = self.model.temporal_volumes
@@ -61,7 +94,9 @@ class DICOMController:
         if 0 <= time_index < len(temporal_volumes):
             self.current_time_index = time_index
             self.view.update_display_with_position(
-                temporal_volumes[time_index], preserve_position=True
+                temporal_volumes[time_index],
+                preserve_position=True,
+                slice_positions=self.model.slice_positions,
             )
 
             # Update segmentation overlay if available
