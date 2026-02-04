@@ -1,5 +1,8 @@
 """
-Utility functions for LA inference visualization and analysis.
+Visualization utilities for long-axis (LA) cardiac segmentation.
+
+Provides functions for creating static plots, animated GIFs, volume curves,
+and anatomical marker visualizations for 2CH, 3CH, and 4CH views.
 """
 
 import numpy as np
@@ -72,19 +75,34 @@ def create_static_segmentation_plot(input_image, pred_slice, chamber_type, mid_f
     plt.close()
 
 
-def create_segmentation_gif(cine_segmentation, pixel_array, chamber_type, num_frames, output_path):
+def create_segmentation_gif(cine_segmentation, slice_data, chamber_type, num_frames, output_path, slice_idx=None):
     """
     Create animated GIF of segmentation across all cardiac phases.
     
     Args:
         cine_segmentation: Full segmentation array (slices, frames, H, W)
-        pixel_array: Original image frames
+        slice_data: Dictionary containing slice data with pixel_array for each slice
         chamber_type: Name of chamber
         num_frames: Number of temporal frames
         output_path: Path to save the GIF
+        slice_idx: Optional slice index to visualize (if None, uses middle slice for multi-slice data)
     """
     cmap_custom = get_custom_colormap()
     seg_shape = cine_segmentation.shape
+    
+    # Determine slice index if not provided
+    if slice_idx is None and len(seg_shape) == 4:
+        slice_idx = seg_shape[0] // 2  # Use middle slice for SAX data
+    
+    # Get the appropriate slice key based on slice_idx
+    if slice_idx is not None:
+        slice_keys = sorted(slice_data.keys())
+        slice_key = slice_keys[slice_idx] if slice_idx < len(slice_keys) else slice_keys[0]
+    else:
+        slice_key = list(slice_data.keys())[0]
+    
+    # Get pixel array for the specific slice
+    pixel_array = slice_data[slice_key]["pixel_array"]
     
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     fig.patch.set_facecolor('black')
@@ -96,16 +114,18 @@ def create_segmentation_gif(cine_segmentation, pixel_array, chamber_type, num_fr
             ax.axis('off')
             ax.set_facecolor('black')
         
-        # Get frame-specific data
+        # Get frame-specific segmentation data
         if len(seg_shape) == 4:
+            # Use specified slice_idx (or middle slice)
+            actual_slice = slice_idx if slice_idx is not None else 0
             if seg_shape[1] == num_frames:
-                frame_pred = cine_segmentation[0, frame_idx, :, :]
+                frame_pred = cine_segmentation[actual_slice, frame_idx, :, :]
             else:
-                frame_pred = cine_segmentation[0, :, :, frame_idx]
+                frame_pred = cine_segmentation[actual_slice, :, :, frame_idx]
         else:
             frame_pred = cine_segmentation[0]
         
-        # Get corresponding input
+        # Get corresponding input image from the correct slice
         if isinstance(pixel_array, list):
             frame_input = pixel_array[frame_idx] if frame_idx < len(pixel_array) else pixel_array[0]
         else:
@@ -127,7 +147,8 @@ def create_segmentation_gif(cine_segmentation, pixel_array, chamber_type, num_fr
         axes[2].imshow(frame_masked, cmap=cmap_custom, alpha=0.5, vmin=0, vmax=3, interpolation='nearest')
         axes[2].set_title('Overlay', fontsize=14, color='white')
         
-        fig.suptitle(f"{chamber_type} - Frame {frame_idx}/{num_frames}", fontsize=16, color='white', y=0.98)
+        slice_label = f" (Slice {actual_slice})" if len(seg_shape) == 4 else ""
+        fig.suptitle(f"{chamber_type}{slice_label} - Frame {frame_idx}/{num_frames}", fontsize=16, color='white', y=0.98)
     
     # Create animation
     anim = FuncAnimation(fig, animate_frame, frames=num_frames, interval=100, repeat=True)
@@ -170,22 +191,24 @@ def plot_volume_curves(lv_vol, myo_vol, rv_vol, lv_ef, rv_ef, chamber_type, outp
     plt.close()
 
 
-def plot_marker_points(input_image, pred_masked, lv_centers, rv_centers, rv_insertions, 
-                       mid_frame_idx, chamber_type, cmap_custom, output_path):
+def plot_marker_points(input_image, pred_slice, lv_centers, rv_centers, rv_insertions, 
+                       chamber_type, mid_frame_idx, output_path):
     """
     Visualize anatomical marker points on segmentation.
     
     Args:
         input_image: Original image
-        pred_masked: Masked segmentation for overlay
+        pred_slice: Segmentation prediction
         lv_centers: LV center points
         rv_centers: RV center points
         rv_insertions: RV insertion points
-        mid_frame_idx: Frame index to visualize
         chamber_type: Name of chamber
-        cmap_custom: Custom colormap
+        mid_frame_idx: Frame index to visualize
         output_path: Path to save visualization
     """
+    cmap_custom = get_custom_colormap()
+    pred_masked = np.ma.masked_where(pred_slice == 0, pred_slice)
+    
     fig, ax = plt.subplots(1, 1, figsize=(8, 8))
     ax.imshow(input_image, cmap='gray')
     
