@@ -101,38 +101,123 @@ class BaseSeries:
     def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
         """
         Runs the model inference on preprocessed slices.
+        
+        Now supports both simple UNet models and context-aware Transformer models.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            image_type (str): Type of image array to use ('pixel' or other)
         """
+        # Import helper modules
+        try:
+            from qcardia.inference import InferenceConfig, load_model_from_config, InferencePredictor
+            USE_NEW_INFERENCE = True
+        except ImportError:
+            USE_NEW_INFERENCE = False
+            print("Warning: New inference modules not available. Using legacy inference.")
+        
+        # Preprocessing (unchanged)
         preprocessed_slices = self._preproccess_slices(
             self._get_array(image_type=image_type)
         )
-        config = self._get_config(wandb_run_path)
+        
+        # Load raw config
+        raw_config = self._get_config(wandb_run_path)
+        
+        if USE_NEW_INFERENCE:
+            # NEW: Use helper modules for context-aware inference
+            try:
+                # Parse config with new handler
+                config = InferenceConfig(raw_config)
+                
+                # Store inference parameters
+                self.inference_dict["target_pixdim"] = torch.tensor(config.target_pixdim)
+                self.inference_dict["target_size"] = torch.tensor(config.target_size)
+                self.inference_dict["grid_sample_modes"] = [config.image_grid_sample_mode]
+                self.inference_dict["nr_output_classes"] = config.nr_classes
+                
+                # Load model dynamically (supports both UNet and Transformer)
+                # Auto-detect device (prefer GPU if available)
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                print(f"  Using device: {device}")
+                the_model = load_model_from_config(raw_config, wandb_run_path, device=device)
+                
+                # Rescale and standardize (unchanged)
+                self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
+                    self._rescale_tensor(preprocessed_slices)
+                )
+                standardised_tensor = utils.standardise(rescaled_tensor)
+                
+                # NEW: Reshape for context-aware models if needed
+                if config.needs_context():
+                    # Context-aware models expect (B, C, H, W, Z, T) format
+                    # Current shape is (Z*T, C, H, W), need to reshape
+                    n_slices = self.number_of_slices
+                    n_frames = self.number_of_temporal_positions
+                    _, C, H, W = standardised_tensor.shape
+                    
+                    # Reshape: (Z*T, C, H, W) -> (1, C, H, W, Z, T)
+                    standardised_tensor = standardised_tensor.view(
+                        n_slices, n_frames, C, H, W
+                    ).permute(2, 3, 4, 0, 1).unsqueeze(0)
+                    print(f"    Reshaped for context-aware: {standardised_tensor.shape}")
+                
+                # NEW: Use predictor for inference (handles context automatically)
+                predictor = InferencePredictor(the_model, config, device=device, batch_size=self.batch_size)
+                model_output = predictor.predict(standardised_tensor)
+                
+                # Reshape output back for downstream processing
+                if config.needs_context() and len(model_output.shape) == 6:
+                    # Output shape: (B, num_classes, H, W, Z, T)
+                    # Reshape to: (Z*T, num_classes, H, W)
+                    print(f"    Pre-reshape output shape: {model_output.shape}")
+                    B, num_classes, H, W, Z, T = model_output.shape
+                    # First remove batch dimension: (num_classes, H, W, Z, T)
+                    output_5d = model_output[0]
+                    print(f"    After removing batch: {output_5d.shape}")
+                    # Permute to: (Z, T, num_classes, H, W)
+                    output_permuted = output_5d.permute(3, 4, 0, 1, 2)
+                    print(f"    After permute: {output_permuted.shape}")
+                    # Reshape to: (Z*T, num_classes, H, W)
+                    model_output = output_permuted.reshape(Z*T, num_classes, H, W)
+                    print(f"    Final reshaped output: {model_output.shape}")
+                
+            except Exception as e:
+                print(f"Warning: New inference failed ({e}), falling back to legacy")
+                USE_NEW_INFERENCE = False
+        
+        if not USE_NEW_INFERENCE:
+            # LEGACY: Original hardcoded UNet inference
+            config = raw_config
+            self.inference_dict["target_pixdim"] = torch.tensor(
+                config["data"]["target_pixdim"]
+            )
+            self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+            self.inference_dict["grid_sample_modes"] = [
+                config["data"]["image_grid_sample_mode"]
+            ]
+            self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
+            
+            the_model = UNet2d(
+                nr_input_channels=config["unet"]["nr_image_channels"],
+                channels_list=config["unet"]["channels_list"],
+                nr_output_classes=config["unet"]["nr_output_classes"],
+                nr_output_scales=config["unet"]["nr_output_scales"],
+            ).to("cpu")
+            
+            # Try both possible weight file names
+            weights_path = wandb_run_path / "files" / "last_model.pt"
+            if not weights_path.exists():
+                weights_path = wandb_run_path / "files" / "best_model.pt"
+            
+            model_weights = torch.load(weights_path)
+            the_model.load_state_dict(model_weights)
 
-        self.inference_dict["target_pixdim"] = torch.tensor(
-            config["data"]["target_pixdim"]
-        )
-        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
-
-        self.inference_dict["grid_sample_modes"] = [
-            config["data"]["image_grid_sample_mode"]
-        ]
-        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
-        the_model = UNet2d(
-            nr_input_channels=config["unet"]["nr_image_channels"],
-            channels_list=config["unet"]["channels_list"],
-            nr_output_classes=config["unet"]["nr_output_classes"],
-            nr_output_scales=config["unet"]["nr_output_scales"],
-        ).to("cpu")
-        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
-        the_model.load_state_dict(model_weights)
-
-        self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
-            self._rescale_tensor(preprocessed_slices)
-        )
-        standardised_tensor = utils.standardise(rescaled_tensor)
-        model_output = self._forward_model(the_model, standardised_tensor)
+            self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
+                self._rescale_tensor(preprocessed_slices)
+            )
+            standardised_tensor = utils.standardise(rescaled_tensor)
+            model_output = self._forward_model(the_model, standardised_tensor)
 
         rescale_model_output = self._invert_rescale_tensor(model_output)
         model_prediction = torch.argmax(
@@ -446,6 +531,8 @@ class BaseSeries:
         Returns:
             torch.Tensor: The output of the model.
         """
+        from tqdm import tqdm
+        
         model_output = torch.zeros(
             self.inference_dict["number_of_slices"],
             self.inference_dict["nr_output_classes"],
@@ -455,12 +542,20 @@ class BaseSeries:
 
         model.eval()
         with torch.no_grad():
-            for i in range(
-                0, self.inference_dict["number_of_slices"] // self.batch_size + 1
-            ):
-                model_output[i * self.batch_size : (i + 1) * self.batch_size] = model(
-                    tensor[i * self.batch_size : (i + 1) * self.batch_size]
-                )[0]
+            total_batches = self.inference_dict["number_of_slices"] // self.batch_size + 1
+            pbar = tqdm(range(0, self.inference_dict["number_of_slices"] // self.batch_size + 1),
+                       desc="Inference (legacy)",
+                       total=total_batches,
+                       unit="batch")
+            
+            for i in pbar:
+                start_idx = i * self.batch_size
+                end_idx = (i + 1) * self.batch_size
+                if start_idx < self.inference_dict["number_of_slices"]:
+                    model_output[start_idx:end_idx] = model(
+                        tensor[start_idx:end_idx]
+                    )[0]
+                    pbar.set_postfix({'images': f'{min(end_idx, self.inference_dict["number_of_slices"])}/{self.inference_dict["number_of_slices"]}'})
 
         return model_output
 
