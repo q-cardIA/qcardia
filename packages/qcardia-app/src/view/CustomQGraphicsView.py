@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
+    QToolButton,
 )
 
 from view.utils import SoftwareConfigResources
@@ -85,6 +86,7 @@ class CustomQGraphicsView(QGraphicsView):
 
         self.__set_interface()
         self.__set_stylesheets()
+        self.__set_zoom_controls()
 
     def __set_interface(self):
         self.scene = QGraphicsScene(self)
@@ -190,6 +192,68 @@ class CustomQGraphicsView(QGraphicsView):
         if getattr(self, "display_2d", None) is not None:
             # Recompute fit/offset using the latest viewport size
             self.update_slice_view(self.display_2d)
+        self.__position_zoom_controls()
+
+    def __set_zoom_controls(self):
+        self.zoom_out_button = QToolButton(self)
+        self.zoom_out_button.setText("−")
+        self.zoom_out_button.setToolTip("Zoom out")
+        self.zoom_out_button.clicked.connect(self.zoom_out)
+
+        self.zoom_in_button = QToolButton(self)
+        self.zoom_in_button.setText("+")
+        self.zoom_in_button.setToolTip("Zoom in")
+        self.zoom_in_button.clicked.connect(self.zoom_in)
+
+        button_style = (
+            "QToolButton {"
+            "background-color: rgba(40, 40, 40, 190);"
+            "color: #FFFFFF;"
+            "border: 1px solid #505050;"
+            "border-radius: 4px;"
+            "font-weight: 600;"
+            "font-size: 13px;"
+            "padding: 0px;"
+            "}"
+            "QToolButton:hover {"
+            "background-color: rgba(70, 70, 70, 220);"
+            "}"
+            "QToolButton:pressed {"
+            "background-color: rgba(90, 90, 90, 220);"
+            "}"
+        )
+        for button in (self.zoom_out_button, self.zoom_in_button):
+            button.setFixedSize(22, 22)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setStyleSheet(button_style)
+
+        self.__position_zoom_controls()
+
+    def __position_zoom_controls(self):
+        if not hasattr(self, "zoom_in_button") or not hasattr(self, "zoom_out_button"):
+            return
+        margin = 8
+        spacing = 4
+        button_size = self.zoom_in_button.width()
+        right_x = self.width() - margin - button_size
+        y_pos = margin
+        self.zoom_in_button.move(right_x, y_pos)
+        self.zoom_out_button.move(right_x, y_pos + button_size + spacing)
+        self.zoom_in_button.raise_()
+        self.zoom_out_button.raise_()
+
+    def __apply_zoom_step(self, delta):
+        updated_zoom = max(0.5, min(4.0, self.zoom_ratio + delta))
+        if abs(updated_zoom - self.zoom_ratio) < 1e-9:
+            return
+        self.zoom_ratio = updated_zoom
+        self.__repaint_view()
+
+    def zoom_in(self):
+        self.__apply_zoom_step(0.1)
+
+    def zoom_out(self):
+        self.__apply_zoom_step(-0.1)
 
     def keyPressEvent(self, event) -> None:
         """
@@ -280,10 +344,9 @@ class CustomQGraphicsView(QGraphicsView):
 
         elif self.right_button_on_hold:
             if event.globalPos().y() > self.clicked_right_pos.y():
-                self.zoom_ratio = min(4.0, self.zoom_ratio + 0.025)
+                self.__apply_zoom_step(0.025)
             else:
-                self.zoom_ratio = max(0.5, self.zoom_ratio - 0.025)
-            self.__repaint_view()
+                self.__apply_zoom_step(-0.025)
             self.clicked_right_pos = event.globalPos()
 
     def updateCrosshairPosition(self, x, y):
