@@ -5,7 +5,7 @@ import numpy as np
 
 # from gui.UtilsWidgets.CustomQDialog.ImportDataQDialog import ImportDataQDialog
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsOpacityEffect,
@@ -112,6 +112,7 @@ class CustomQGraphicsView(QGraphicsView):
         # Remove persistent references to QGraphicsLineItem objects
         # Always add new lines after scene.clear()
         self.setScene(self.scene)
+        self.setRenderHint(QPainter.Antialiasing, True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
@@ -820,6 +821,8 @@ class CustomQGraphicsView(QGraphicsView):
                 self._class_colors.get(contour["class_id"], QColor(255, 255, 255))
             )
             pen.setWidth(2)
+            pen.setJoinStyle(Qt.RoundJoin)
+            pen.setCapStyle(Qt.RoundCap)
             path_item.setPen(pen)
             path_item.setZValue(120)
             self.scene.addItem(path_item)
@@ -861,10 +864,62 @@ class CustomQGraphicsView(QGraphicsView):
         points = contour.get("points", [])
         if not points:
             return QPainterPath()
-        first_row, first_col = points[0]
-        painter_path = QPainterPath(self.__image_point_to_scene(first_col, first_row))
-        for row, col in points[1:]:
-            painter_path.lineTo(self.__image_point_to_scene(col, row))
+        scene_points = [self.__image_point_to_scene(col, row) for (row, col) in points]
+
+        painter_path = QPainterPath(scene_points[0])
+        if len(scene_points) < 3:
+            for point in scene_points[1:]:
+                painter_path.lineTo(point)
+            return painter_path
+
+        def __distance(point_a, point_b):
+            dx = point_b.x() - point_a.x()
+            dy = point_b.y() - point_a.y()
+            return (dx * dx + dy * dy) ** 0.5
+
+        def __safe_div(value, denominator):
+            if abs(denominator) < 1e-6:
+                return 0.0
+            return value / denominator
+
+        num_points = len(scene_points)
+        alpha = 0.5  # centripetal parameterization reduces loop/overshoot artifacts
+        for idx in range(num_points):
+            point0 = scene_points[(idx - 1) % num_points]
+            point1 = scene_points[idx]
+            point2 = scene_points[(idx + 1) % num_points]
+            point3 = scene_points[(idx + 2) % num_points]
+
+            t0 = 0.0
+            t1 = t0 + (__distance(point0, point1) ** alpha)
+            t2 = t1 + (__distance(point1, point2) ** alpha)
+            t3 = t2 + (__distance(point2, point3) ** alpha)
+
+            m1x = (t2 - t1) * (
+                __safe_div(point1.x() - point0.x(), t1 - t0)
+                - __safe_div(point2.x() - point0.x(), t2 - t0)
+                + __safe_div(point2.x() - point1.x(), t2 - t1)
+            )
+            m1y = (t2 - t1) * (
+                __safe_div(point1.y() - point0.y(), t1 - t0)
+                - __safe_div(point2.y() - point0.y(), t2 - t0)
+                + __safe_div(point2.y() - point1.y(), t2 - t1)
+            )
+            m2x = (t2 - t1) * (
+                __safe_div(point2.x() - point1.x(), t2 - t1)
+                - __safe_div(point3.x() - point1.x(), t3 - t1)
+                + __safe_div(point3.x() - point2.x(), t3 - t2)
+            )
+            m2y = (t2 - t1) * (
+                __safe_div(point2.y() - point1.y(), t2 - t1)
+                - __safe_div(point3.y() - point1.y(), t3 - t1)
+                + __safe_div(point3.y() - point2.y(), t3 - t2)
+            )
+
+            control1 = QPointF(point1.x() + (m1x / 3.0), point1.y() + (m1y / 3.0))
+            control2 = QPointF(point2.x() - (m2x / 3.0), point2.y() - (m2y / 3.0))
+            painter_path.cubicTo(control1, control2, point2)
+
         painter_path.closeSubpath()
         return painter_path
 
