@@ -1,7 +1,5 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPalette
 from PySide6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -30,25 +28,13 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.folder_selected = False
-        # Create welcome widget first, then set application palette so it applies to all widgets
+        # Theme is applied at app startup; build welcome screen first.
         self.welcome_widget = WelcomeWidget(self)
-        self.set_dark_palette()
         self.setCentralWidget(self.welcome_widget)
         # Welcome transitions to analysis UI (data loaded later from left panel)
         self.welcome_widget.transition_signal.connect(self.build_analysis_interface)
         # Default to full-screen so the welcome layout fills the display
         self.setWindowState(Qt.WindowMaximized)
-
-    def set_dark_palette(self):
-        palette = QPalette()
-        brush = QBrush(QColor(255, 255, 255, 255))
-        brush.setStyle(Qt.SolidPattern)
-        palette.setBrush(QPalette.Active, QPalette.WindowText, brush)
-        # (Palette setup code continues unchanged below)
-        try:
-            QApplication.setPalette(palette)
-        except Exception:
-            self.setPalette(palette)
 
     def build_analysis_interface(self):
         """Construct analysis UI without loading data."""
@@ -72,44 +58,46 @@ class MainWindow(QMainWindow):
         time_layout.setContentsMargins(6, 4, 6, 4)
         time_layout.setSpacing(8)
         self.time_label = QLabel("Time Frame: 0 / 0")
-        self.time_label.setStyleSheet("color: #E6E6E6; font-size:12px")
+        self.time_label.setProperty("secondary", "true")
         self.time_slider = QSlider(Qt.Horizontal)
         self.time_slider.setMinimum(0)
         self.time_slider.setMaximum(0)
         self.time_slider.setEnabled(False)
         self.time_slider.valueChanged.connect(self.on_time_slider_changed)
-        self.time_slider.setStyleSheet(
-            """QSlider::groove:horizontal {background:#2F3440; height:6px; border-radius:3px;}\nQSlider::handle:horizontal {background:#85aaff; width:14px; margin:-4px 0; border-radius:7px;}\nQSlider::handle:horizontal:hover {background:#a0c0ff;}"""
-        )
+        self.time_slider.setProperty("role", "timeSlider")
         time_layout.addWidget(self.time_label)
         time_layout.addWidget(self.time_slider)
 
         # Top bar
         self.top_bar = QWidget()
-        self.top_bar.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        self.top_bar.setProperty("role", "topBar")
         top_layout = QHBoxLayout(self.top_bar)
         top_layout.setContentsMargins(8, 4, 8, 4)
         top_layout.setSpacing(12)
         self.toggle_sidebar_btn = QPushButton("Hide Menu")
         self.toggle_sidebar_btn.setCheckable(True)
-        self.toggle_sidebar_btn.setStyleSheet(
-            "QPushButton{background-color:#2F3440; color:#E6E6E6; border:none; padding:6px 12px; border-radius:4px;}"
-            "QPushButton:hover{background-color:#3d4450;}"
-            "QPushButton:checked{background-color:#3d4450;}"
-        )
+        self.toggle_sidebar_btn.setProperty("role", "sidebarToggle")
         self.toggle_sidebar_btn.toggled.connect(self._on_toggle_sidebar)
         self.contour_edit_btn = QPushButton("Edit Contours")
         self.contour_edit_btn.setCheckable(True)
-        self.contour_edit_btn.setStyleSheet(
-            "QPushButton{background-color:#2F3440; color:#E6E6E6; border:none; padding:6px 12px; border-radius:4px;}"
-            "QPushButton:hover{background-color:#3d4450;}"
-            "QPushButton:checked{background-color:#3f5d32;}"
-        )
+        self.contour_edit_btn.setProperty("role", "contourToggle")
         self.contour_edit_btn.toggled.connect(self._on_contour_edit_toggled)
+        self.add_point_btn = QPushButton("Add Point")
+        self.add_point_btn.setCheckable(True)
+        self.add_point_btn.setEnabled(False)
+        self.add_point_btn.setProperty("role", "contourTool")
+        self.add_point_btn.toggled.connect(self._on_add_point_toggled)
+        self.remove_point_btn = QPushButton("Remove Point")
+        self.remove_point_btn.setCheckable(True)
+        self.remove_point_btn.setEnabled(False)
+        self.remove_point_btn.setProperty("role", "contourTool")
+        self.remove_point_btn.toggled.connect(self._on_remove_point_toggled)
         self.app_title = QLabel("q-cardIA v0.0.1")
-        self.app_title.setStyleSheet("color:#E6E6E6; font-size:18px; font-weight:bold")
+        self.app_title.setProperty("role", "appTitle")
         top_layout.addWidget(self.toggle_sidebar_btn)
         top_layout.addWidget(self.contour_edit_btn)
+        top_layout.addWidget(self.add_point_btn)
+        top_layout.addWidget(self.remove_point_btn)
         top_layout.addWidget(self.app_title)
         top_layout.addStretch(1)
 
@@ -172,6 +160,30 @@ class MainWindow(QMainWindow):
         self.contour_edit_btn.setText(
             "Editing Contours" if checked else "Edit Contours"
         )
+        self.add_point_btn.setEnabled(checked)
+        self.remove_point_btn.setEnabled(checked)
+        if not checked:
+            self.add_point_btn.setChecked(False)
+            self.remove_point_btn.setChecked(False)
+            self.display_area_widget.set_contour_edit_tool("move")
+
+    def _on_add_point_toggled(self, checked):
+        if not hasattr(self, "display_area_widget"):
+            return
+        if checked:
+            self.remove_point_btn.setChecked(False)
+            self.display_area_widget.set_contour_edit_tool("add")
+        elif not self.remove_point_btn.isChecked():
+            self.display_area_widget.set_contour_edit_tool("move")
+
+    def _on_remove_point_toggled(self, checked):
+        if not hasattr(self, "display_area_widget"):
+            return
+        if checked:
+            self.add_point_btn.setChecked(False)
+            self.display_area_widget.set_contour_edit_tool("remove")
+        elif not self.add_point_btn.isChecked():
+            self.display_area_widget.set_contour_edit_tool("move")
 
     def update_display(self, image_stack, slice_positions=None):
         """Update display with new image stack, centering the view."""

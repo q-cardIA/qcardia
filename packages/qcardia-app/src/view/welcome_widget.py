@@ -43,15 +43,18 @@ class WelcomeWidget(QWidget):
         self.left_panel = QWidget()
         self.left_panel.setObjectName("welcomeLeftPanel")
         self.left_panel.setAttribute(Qt.WA_StyledBackground, True)
+        self.left_panel.setProperty("role", "welcomeSidePanel")
         self.left_panel.setLayout(self.left_panel_layout)
         self.right_panel = QWidget()
         self.right_panel.setObjectName("welcomeRightPanel")
         self.right_panel.setAttribute(Qt.WA_StyledBackground, True)
+        self.right_panel.setProperty("role", "welcomeSidePanel")
         self.right_panel.setLayout(self.right_panel_layout)
 
         self.central_label = QWidget()
         self.central_label.setObjectName("centralContainer")
         self.central_label.setAttribute(Qt.WA_StyledBackground, True)
+        self.central_label.setProperty("role", "welcomeCentral")
         self.central_label.setContentsMargins(0, 0, 0, 0)
         self.central_layout = QHBoxLayout()
         self.central_layout.setContentsMargins(0, 0, 0, 0)
@@ -70,6 +73,7 @@ class WelcomeWidget(QWidget):
     def __top_title_interface(self):
         self.top_logo_panel_layout = QHBoxLayout()
         self.top_logo_panel_label = QLabel("Quantitative cardiac image analysis")
+        self.top_logo_panel_label.setProperty("role", "welcomeHeadline")
         self.top_logo_panel_layout.addStretch(1)
         self.top_logo_panel_layout.addWidget(self.top_logo_panel_label, Qt.AlignCenter)
         self.top_logo_panel_layout.addStretch(1)
@@ -101,6 +105,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_title_layout.setContentsMargins(0, 50, 0, 0)
         self.right_panel_title_layout.addStretch(1)
         self.right_panel_title_label = QLabel("For more information")
+        self.right_panel_title_label.setProperty("role", "welcomeSectionTitle")
         self.right_panel_title_layout.addWidget(self.right_panel_title_label)
         self.right_panel_title_layout.addStretch(1)
         self.right_panel_layout.addLayout(self.right_panel_title_layout)
@@ -111,6 +116,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_community_layout.setSpacing(5)
         self.right_panel_community_layout.setContentsMargins(50, 0, 50, 0)
         self.right_panel_community_pushbutton = QPushButton("  Research community")
+        self.right_panel_community_pushbutton.setProperty("role", "welcomeInfoAction")
         self.right_panel_community_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -130,6 +136,9 @@ class WelcomeWidget(QWidget):
         self.right_panel_about_layout.setSpacing(5)
         self.right_panel_about_layout.setContentsMargins(50, 25, 50, 0)
         self.right_panel_about_software_pushbutton = QPushButton("  About q-cardIA")
+        self.right_panel_about_software_pushbutton.setProperty(
+            "role", "welcomeInfoAction"
+        )
         self.right_panel_about_software_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -149,6 +158,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_helpwiki_layout.setSpacing(5)
         self.right_panel_helpwiki_layout.setContentsMargins(50, 25, 50, 0)
         self.right_panel_helpwiki_pushbutton = QPushButton("  Tutorials and wiki")
+        self.right_panel_helpwiki_pushbutton.setProperty("role", "welcomeInfoAction")
         self.right_panel_helpwiki_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -166,6 +176,7 @@ class WelcomeWidget(QWidget):
         self.right_panel_issues_layout.setSpacing(5)
         self.right_panel_issues_layout.setContentsMargins(50, 25, 50, 0)
         self.right_panel_issues_pushbutton = QPushButton("  Issues and suggestions")
+        self.right_panel_issues_pushbutton.setProperty("role", "welcomeInfoAction")
         self.right_panel_issues_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -189,6 +200,7 @@ class WelcomeWidget(QWidget):
         self.left_panel_title_layout.setContentsMargins(0, 50, 0, 0)
         self.left_panel_title_layout.addStretch(1)
         self.left_panel_title_label = QLabel("Start by")
+        self.left_panel_title_label.setProperty("role", "welcomeSectionTitle")
         self.left_panel_title_layout.addWidget(self.left_panel_title_label)
         self.left_panel_title_layout.addStretch(1)
         self.left_panel_layout.addLayout(self.left_panel_title_layout)
@@ -199,6 +211,10 @@ class WelcomeWidget(QWidget):
         self.left_panel_single_layout.setSpacing(5)
         self.left_panel_single_layout.setContentsMargins(50, 0, 50, 0)
         self.left_panel_single_patient_pushbutton = QPushButton("  Single patient mode")
+        self.left_panel_single_patient_pushbutton.setProperty(
+            "role", "welcomePrimaryAction"
+        )
+        self.left_panel_single_patient_pushbutton.setProperty("variant", "primary")
         self.left_panel_single_patient_pushbutton.setIcon(
             QIcon(
                 QPixmap(
@@ -268,212 +284,7 @@ class WelcomeWidget(QWidget):
         self.right_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def __set_stylesheets(self):
-        software_ss = SoftwareConfigResources.getInstance().stylesheet_components
-        self.setStyleSheet(
-            "#welcomeRoot { background-color: " + software_ss["Color2"] + "; }"
-        )
-        self.central_label.setStyleSheet(
-            "background-color: " + software_ss["Color2"] + ";"
-        )
-
-        self.top_logo_panel_label.setStyleSheet(
-            """
-        QLabel{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        font-size: 56px;
-        font-weight: bold;
-        margin-top: 30px;
-        margin-bottom: 20px;
-        qproperty-alignment: AlignCenter;
-        }"""
-        )
-
-        self.right_panel.setStyleSheet(
-            "#welcomeRightPanel {\n            min-width: 200px;\n            min-height: 200px;\n            background-color: "
-            + software_ss["Color2"]
-            + ";\n        }"
-        )
-
-        self.right_panel_title_label.setStyleSheet(
-            """
-        QLabel{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        border: 0px;
-        font-size: 32px;
-        font-weight: bold;
-        }"""
-        )
-
-        self.right_panel_community_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.right_panel_about_software_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.right_panel_helpwiki_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.right_panel_issues_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.left_panel.setStyleSheet(
-            "#welcomeLeftPanel {\n            min-width: 200px;\n            min-height: 200px;\n            background-color: "
-            + software_ss["Color2"]
-            + ";\n        }"
-        )
-
-        self.left_panel_title_label.setStyleSheet(
-            """
-        QLabel{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        border: 0px;
-        font-size: 32px;
-        font-weight: bold;
-        }"""
-        )
-
-        self.left_panel_single_patient_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Process"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Process_pressed"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        # self.left_panel_multiple_patients_pushbutton.setStyleSheet(
-        #     """
-        # QPushButton{
-        # color: """
-        #     + software_ss["Color7"]
-        #     + """;
-        # background-color: """
-        #     + software_ss["Process"]
-        #     + """;
-        # font-size: 18px;
-        # text-align: center;
-        # border-radius:12px;
-        # padding: 12px;
-        # margin-left:5px;
-        # margin-right:5px;
-        # font-weight:bold}
-        # QPushButton:pressed{
-        # background-color: """
-        #     + software_ss["Process_pressed"]
-        #     + """;
-        # border-style:inset
-        # }"""
-        # )
+        self.setProperty("role", "welcomeRoot")
 
     def __set_connections(self):
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)

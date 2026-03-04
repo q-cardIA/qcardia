@@ -70,7 +70,7 @@ class CentralDisplayAreaWidget(QWidget):
         super().resizeEvent(event)
 
     def __set_interface(self):
-        self.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        self.setObjectName("centralDisplayArea")
         self.layout = QGridLayout(self)
         self.layout.setHorizontalSpacing(0)
         self.layout.setVerticalSpacing(0)
@@ -79,7 +79,7 @@ class CentralDisplayAreaWidget(QWidget):
         self.lge_volume = None
         self.lge_slice_index = 0
         self.lge_container = QWidget()
-        self.lge_container.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        self.lge_container.setProperty("role", "viewerCard")
         self.lge_container_layout = QVBoxLayout(self.lge_container)
         self.lge_container_layout.setContentsMargins(2, 2, 2, 2)
         self.lge_container_layout.setSpacing(2)
@@ -123,8 +123,10 @@ class CentralDisplayAreaWidget(QWidget):
 
         self.horizontal_line = QLabel()
         self.horizontal_line.setFixedHeight(3)
+        self.horizontal_line.setProperty("role", "divider")
         self.vertical_line = QLabel()
         self.vertical_line.setFixedWidth(3)
+        self.vertical_line.setProperty("role", "divider")
         # Place containers (keeping existing spatial semantics for now)
         self.layout.addWidget(self.sagittal_container, 0, 0)
         self.layout.addWidget(self.lge_container, 0, 2)
@@ -136,15 +138,10 @@ class CentralDisplayAreaWidget(QWidget):
     # Removed unused __set_layout_dimensions (previously only comments).
 
     def __set_stylesheets(self):
-        dark_view = (
-            "QGraphicsView{background-color:rgb(0,0,0); border:1px solid #2F3440;}"
-        )
-        self.secondary_viewer.setStyleSheet(dark_view)
-        self.axial_viewer.setStyleSheet(dark_view)
-        self.coronal_viewer.setStyleSheet(dark_view)
-        self.sagittal_viewer.setStyleSheet(dark_view)
-        self.horizontal_line.setStyleSheet("""QLabel{background-color: #2F3440;}""")
-        self.vertical_line.setStyleSheet("""QLabel{background-color: #2F3440;}""")
+        self.secondary_viewer.setProperty("role", "imageViewport")
+        self.axial_viewer.setProperty("role", "imageViewport")
+        self.coronal_viewer.setProperty("role", "imageViewport")
+        self.sagittal_viewer.setProperty("role", "imageViewport")
 
     def __set_connections(self):
         self.axial_viewer.coordinates_changed.connect(
@@ -574,7 +571,13 @@ class CentralDisplayAreaWidget(QWidget):
         self.contour_edit_mode = bool(enabled)
         if hasattr(self, "sagittal_viewer"):
             self.sagittal_viewer.set_edit_mode(self.contour_edit_mode)
+            if not self.contour_edit_mode:
+                self.sagittal_viewer.set_edit_tool("move")
             self.__update_segmentation_overlay()
+
+    def set_contour_edit_tool(self, tool):
+        if hasattr(self, "sagittal_viewer"):
+            self.sagittal_viewer.set_edit_tool(tool)
 
     def __on_sagittal_contours_updated(self, contour_defs):
         if (
@@ -875,9 +878,9 @@ class CentralDisplayAreaWidget(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(8)
         lbl_title = QLabel(title)
-        lbl_title.setStyleSheet("color:#FFFFFF; font-weight:500; font-size:13px;")
+        lbl_title.setProperty("role", "viewerTitle")
         lbl_slice = QLabel("")  # dynamic slice info
-        lbl_slice.setStyleSheet("color:#A0A0A0; font-size:11px;")
+        lbl_slice.setProperty("role", "viewerMeta")
         layout.addWidget(lbl_title)
         layout.addStretch(1)
         layout.addWidget(lbl_slice)
@@ -889,18 +892,12 @@ class CentralDisplayAreaWidget(QWidget):
         slider.setMaximum(0)
         slider.setEnabled(False)
         slider.setMinimumHeight(20)
-        slider.setStyleSheet(
-            "QSlider {background: transparent;}"
-            "QSlider::groove:horizontal {background:#2F3440; height:6px; border-radius:3px;}"
-            "QSlider::handle:horizontal {background:#85aaff; width:14px; height:14px; margin:-4px 0; border-radius:7px;}"
-            "QSlider::handle:horizontal:hover {background:#a0c0ff;}"
-            "QSlider::handle:horizontal:disabled {background:#555555;}"
-        )
+        slider.setProperty("role", "sliceSlider")
         return slider
 
     def __make_plane_view(self, title, view_type, size, cb):
         container = QWidget()
-        container.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        container.setProperty("role", "viewerCard")
         vlayout = QVBoxLayout(container)
         vlayout.setContentsMargins(2, 2, 2, 2)
         vlayout.setSpacing(2)

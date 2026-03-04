@@ -63,10 +63,13 @@ class CustomQGraphicsView(QGraphicsView):
         self._handle_drag_offset = QPointF(0, 0)
         self._handle_radius = 2.5
         self._handle_pick_radius = self._handle_radius * 2.0
+        self._segment_pick_radius = 28.0
+        self._edit_tool = "move"
+        self._crosshair_color = QColor(137, 167, 207)
         self._class_colors = {
-            1: QColor(255, 64, 64),
-            2: QColor(64, 255, 128),
-            3: QColor(96, 160, 255),
+            1: QColor(213, 160, 122),
+            2: QColor(90, 111, 141),
+            3: QColor(137, 167, 207),
         }
 
         self.right_button_on_hold = False
@@ -109,7 +112,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.scene.addItem(self.image_item)
 
         pen = QPen()
-        pen.setColor(QColor(60, 255, 137))
+        pen.setColor(self._crosshair_color)
         pen.setStyle(Qt.DashLine)
         # Remove persistent references to QGraphicsLineItem objects
         # Always add new lines after scene.clear()
@@ -119,68 +122,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
     def __set_stylesheets(self):
-        self.setStyleSheet("QGraphicsView{background-color:rgb(0,0,0);}")
-
-        self.setStyleSheet(
-            """
-            QGraphicsView {
-            border: none;
-            background-color: black;
-                }
-        
-            QScrollBar:vertical {
-                background: transparent;
-                width: 8px;
-                margin: 0px;
-            }
-        
-            QScrollBar::handle:vertical {
-                background: #666;
-                border-radius: 4px;
-                min-height: 20px;
-            }
-        
-            QScrollBar::handle:vertical:hover {
-                background: #aaa;
-            }
-        
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        
-            QScrollBar:horizontal {
-                background: transparent;
-                height: 8px;
-                margin: 0px;
-            }
-        
-            QScrollBar::handle:horizontal {
-                background: #666;
-                border-radius: 4px;
-                min-width: 20px;
-            }
-        
-            QScrollBar::handle:horizontal:hover {
-                background: #aaa;
-            }
-        
-            QScrollBar::add-line:horizontal,
-            QScrollBar::sub-line:horizontal {
-                width: 0px;
-            }
-        
-            QScrollBar::add-page:horizontal,
-            QScrollBar::sub-page:horizontal {
-                background: none;
-            }
-        """
-        )
+        self.setProperty("role", "imageViewport")
 
     def resizeEvent(self, event):
         """
@@ -199,33 +141,17 @@ class CustomQGraphicsView(QGraphicsView):
         self.zoom_out_button.setText("−")
         self.zoom_out_button.setToolTip("Zoom out")
         self.zoom_out_button.clicked.connect(self.zoom_out)
+        self.zoom_out_button.setProperty("role", "viewerZoom")
 
         self.zoom_in_button = QToolButton(self)
         self.zoom_in_button.setText("+")
         self.zoom_in_button.setToolTip("Zoom in")
         self.zoom_in_button.clicked.connect(self.zoom_in)
+        self.zoom_in_button.setProperty("role", "viewerZoom")
 
-        button_style = (
-            "QToolButton {"
-            "background-color: rgba(40, 40, 40, 190);"
-            "color: #FFFFFF;"
-            "border: 1px solid #505050;"
-            "border-radius: 4px;"
-            "font-weight: 600;"
-            "font-size: 13px;"
-            "padding: 0px;"
-            "}"
-            "QToolButton:hover {"
-            "background-color: rgba(70, 70, 70, 220);"
-            "}"
-            "QToolButton:pressed {"
-            "background-color: rgba(90, 90, 90, 220);"
-            "}"
-        )
         for button in (self.zoom_out_button, self.zoom_in_button):
             button.setFixedSize(22, 22)
             button.setCursor(Qt.PointingHandCursor)
-            button.setStyleSheet(button_style)
 
         self.__position_zoom_controls()
 
@@ -273,6 +199,13 @@ class CustomQGraphicsView(QGraphicsView):
 
         if event.button() == Qt.LeftButton:
             if self.edit_mode:
+                if self._edit_tool == "add":
+                    target = self.__clamp_scene_to_image(pos)
+                    if self.__add_point_at(target):
+                        return
+                elif self._edit_tool == "remove":
+                    if self.__remove_point_at(pos):
+                        return
                 handle_info = self.__pick_handle_at(pos)
                 if handle_info:
                     self._active_handle = handle_info
@@ -384,7 +317,7 @@ class CustomQGraphicsView(QGraphicsView):
 
         # Draw fresh crosshair lines that reflect the latest position
         if self.scene:
-            pen = QPen(QColor(60, 255, 137))
+            pen = QPen(self._crosshair_color)
             pen.setStyle(Qt.DashLine)
             pen.setWidth(2)
 
@@ -678,8 +611,8 @@ class CustomQGraphicsView(QGraphicsView):
         self.image_item.setPixmap(pixmap)
 
         # Center the image within the viewport
-        offset_x = max(0, int((view_w - pixmap.width()) / 2))
-        offset_y = max(0, int((view_h - pixmap.height()) / 2))
+        offset_x = int((view_w - pixmap.width()) / 2)
+        offset_y = int((view_h - pixmap.height()) / 2)
         self.image_item.setOffset(offset_x, offset_y)
         self.scene.setSceneRect(0, 0, view_w, view_h)
 
@@ -773,10 +706,18 @@ class CustomQGraphicsView(QGraphicsView):
     def set_edit_mode(self, enabled):
         self.edit_mode = bool(enabled)
         self._active_handle = None
+        if not self.edit_mode:
+            self._edit_tool = "move"
         self.setDragMode(
             QGraphicsView.NoDrag if self.edit_mode else QGraphicsView.ScrollHandDrag
         )
         self.__update_handle_visibility()
+
+    def set_edit_tool(self, tool):
+        if tool not in {"move", "add", "remove"}:
+            tool = "move"
+        self._edit_tool = tool
+        self._active_handle = None
 
     def update_contour_paths(self, contour_defs):
         if contour_defs is None:
@@ -825,6 +766,82 @@ class CustomQGraphicsView(QGraphicsView):
         contour["points"][handle["point_idx"]] = (row, col)
         self.__update_contour_path(handle["contour_idx"])
         self.__emit_contours_updated()
+
+    @staticmethod
+    def __distance_sq_to_segment(point, seg_start, seg_end):
+        seg_dx = seg_end.x() - seg_start.x()
+        seg_dy = seg_end.y() - seg_start.y()
+        seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy
+        if seg_len_sq <= 1e-9:
+            dx = point.x() - seg_start.x()
+            dy = point.y() - seg_start.y()
+            return dx * dx + dy * dy
+
+        t = (
+            (point.x() - seg_start.x()) * seg_dx + (point.y() - seg_start.y()) * seg_dy
+        ) / seg_len_sq
+        t = max(0.0, min(1.0, t))
+        proj_x = seg_start.x() + t * seg_dx
+        proj_y = seg_start.y() + t * seg_dy
+        dx = point.x() - proj_x
+        dy = point.y() - proj_y
+        return dx * dx + dy * dy
+
+    def __add_point_at(self, scene_pos):
+        if not self._contour_definitions:
+            return False
+
+        best_match = None
+        for contour_idx, contour in enumerate(self._contour_definitions):
+            points = contour.get("points", [])
+            num_points = len(points)
+            if num_points < 2:
+                continue
+
+            for point_idx in range(num_points):
+                start_row, start_col = points[point_idx]
+                end_row, end_col = points[(point_idx + 1) % num_points]
+                seg_start = self.__image_point_to_scene(start_col, start_row)
+                seg_end = self.__image_point_to_scene(end_col, end_row)
+                dist_sq = self.__distance_sq_to_segment(scene_pos, seg_start, seg_end)
+                if best_match is None or dist_sq < best_match[0]:
+                    best_match = (dist_sq, contour_idx, point_idx + 1)
+
+        if best_match is None:
+            return False
+
+        max_dist_sq = self._segment_pick_radius * self._segment_pick_radius
+        if best_match[0] > max_dist_sq:
+            return False
+
+        row, col = self.__scene_point_to_image(scene_pos)
+        _, contour_idx, insert_idx = best_match
+        contour = self._contour_definitions[contour_idx]
+        contour["points"].insert(insert_idx, (row, col))
+
+        self.__rebuild_contour_items()
+        self.__emit_contours_updated()
+        return True
+
+    def __remove_point_at(self, scene_pos):
+        handle_info = self.__pick_handle_at(scene_pos)
+        if not handle_info:
+            return False
+
+        contour_idx = handle_info["contour_idx"]
+        point_idx = handle_info["point_idx"]
+        if contour_idx < 0 or contour_idx >= len(self._contour_definitions):
+            return False
+
+        contour = self._contour_definitions[contour_idx]
+        points = contour.get("points", [])
+        if len(points) <= 3:
+            return False
+
+        points.pop(point_idx)
+        self.__rebuild_contour_items()
+        self.__emit_contours_updated()
+        return True
 
     def __clamp_scene_to_image(self, scene_point):
         if self.image_item is None or self.image_item.pixmap().isNull():

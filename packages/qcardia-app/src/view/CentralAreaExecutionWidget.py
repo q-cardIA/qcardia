@@ -81,63 +81,9 @@ class CentralAreaExecutionWidget(QLabel):
         self.setMinimumHeight(40)
 
     def __set_stylesheets(self):
-        software_ss = SoftwareConfigResources.getInstance().stylesheet_components
-        font_color = software_ss["Color7"]
-
-        self.setStyleSheet(
-            """
-        QLabel{
-        background-color: rgb(0,0,0);}
-        """
-        )
-
-        self.run_segmentation_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color:rgb(0, 0, 0);
-        background-color: """
-            + software_ss["Process"]
-            + """;
-        border-radius:10px;
-        margin-left:5px;
-        margin-right:5px;
-        font:bold;
-        font-size: 14px;
-        }
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Process_pressed"]
-            + """;
-        border-style:inset
-        }
-        QPushButton:disabled{
-        color: rgb(127, 127, 127);
-        }"""
-        )
-
-        self.run_reporting_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color:rgb(0, 0, 0);
-        background-color: """
-            + software_ss["Process"]
-            + """;
-        border-radius:10px;
-        margin-left:5px;
-        margin-right:5px;
-        font:bold;
-        font-size: 14px;
-        }
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Process_pressed"]
-            + """;
-        border-style:inset
-        }
-        QPushButton:disabled{
-        color: rgb(127, 127, 127);
-        }"""
-        )
+        self.setProperty("role", "executionBar")
+        self.run_segmentation_pushbutton.setProperty("role", "executionAction")
+        self.run_reporting_pushbutton.setProperty("role", "executionAction")
 
     def __set_connections(self):
         self.__set_inner_connections()
