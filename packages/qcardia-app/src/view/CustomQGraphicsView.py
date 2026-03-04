@@ -695,6 +695,8 @@ class CustomQGraphicsView(QGraphicsView):
         else:
             self.updateCrosshairPosition(self.crosshair_pos[0], self.crosshair_pos[1])
 
+        self.__refresh_contour_geometry()
+
         # Atlas-related overlay helpers removed (feature not used)
 
     def __repaint_view(self):
