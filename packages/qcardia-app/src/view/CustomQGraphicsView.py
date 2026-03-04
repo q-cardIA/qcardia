@@ -5,9 +5,11 @@ import numpy as np
 
 # from gui.UtilsWidgets.CustomQDialog.ImportDataQDialog import ImportDataQDialog
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPen, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QGraphicsEllipseItem,
     QGraphicsOpacityEffect,
+    QGraphicsPathItem,
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
@@ -36,6 +38,7 @@ class CustomQGraphicsView(QGraphicsView):
     annotation_display_state_changed = (
         Signal()
     )  # When pressing 's' to toggle on/off the annotations
+    contours_updated = Signal(list)
 
     def __init__(self, view_type="axial", size=QSize(150, 150), parent=None):
         super(CustomQGraphicsView, self).__init__()
@@ -51,6 +54,19 @@ class CustomQGraphicsView(QGraphicsView):
         self.overlaid_items = {}  # Placeholder for the QGraphicsPixmapItem
         # Placeholder for color and opacity for now: {color:QColor(255,255,255), opacity:0.5}
         self.overlaid_items_display_parameters = {}
+        self.edit_mode = False
+        self._contour_definitions = []
+        self._contour_items = []
+        self._handle_items = []
+        self._active_handle = None
+        self._handle_drag_offset = QPointF(0, 0)
+        self._handle_radius = 2.5
+        self._handle_pick_radius = self._handle_radius * 2.0
+        self._class_colors = {
+            1: QColor(255, 64, 64),
+            2: QColor(64, 255, 128),
+            3: QColor(96, 160, 255),
+        }
 
         self.right_button_on_hold = False
         self.left_button_on_hold = False
@@ -191,6 +207,12 @@ class CustomQGraphicsView(QGraphicsView):
         pos = self.mapToScene(QPoint(event.localPos().x(), event.localPos().y()))
 
         if event.button() == Qt.LeftButton:
+            if self.edit_mode:
+                handle_info = self.__pick_handle_at(pos)
+                if handle_info:
+                    self._active_handle = handle_info
+                    self._handle_drag_offset = handle_info["item"].pos() - pos
+                    return
             # Check if clicking on either crosshair line
             items = self.scene.items(pos)
             clicked_line = None
@@ -226,11 +248,18 @@ class CustomQGraphicsView(QGraphicsView):
         if event.button() == Qt.LeftButton:
             self.left_button_on_hold = False
             self.dragging_crosshair = None
+            self._active_handle = None
         elif event.button() == Qt.RightButton:
             self.right_button_on_hold = False
 
     def mouseMoveEvent(self, event):
         pos = self.mapToScene(QPoint(event.localPos().x(), event.localPos().y()))
+
+        if self.edit_mode and self._active_handle is not None:
+            target = pos + self._handle_drag_offset
+            clamped = self.__clamp_scene_to_image(target)
+            self.__move_active_handle(clamped)
+            return
 
         if self.left_button_on_hold:
             if self.dragging_crosshair:
@@ -674,3 +703,201 @@ class CustomQGraphicsView(QGraphicsView):
             self.overlaid_items_display_parameters[overlay_uid]["opacity"]
         )
         graphics_item.setGraphicsEffect(opacity)
+
+    def set_edit_mode(self, enabled):
+        self.edit_mode = bool(enabled)
+        self._active_handle = None
+        self.setDragMode(
+            QGraphicsView.NoDrag if self.edit_mode else QGraphicsView.ScrollHandDrag
+        )
+        self.__update_handle_visibility()
+
+    def update_contour_paths(self, contour_defs):
+        if contour_defs is None:
+            self._contour_definitions = []
+            self.__clear_contour_items()
+            return
+        sanitized = []
+        for contour in contour_defs:
+            points = contour.get("points", [])
+            if not points:
+                continue
+            sanitized.append(
+                {
+                    "class_id": contour.get("class_id", 0),
+                    "points": [(float(r), float(c)) for (r, c) in points],
+                }
+            )
+        self._contour_definitions = sanitized
+        self.__rebuild_contour_items()
+
+    def clear_contours(self):
+        self._contour_definitions = []
+        self.__clear_contour_items()
+
+    def __pick_handle_at(self, scene_pos):
+        for handle in self._handle_items:
+            item = handle["item"]
+            if not item.isVisible():
+                continue
+            center = item.pos()
+            dx = scene_pos.x() - center.x()
+            dy = scene_pos.y() - center.y()
+            if (dx * dx + dy * dy) <= (
+                self._handle_pick_radius * self._handle_pick_radius
+            ):
+                return handle
+        return None
+
+    def __move_active_handle(self, scene_point):
+        if self._active_handle is None:
+            return
+        handle = self._active_handle
+        handle["item"].setPos(scene_point)
+        row, col = self.__scene_point_to_image(scene_point)
+        contour = self._contour_definitions[handle["contour_idx"]]
+        contour["points"][handle["point_idx"]] = (row, col)
+        self.__update_contour_path(handle["contour_idx"])
+        self.__emit_contours_updated()
+
+    def __clamp_scene_to_image(self, scene_point):
+        if self.image_item is None or self.image_item.pixmap().isNull():
+            return scene_point
+        pixmap = self.image_item.pixmap()
+        offset = self.image_item.offset()
+        max_x = offset.x() + max(1, pixmap.width()) - 1
+        max_y = offset.y() + max(1, pixmap.height()) - 1
+        clamped_x = min(max(offset.x(), scene_point.x()), max_x)
+        clamped_y = min(max(offset.y(), scene_point.y()), max_y)
+        return QPointF(clamped_x, clamped_y)
+
+    def __scene_point_to_image(self, scene_point):
+        if self.image_item is None or self.image_item.pixmap().isNull():
+            return 0.0, 0.0
+        pixmap = self.image_item.pixmap()
+        width = max(1, pixmap.width())
+        height = max(1, pixmap.height())
+        offset = self.image_item.offset()
+        local_x = min(max(0.0, scene_point.x() - offset.x()), width - 1)
+        local_y = min(max(0.0, scene_point.y() - offset.y()), height - 1)
+        col_ratio = local_x / (width - 1) if width > 1 else 0.0
+        row_ratio = local_y / (height - 1) if height > 1 else 0.0
+        col = col_ratio * (self.image_2d_w - 1) if self.image_2d_w > 1 else 0.0
+        row = row_ratio * (self.image_2d_h - 1) if self.image_2d_h > 1 else 0.0
+        return row, col
+
+    def __image_point_to_scene(self, col, row):
+        if self.image_item is None or self.image_item.pixmap().isNull():
+            return QPointF(col, row)
+        pixmap = self.image_item.pixmap()
+        width = max(1, pixmap.width())
+        height = max(1, pixmap.height())
+        col_ratio = col / (self.image_2d_w - 1) if self.image_2d_w > 1 else 0.0
+        row_ratio = row / (self.image_2d_h - 1) if self.image_2d_h > 1 else 0.0
+        offset = self.image_item.offset()
+        x = offset.x() + col_ratio * (width - 1)
+        y = offset.y() + row_ratio * (height - 1)
+        return QPointF(x, y)
+
+    def __clear_contour_items(self):
+        for entry in self._contour_items:
+            path_item = entry.get("path")
+            if path_item is not None:
+                self.scene.removeItem(path_item)
+        for handle in self._handle_items:
+            self.scene.removeItem(handle["item"])
+        self._contour_items = []
+        self._handle_items = []
+        self._active_handle = None
+
+    def __rebuild_contour_items(self):
+        self.__clear_contour_items()
+        if not self._contour_definitions:
+            return
+        for idx, contour in enumerate(self._contour_definitions):
+            path_item = QGraphicsPathItem()
+            pen = QPen(
+                self._class_colors.get(contour["class_id"], QColor(255, 255, 255))
+            )
+            pen.setWidth(2)
+            path_item.setPen(pen)
+            path_item.setZValue(120)
+            self.scene.addItem(path_item)
+            handles = []
+            for point_idx, _ in enumerate(contour["points"]):
+                handle_item = self.__create_handle_item(pen.color())
+                handle_info = {
+                    "item": handle_item,
+                    "contour_idx": idx,
+                    "point_idx": point_idx,
+                }
+                handles.append(handle_info)
+                self._handle_items.append(handle_info)
+            self._contour_items.append({"path": path_item, "handles": handles})
+        self.__refresh_contour_geometry()
+
+    def __update_contour_path(self, contour_idx):
+        if contour_idx >= len(self._contour_items):
+            return
+        contour = self._contour_definitions[contour_idx]
+        path = self.__build_path(contour)
+        self._contour_items[contour_idx]["path"].setPath(path)
+
+    def __refresh_contour_geometry(self):
+        if not self._contour_items:
+            return
+        for idx, contour in enumerate(self._contour_definitions):
+            if idx >= len(self._contour_items):
+                continue
+            path = self.__build_path(contour)
+            self._contour_items[idx]["path"].setPath(path)
+            for handle in self._contour_items[idx]["handles"]:
+                row, col = contour["points"][handle["point_idx"]]
+                scene_point = self.__image_point_to_scene(col, row)
+                handle["item"].setPos(scene_point)
+        self.__update_handle_visibility()
+
+    def __build_path(self, contour):
+        points = contour.get("points", [])
+        if not points:
+            return QPainterPath()
+        first_row, first_col = points[0]
+        painter_path = QPainterPath(self.__image_point_to_scene(first_col, first_row))
+        for row, col in points[1:]:
+            painter_path.lineTo(self.__image_point_to_scene(col, row))
+        painter_path.closeSubpath()
+        return painter_path
+
+    def __create_handle_item(self, color):
+        handle = QGraphicsEllipseItem(
+            -self._handle_radius,
+            -self._handle_radius,
+            self._handle_radius * 2,
+            self._handle_radius * 2,
+        )
+        handle.setBrush(color)
+        handle.setPen(Qt.NoPen)
+        handle.setZValue(150)
+        handle.setVisible(self.edit_mode)
+        self.scene.addItem(handle)
+        return handle
+
+    def __update_handle_visibility(self):
+        for handle in self._handle_items:
+            handle["item"].setVisible(self.edit_mode)
+
+    def __emit_contours_updated(self):
+        if not self.edit_mode:
+            return
+        payload = []
+        for contour in self._contour_definitions:
+            points = contour.get("points", [])
+            if len(points) < 3:
+                continue
+            payload.append(
+                {
+                    "class_id": int(contour.get("class_id", 0)),
+                    "points": [(float(r), float(c)) for (r, c) in points],
+                }
+            )
+        self.contours_updated.emit(payload)

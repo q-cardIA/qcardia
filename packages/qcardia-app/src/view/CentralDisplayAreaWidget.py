@@ -1,6 +1,7 @@
 import logging
 import traceback
 
+import cv2
 import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
@@ -62,6 +63,7 @@ class CentralDisplayAreaWidget(QWidget):
         )
         self.lge_slice_positions = None  # Physical locations along LGE stack
         self.lge_segmentation_volume = None
+        self.contour_edit_mode = False
 
     def resizeEvent(self, event):
         # Default resize behavior retained.
@@ -181,6 +183,9 @@ class CentralDisplayAreaWidget(QWidget):
         self.sagittal_viewer.annotation_display_state_changed.connect(
             self.annotation_display_state_changed
         )
+        self.sagittal_viewer.contours_updated.connect(
+            self.__on_sagittal_contours_updated
+        )
         # self.sagittal_viewer.patient_imported.connect(self.patient_imported)
 
     def reset_viewer(self):
@@ -203,6 +208,7 @@ class CentralDisplayAreaWidget(QWidget):
         self.axial_viewer.cleanse_annotations()
         self.coronal_viewer.cleanse_annotations()
         self.sagittal_viewer.cleanse_annotations()
+        self.sagittal_viewer.clear_contours()
         self.overlaid_volumes.clear()
 
     def on_import_data(self):
@@ -564,9 +570,43 @@ class CentralDisplayAreaWidget(QWidget):
         self.lge_segmentation_volume = seg_volume
         self.__update_lge_segmentation_overlay()
 
+    def set_contour_edit_mode(self, enabled):
+        self.contour_edit_mode = bool(enabled)
+        if hasattr(self, "sagittal_viewer"):
+            self.sagittal_viewer.set_edit_mode(self.contour_edit_mode)
+            self.__update_segmentation_overlay()
+
+    def __on_sagittal_contours_updated(self, contour_defs):
+        if (
+            not self.contour_edit_mode
+            or self.segmentation_volume is None
+            or contour_defs is None
+        ):
+            return
+        try:
+            depth = self.segmentation_volume.shape[0]
+            x_idx = self.point_clicker_position[0]
+            if x_idx < 0 or x_idx >= depth:
+                return
+            slice_idx = depth - x_idx - 1
+            if slice_idx < 0 or slice_idx >= depth:
+                return
+            target_shape = self.segmentation_volume[slice_idx].shape
+            updated_slice = self.__rasterize_contours(contour_defs, target_shape)
+            if updated_slice is None:
+                return
+            self.segmentation_volume[slice_idx] = updated_slice
+            self.sagittal_viewer.update_overlay(None)
+        except Exception as exc:
+            logging.error(
+                "[CentralDisplayAreaWidget] Failed to persist contour edit: %s",
+                exc,
+            )
+
     def __update_segmentation_overlay(self):
         if self.segmentation_volume is None:
             self.sagittal_viewer.update_overlay(None)
+            self.sagittal_viewer.clear_contours()
             return
 
         try:
@@ -575,8 +615,9 @@ class CentralDisplayAreaWidget(QWidget):
             if x_idx < 0 or x_idx >= self.segmentation_volume.shape[0]:
                 return
             seg_slice = self.segmentation_volume[-x_idx - 1, :, :]
-            overlay = self.__build_segmentation_overlay(seg_slice)
-            self.sagittal_viewer.update_overlay(overlay)
+            contours = self.__extract_segmentation_contours(seg_slice)
+            self.sagittal_viewer.update_contour_paths(contours)
+            self.sagittal_viewer.update_overlay(None)
         except Exception as e:
             logging.error(
                 "[CentralDisplayAreaWidget] Failed to update segmentation overlay: %s",
@@ -630,6 +671,70 @@ class CentralDisplayAreaWidget(QWidget):
             overlay[myo_outer_edges] = (0, 255, 0, 192)
 
         return overlay
+
+    @staticmethod
+    def __extract_segmentation_contours(seg_slice):
+        contours = []
+        if seg_slice is None:
+            return contours
+        class_ids = (1, 2, 3)
+        for class_id in class_ids:
+            mask = (seg_slice == class_id).astype(np.uint8)
+            if not mask.any():
+                continue
+            found, _ = cv2.findContours(
+                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            for contour in found:
+                if len(contour) < 3:
+                    continue
+                epsilon = 0.005 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+                points = [(float(point[0][1]), float(point[0][0])) for point in approx]
+                if len(points) >= 3:
+                    contours.append({"class_id": class_id, "points": points})
+        return contours
+
+    def __rasterize_contours(self, contour_defs, target_shape):
+        if (
+            contour_defs is None
+            or target_shape is None
+            or self.segmentation_volume is None
+        ):
+            return None
+        height, width = target_shape
+        if height <= 0 or width <= 0:
+            return None
+        canvas = np.zeros(target_shape, dtype=self.segmentation_volume.dtype)
+        class_order = (2, 1, 3)
+        for class_id in class_order:
+            polygons = []
+            for contour in contour_defs:
+                if contour.get("class_id") != class_id:
+                    continue
+                poly = self.__contour_to_polygon(
+                    contour.get("points", []), height, width
+                )
+                if poly is not None:
+                    polygons.append(poly)
+            if polygons:
+                cv2.fillPoly(canvas, polygons, int(class_id))
+        return canvas
+
+    @staticmethod
+    def __contour_to_polygon(points, height, width):
+        if not points or height <= 0 or width <= 0:
+            return None
+        converted = []
+        for row, col in points:
+            r = int(round(row))
+            c = int(round(col))
+            r = min(max(0, r), height - 1)
+            c = min(max(0, c), width - 1)
+            converted.append([c, r])
+        if len(converted) < 3:
+            return None
+        return np.asarray(converted, dtype=np.int32).reshape((-1, 1, 2))
 
     def on_annotation_layer_toggled(self, volume_uid, state):
         if state:

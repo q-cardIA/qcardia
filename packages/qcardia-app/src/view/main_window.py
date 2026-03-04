@@ -98,9 +98,18 @@ class MainWindow(QMainWindow):
             "QPushButton:checked{background-color:#3d4450;}"
         )
         self.toggle_sidebar_btn.toggled.connect(self._on_toggle_sidebar)
+        self.contour_edit_btn = QPushButton("Edit Contours")
+        self.contour_edit_btn.setCheckable(True)
+        self.contour_edit_btn.setStyleSheet(
+            "QPushButton{background-color:#2F3440; color:#E6E6E6; border:none; padding:6px 12px; border-radius:4px;}"
+            "QPushButton:hover{background-color:#3d4450;}"
+            "QPushButton:checked{background-color:#3f5d32;}"
+        )
+        self.contour_edit_btn.toggled.connect(self._on_contour_edit_toggled)
         self.app_title = QLabel("q-cardIA v0.0.1")
         self.app_title.setStyleSheet("color:#E6E6E6; font-size:18px; font-weight:bold")
         top_layout.addWidget(self.toggle_sidebar_btn)
+        top_layout.addWidget(self.contour_edit_btn)
         top_layout.addWidget(self.app_title)
         top_layout.addStretch(1)
 
@@ -155,6 +164,14 @@ class MainWindow(QMainWindow):
         else:
             self.sidebar.show()
             self.toggle_sidebar_btn.setText("Hide Menu")
+
+    def _on_contour_edit_toggled(self, checked):
+        if not hasattr(self, "display_area_widget"):
+            return
+        self.display_area_widget.set_contour_edit_mode(checked)
+        self.contour_edit_btn.setText(
+            "Editing Contours" if checked else "Edit Contours"
+        )
 
     def update_display(self, image_stack, slice_positions=None):
         """Update display with new image stack, centering the view."""
