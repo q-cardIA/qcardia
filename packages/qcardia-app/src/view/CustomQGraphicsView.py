@@ -64,6 +64,13 @@ class CustomQGraphicsView(QGraphicsView):
         self._handle_radius = 2.5
         self._handle_pick_radius = self._handle_radius * 2.0
         self._segment_pick_radius = 28.0
+        self._snap_to_image_enabled = True
+        self._snap_to_image_radius = 6.0
+        self._snap_edge_mask = None
+        self._snap_edge_strength = None
+        self._active_contour_drag = None
+        self._contour_drag_influence_radius = 42.0
+        self._contour_drag_falloff_sigma = 18.0
         self._edit_tool = "move"
         self._crosshair_color = QColor(137, 167, 207)
         self._class_colors = {
@@ -211,6 +218,11 @@ class CustomQGraphicsView(QGraphicsView):
                     self._active_handle = handle_info
                     self._handle_drag_offset = handle_info["item"].pos() - pos
                     return
+                if self._edit_tool == "move":
+                    contour_drag = self.__pick_contour_segment_at(pos)
+                    if contour_drag is not None:
+                        self._active_contour_drag = contour_drag
+                        return
             # Check if clicking on either crosshair line
             items = self.scene.items(pos)
             clicked_line = None
@@ -247,6 +259,7 @@ class CustomQGraphicsView(QGraphicsView):
             self.left_button_on_hold = False
             self.dragging_crosshair = None
             self._active_handle = None
+            self._active_contour_drag = None
         elif event.button() == Qt.RightButton:
             self.right_button_on_hold = False
 
@@ -256,7 +269,16 @@ class CustomQGraphicsView(QGraphicsView):
         if self.edit_mode and self._active_handle is not None:
             target = pos + self._handle_drag_offset
             clamped = self.__clamp_scene_to_image(target)
+            if self._snap_to_image_enabled and not (event.modifiers() & Qt.AltModifier):
+                clamped = self.__snap_scene_point_to_image(clamped)
             self.__move_active_handle(clamped)
+            return
+
+        if self.edit_mode and self._active_contour_drag is not None:
+            target = self.__clamp_scene_to_image(pos)
+            if self._snap_to_image_enabled and not (event.modifiers() & Qt.AltModifier):
+                target = self.__snap_scene_point_to_image(target)
+            self.__drag_active_contour(target)
             return
 
         if self.left_button_on_hold:
@@ -562,6 +584,7 @@ class CustomQGraphicsView(QGraphicsView):
         image_2d = slice_2d  # [:, ::-1]
         # image_2d = rotate(image_2d, 180).astype("uint8")
         self.display_2d = image_2d
+        self.__update_image_snap_cache(image_2d)
         h, w = image_2d.shape
         self.image_2d_h = h
         self.image_2d_w = w
@@ -706,6 +729,7 @@ class CustomQGraphicsView(QGraphicsView):
     def set_edit_mode(self, enabled):
         self.edit_mode = bool(enabled)
         self._active_handle = None
+        self._active_contour_drag = None
         if not self.edit_mode:
             self._edit_tool = "move"
         self.setDragMode(
@@ -718,6 +742,7 @@ class CustomQGraphicsView(QGraphicsView):
             tool = "move"
         self._edit_tool = tool
         self._active_handle = None
+        self._active_contour_drag = None
 
     def update_contour_paths(self, contour_defs):
         if contour_defs is None:
@@ -756,6 +781,115 @@ class CustomQGraphicsView(QGraphicsView):
                 return handle
         return None
 
+    def __pick_contour_segment_at(self, scene_pos):
+        if not self._contour_definitions:
+            return None
+
+        best_match = None
+        for contour_idx, contour in enumerate(self._contour_definitions):
+            points = contour.get("points", [])
+            num_points = len(points)
+            if num_points < 2:
+                continue
+
+            for point_idx in range(num_points):
+                start_row, start_col = points[point_idx]
+                end_row, end_col = points[(point_idx + 1) % num_points]
+                seg_start = self.__image_point_to_scene(start_col, start_row)
+                seg_end = self.__image_point_to_scene(end_col, end_row)
+                dist_sq = self.__distance_sq_to_segment(scene_pos, seg_start, seg_end)
+
+                if best_match is None or dist_sq < best_match["dist_sq"]:
+                    best_match = {
+                        "dist_sq": dist_sq,
+                        "contour_idx": contour_idx,
+                    }
+
+        if best_match is None:
+            return None
+
+        max_dist_sq = self._segment_pick_radius * self._segment_pick_radius
+        if best_match["dist_sq"] > max_dist_sq:
+            return None
+
+        return {
+            "contour_idx": best_match["contour_idx"],
+            "last_scene_pos": QPointF(scene_pos.x(), scene_pos.y()),
+        }
+
+    def __drag_active_contour(self, scene_pos):
+        if self._active_contour_drag is None:
+            return
+
+        contour_idx = self._active_contour_drag.get("contour_idx")
+        if (
+            contour_idx is None
+            or contour_idx < 0
+            or contour_idx >= len(self._contour_definitions)
+        ):
+            self._active_contour_drag = None
+            return
+
+        previous_scene = self._active_contour_drag.get("last_scene_pos")
+        if previous_scene is None:
+            self._active_contour_drag["last_scene_pos"] = QPointF(
+                scene_pos.x(), scene_pos.y()
+            )
+            return
+
+        prev_row, prev_col = self.__scene_point_to_image(previous_scene)
+        curr_row, curr_col = self.__scene_point_to_image(scene_pos)
+        delta_row = curr_row - prev_row
+        delta_col = curr_col - prev_col
+        if abs(delta_row) < 1e-6 and abs(delta_col) < 1e-6:
+            return
+
+        contour = self._contour_definitions[contour_idx]
+        points = contour.get("points", [])
+        if not points:
+            self._active_contour_drag["last_scene_pos"] = QPointF(
+                scene_pos.x(), scene_pos.y()
+            )
+            return
+
+        influence_radius = max(1.0, self._contour_drag_influence_radius)
+        sigma = max(1.0, self._contour_drag_falloff_sigma)
+        influence_sq = influence_radius * influence_radius
+
+        max_row = max(0.0, float(getattr(self, "image_2d_h", 1) - 1))
+        max_col = max(0.0, float(getattr(self, "image_2d_w", 1) - 1))
+
+        updated_points = []
+        for row, col in points:
+            point_scene = self.__image_point_to_scene(col, row)
+            dx = point_scene.x() - scene_pos.x()
+            dy = point_scene.y() - scene_pos.y()
+            dist_sq = dx * dx + dy * dy
+
+            if dist_sq > influence_sq:
+                weight = 0.0
+            else:
+                weight = float(np.exp(-dist_sq / (2.0 * sigma * sigma)))
+
+            new_row = min(max(0.0, row + delta_row * weight), max_row)
+            new_col = min(max(0.0, col + delta_col * weight), max_col)
+            updated_points.append((new_row, new_col))
+
+        contour["points"] = updated_points
+        self.__update_contour_path(contour_idx)
+
+        if contour_idx < len(self._contour_items):
+            for handle in self._contour_items[contour_idx]["handles"]:
+                point_idx = handle["point_idx"]
+                row, col = contour["points"][point_idx]
+                scene_point = self.__image_point_to_scene(col, row)
+                handle["item"].setPos(scene_point)
+
+        self.__emit_contours_updated()
+        self._active_contour_drag["last_scene_pos"] = QPointF(
+            scene_pos.x(), scene_pos.y()
+        )
+
     def __move_active_handle(self, scene_point):
         if self._active_handle is None:
             return
@@ -777,15 +911,131 @@ class CustomQGraphicsView(QGraphicsView):
             dy = point.y() - seg_start.y()
             return dx * dx + dy * dy
 
-        t = (
-            (point.x() - seg_start.x()) * seg_dx + (point.y() - seg_start.y()) * seg_dy
-        ) / seg_len_sq
+        numerator = (point.x() - seg_start.x()) * seg_dx + (
+            point.y() - seg_start.y()
+        ) * seg_dy
+        t = numerator / seg_len_sq
         t = max(0.0, min(1.0, t))
         proj_x = seg_start.x() + t * seg_dx
         proj_y = seg_start.y() + t * seg_dy
         dx = point.x() - proj_x
         dy = point.y() - proj_y
         return dx * dx + dy * dy
+
+    @staticmethod
+    def __project_point_to_segment(point, seg_start, seg_end):
+        seg_dx = seg_end.x() - seg_start.x()
+        seg_dy = seg_end.y() - seg_start.y()
+        seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy
+        if seg_len_sq <= 1e-9:
+            return QPointF(seg_start.x(), seg_start.y())
+
+        numerator = (point.x() - seg_start.x()) * seg_dx + (
+            point.y() - seg_start.y()
+        ) * seg_dy
+        t = numerator / seg_len_sq
+        t = max(0.0, min(1.0, t))
+        proj_x = seg_start.x() + t * seg_dx
+        proj_y = seg_start.y() + t * seg_dy
+        return QPointF(proj_x, proj_y)
+
+    def __update_image_snap_cache(self, image_2d):
+        if image_2d is None or image_2d.size == 0:
+            self._snap_edge_mask = None
+            self._snap_edge_strength = None
+            return
+
+        image_float = np.asarray(image_2d, dtype=np.float32)
+        grad_row, grad_col = np.gradient(image_float)
+        edge_strength = np.hypot(grad_row, grad_col)
+
+        valid = edge_strength[np.isfinite(edge_strength)]
+        if valid.size == 0:
+            self._snap_edge_mask = None
+            self._snap_edge_strength = None
+            return
+
+        max_strength = float(valid.max())
+        if max_strength <= 1e-6:
+            self._snap_edge_mask = None
+            self._snap_edge_strength = edge_strength
+            return
+
+        threshold = max(float(np.percentile(valid, 80.0)), max_strength * 0.25)
+        mask = edge_strength >= threshold
+
+        self._snap_edge_strength = edge_strength
+        self._snap_edge_mask = mask if mask.any() else None
+
+    def __scene_radius_to_image_radius(self, scene_pos, scene_radius):
+        if scene_radius <= 0.0:
+            return 1
+
+        center_row, center_col = self.__scene_point_to_image(scene_pos)
+
+        sample_x = self.__clamp_scene_to_image(
+            QPointF(scene_pos.x() + scene_radius, scene_pos.y())
+        )
+        sample_y = self.__clamp_scene_to_image(
+            QPointF(scene_pos.x(), scene_pos.y() + scene_radius)
+        )
+
+        row_x, col_x = self.__scene_point_to_image(sample_x)
+        row_y, col_y = self.__scene_point_to_image(sample_y)
+
+        horiz_radius = abs(col_x - center_col)
+        vert_radius = abs(row_y - center_row)
+        image_radius = int(round(max(horiz_radius, vert_radius)))
+        return max(1, image_radius)
+
+    def __snap_scene_point_to_image(self, scene_pos):
+        if self._snap_edge_mask is None or self._snap_edge_strength is None:
+            return scene_pos
+
+        center_row, center_col = self.__scene_point_to_image(scene_pos)
+        height, width = self._snap_edge_mask.shape
+        row_idx = min(max(0, int(round(center_row))), height - 1)
+        col_idx = min(max(0, int(round(center_col))), width - 1)
+
+        image_radius = self.__scene_radius_to_image_radius(
+            scene_pos, self._snap_to_image_radius
+        )
+        row_min = max(0, row_idx - image_radius)
+        row_max = min(height - 1, row_idx + image_radius)
+        col_min = max(0, col_idx - image_radius)
+        col_max = min(width - 1, col_idx + image_radius)
+
+        local_mask = self._snap_edge_mask[
+            row_min : row_max + 1,
+            col_min : col_max + 1,
+        ]
+        if not local_mask.any():
+            return scene_pos
+
+        local_candidates = np.argwhere(local_mask)
+        cand_rows = local_candidates[:, 0] + row_min
+        cand_cols = local_candidates[:, 1] + col_min
+
+        row_delta = cand_rows - row_idx
+        col_delta = cand_cols - col_idx
+        dist_sq = row_delta * row_delta + col_delta * col_delta
+
+        best_local_idx = int(np.argmin(dist_sq))
+        best_distance = dist_sq[best_local_idx]
+        tied = np.where(dist_sq == best_distance)[0]
+
+        if tied.size > 1:
+            tied_rows = cand_rows[tied]
+            tied_cols = cand_cols[tied]
+            tie_strength = self._snap_edge_strength[tied_rows, tied_cols]
+            best_tie_idx = tied[int(np.argmax(tie_strength))]
+            best_row = int(cand_rows[best_tie_idx])
+            best_col = int(cand_cols[best_tie_idx])
+        else:
+            best_row = int(cand_rows[best_local_idx])
+            best_col = int(cand_cols[best_local_idx])
+
+        return self.__image_point_to_scene(best_col, best_row)
 
     def __add_point_at(self, scene_pos):
         if not self._contour_definitions:
@@ -805,7 +1055,15 @@ class CustomQGraphicsView(QGraphicsView):
                 seg_end = self.__image_point_to_scene(end_col, end_row)
                 dist_sq = self.__distance_sq_to_segment(scene_pos, seg_start, seg_end)
                 if best_match is None or dist_sq < best_match[0]:
-                    best_match = (dist_sq, contour_idx, point_idx + 1)
+                    projected = self.__project_point_to_segment(
+                        scene_pos, seg_start, seg_end
+                    )
+                    best_match = (
+                        dist_sq,
+                        contour_idx,
+                        point_idx + 1,
+                        projected,
+                    )
 
         if best_match is None:
             return False
@@ -814,8 +1072,11 @@ class CustomQGraphicsView(QGraphicsView):
         if best_match[0] > max_dist_sq:
             return False
 
-        row, col = self.__scene_point_to_image(scene_pos)
-        _, contour_idx, insert_idx = best_match
+        snapped_pos = best_match[3] if best_match[3] is not None else scene_pos
+        if self._snap_to_image_enabled:
+            snapped_pos = self.__snap_scene_point_to_image(snapped_pos)
+        row, col = self.__scene_point_to_image(snapped_pos)
+        _, contour_idx, insert_idx, _ = best_match
         contour = self._contour_definitions[contour_idx]
         contour["points"].insert(insert_idx, (row, col))
 
