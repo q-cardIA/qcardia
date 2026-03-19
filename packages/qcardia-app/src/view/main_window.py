@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from view.CentralDisplayAreaWidget import CentralDisplayAreaWidget
-from view.NavigationPanelWidget import NavigationPanelWidget
+from view.QuickViewPanelWidget import QuickViewPanelWidget
 from view.SidebarWidget import SidebarWidget
 from view.welcome_widget import WelcomeWidget
 
@@ -49,8 +49,8 @@ class MainWindow(QMainWindow):
         # Central display (3 orthogonal viewers + empty cell)
         self.display_area_widget = CentralDisplayAreaWidget(self)
 
-        # Navigation panel (right)
-        self.navigation_panel = NavigationPanelWidget(self)
+        # Quick view results panel (right)
+        self.quick_view_panel = QuickViewPanelWidget(self)
 
         # Time controls below central area (keep existing semantics)
         time_controls_container = QWidget()
@@ -112,7 +112,7 @@ class MainWindow(QMainWindow):
         content_row.setSpacing(0)
         content_row.addWidget(self.sidebar)
         content_row.addWidget(self.display_area_widget, 1)
-        content_row.addWidget(self.navigation_panel)
+        content_row.addWidget(self.quick_view_panel)
         main_v.addLayout(content_row)
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)

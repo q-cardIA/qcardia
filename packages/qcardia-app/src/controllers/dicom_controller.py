@@ -64,6 +64,8 @@ class DICOMController:
                 self.view.display_area_widget.set_segmentation_volume(
                     temporal_segmentations[idx]
                 )
+            if hasattr(self.view, "quick_view_panel"):
+                self.view.quick_view_panel.show_cine_results()
         except Exception as e:
             logging.error(f"Segmentation failed: {e}")
             self._show_error_dialog(

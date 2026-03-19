@@ -1,0 +1,501 @@
+/* =============================================================
+   Dracula dark theme (base by Wanderson M.Pimenta, adapted)
+   ============================================================= */
+
+QWidget {
+	color: rgb(221, 221, 221);
+	font: 10pt "Segoe UI";
+}
+
+QToolTip {
+	color: #ffffff;
+	background-color: rgba(33, 37, 43, 180);
+	border: none;
+	border-left: 2px solid rgb(255, 121, 198);
+	text-align: left;
+	padding-left: 8px;
+	margin: 0px;
+}
+
+QTableWidget {
+	background-color: transparent;
+	padding: 10px;
+	border-radius: 5px;
+	gridline-color: rgb(44, 49, 58);
+	border-bottom: 1px solid rgb(44, 49, 60);
+}
+QTableWidget::item {
+	border-color: rgb(44, 49, 60);
+	padding-left: 5px;
+	padding-right: 5px;
+	gridline-color: rgb(44, 49, 60);
+}
+QTableWidget::item:selected {
+	background-color: rgb(189, 147, 249);
+}
+QHeaderView::section {
+	background-color: rgb(33, 37, 43);
+	border-style: none;
+	border-bottom: 1px solid rgb(44, 49, 60);
+	border-right: 1px solid rgb(44, 49, 60);
+}
+QTableWidget::horizontalHeader {
+	background-color: rgb(33, 37, 43);
+}
+QHeaderView::section:horizontal {
+	border: 1px solid rgb(33, 37, 43);
+	background-color: rgb(33, 37, 43);
+	padding: 3px;
+	border-top-left-radius: 7px;
+	border-top-right-radius: 7px;
+}
+QHeaderView::section:vertical {
+	border: 1px solid rgb(44, 49, 60);
+}
+
+QLineEdit {
+	background-color: rgb(33, 37, 43);
+	border-radius: 5px;
+	border: 2px solid rgb(33, 37, 43);
+	padding-left: 10px;
+	selection-color: rgb(255, 255, 255);
+	selection-background-color: rgb(255, 121, 198);
+}
+QLineEdit:hover { border: 2px solid rgb(64, 71, 88); }
+QLineEdit:focus  { border: 2px solid rgb(91, 101, 124); }
+
+QPlainTextEdit {
+	background-color: rgb(27, 29, 35);
+	border-radius: 5px;
+	padding: 10px;
+	selection-color: rgb(255, 255, 255);
+	selection-background-color: rgb(255, 121, 198);
+}
+QPlainTextEdit QScrollBar:vertical   { width: 8px; }
+QPlainTextEdit QScrollBar:horizontal { height: 8px; }
+QPlainTextEdit:hover { border: 2px solid rgb(64, 71, 88); }
+QPlainTextEdit:focus { border: 2px solid rgb(91, 101, 124); }
+
+QScrollBar:horizontal {
+	border: none;
+	background: rgb(52, 59, 72);
+	height: 8px;
+	margin: 0px 21px 0 21px;
+	border-radius: 0px;
+}
+QScrollBar::handle:horizontal {
+	background: rgb(189, 147, 249);
+	min-width: 25px;
+	border-radius: 4px;
+}
+QScrollBar::add-line:horizontal {
+	border: none;
+	background: rgb(55, 63, 77);
+	width: 20px;
+	border-top-right-radius: 4px;
+	border-bottom-right-radius: 4px;
+	subcontrol-position: right;
+	subcontrol-origin: margin;
+}
+QScrollBar::sub-line:horizontal {
+	border: none;
+	background: rgb(55, 63, 77);
+	width: 20px;
+	border-top-left-radius: 4px;
+	border-bottom-left-radius: 4px;
+	subcontrol-position: left;
+	subcontrol-origin: margin;
+}
+QScrollBar::up-arrow:horizontal, QScrollBar::down-arrow:horizontal { background: none; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal   { background: none; }
+
+QScrollBar:vertical {
+	border: none;
+	background: rgb(52, 59, 72);
+	width: 8px;
+	margin: 21px 0 21px 0;
+	border-radius: 0px;
+}
+QScrollBar::handle:vertical {
+	background: rgb(189, 147, 249);
+	min-height: 25px;
+	border-radius: 4px;
+}
+QScrollBar::add-line:vertical {
+	border: none;
+	background: rgb(55, 63, 77);
+	height: 20px;
+	border-bottom-left-radius: 4px;
+	border-bottom-right-radius: 4px;
+	subcontrol-position: bottom;
+	subcontrol-origin: margin;
+}
+QScrollBar::sub-line:vertical {
+	border: none;
+	background: rgb(55, 63, 77);
+	height: 20px;
+	border-top-left-radius: 4px;
+	border-top-right-radius: 4px;
+	subcontrol-position: top;
+	subcontrol-origin: margin;
+}
+QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical { background: none; }
+QScrollBar::add-page:vertical,  QScrollBar::sub-page:vertical  { background: none; }
+
+QCheckBox::indicator {
+	border: 3px solid rgb(52, 59, 72);
+	width: 15px;
+	height: 15px;
+	border-radius: 10px;
+	background: rgb(44, 49, 60);
+}
+QCheckBox::indicator:hover   { border: 3px solid rgb(58, 66, 81); }
+QCheckBox::indicator:checked {
+	background: rgb(189, 147, 249);
+	border: 3px solid rgb(52, 59, 72);
+}
+
+QRadioButton::indicator {
+	border: 3px solid rgb(52, 59, 72);
+	width: 15px;
+	height: 15px;
+	border-radius: 10px;
+	background: rgb(44, 49, 60);
+}
+QRadioButton::indicator:hover   { border: 3px solid rgb(58, 66, 81); }
+QRadioButton::indicator:checked {
+	background: rgb(94, 106, 130);
+	border: 3px solid rgb(52, 59, 72);
+}
+
+QComboBox {
+	background-color: rgb(27, 29, 35);
+	border-radius: 5px;
+	border: 2px solid rgb(33, 37, 43);
+	padding: 5px;
+	padding-left: 10px;
+}
+QComboBox:hover { border: 2px solid rgb(64, 71, 88); }
+QComboBox::drop-down {
+	subcontrol-origin: padding;
+	subcontrol-position: top right;
+	width: 25px;
+	border-left-width: 3px;
+	border-left-color: rgba(39, 44, 54, 150);
+	border-left-style: solid;
+	border-top-right-radius: 3px;
+	border-bottom-right-radius: 3px;
+}
+QComboBox QAbstractItemView {
+	color: rgb(255, 121, 198);
+	background-color: rgb(33, 37, 43);
+	padding: 10px;
+	selection-background-color: rgb(39, 44, 54);
+}
+
+/* Default slider (applies to all sliders not overridden below) */
+QSlider::groove:horizontal {
+	border-radius: 5px;
+	height: 10px;
+	margin: 0px;
+	background-color: rgb(52, 59, 72);
+}
+QSlider::groove:horizontal:hover { background-color: rgb(55, 62, 76); }
+QSlider::handle:horizontal {
+	background-color: rgb(189, 147, 249);
+	border: none;
+	height: 10px;
+	width: 10px;
+	margin: 0px;
+	border-radius: 5px;
+}
+QSlider::handle:horizontal:hover   { background-color: rgb(195, 155, 255); }
+QSlider::handle:horizontal:pressed { background-color: rgb(255, 121, 198); }
+
+QSlider::groove:vertical {
+	border-radius: 5px;
+	width: 10px;
+	margin: 0px;
+	background-color: rgb(52, 59, 72);
+}
+QSlider::groove:vertical:hover { background-color: rgb(55, 62, 76); }
+QSlider::handle:vertical {
+	background-color: rgb(189, 147, 249);
+	border: none;
+	height: 10px;
+	width: 10px;
+	margin: 0px;
+	border-radius: 5px;
+}
+QSlider::handle:vertical:hover   { background-color: rgb(195, 155, 255); }
+QSlider::handle:vertical:pressed { background-color: rgb(255, 121, 198); }
+
+QPushButton {
+	border: 2px solid rgb(52, 59, 72);
+	border-radius: 5px;
+	background-color: rgb(52, 59, 72);
+	padding: 4px 12px;
+	min-height: 26px;
+}
+QPushButton:hover {
+	background-color: rgb(57, 65, 80);
+	border: 2px solid rgb(61, 70, 86);
+}
+QPushButton:pressed {
+	background-color: rgb(35, 40, 49);
+	border: 2px solid rgb(43, 50, 61);
+}
+QPushButton:checked {
+	background-color: rgb(44, 35, 65);
+	border: 2px solid rgb(189, 147, 249);
+	color: rgb(189, 147, 249);
+}
+QPushButton:disabled {
+	background-color: rgb(40, 44, 52);
+	color: rgb(80, 85, 95);
+	border: 2px solid rgb(44, 49, 58);
+}
+
+/* =============================================================
+   App-specific role overrides (Dracula palette)
+   ============================================================= */
+
+/* ---- Top bar ---------------------------------------------- */
+QWidget[role="topBar"] {
+	background-color: rgb(33, 37, 43);
+	border-bottom: 1px solid rgb(44, 49, 58);
+}
+
+QLabel[role="appTitle"] {
+	color: rgb(113, 126, 149);
+	font-size: 11px;
+	background-color: transparent;
+}
+
+QPushButton[role="sidebarToggle"] {
+	background-color: transparent;
+	border: 1px solid rgb(52, 59, 72);
+	color: rgb(113, 126, 149);
+	font-size: 11px;
+	min-height: 24px;
+}
+QPushButton[role="sidebarToggle"]:hover {
+	background-color: rgb(44, 49, 57);
+	color: rgb(221, 221, 221);
+}
+
+QPushButton[role="contourToggle"] {
+	background-color: rgb(44, 49, 58);
+}
+QPushButton[role="contourToggle"]:checked {
+	background-color: rgb(30, 55, 40);
+	border: 2px solid rgb(80, 200, 120);
+	color: rgb(80, 200, 120);
+}
+
+QPushButton[role="contourTool"] {
+	font-size: 11px;
+	padding: 4px 10px;
+	min-height: 24px;
+}
+QPushButton[role="contourTool"]:checked {
+	background-color: rgb(44, 35, 65);
+	border: 2px solid rgb(189, 147, 249);
+	color: rgb(189, 147, 249);
+}
+
+QLabel[secondary="true"] {
+	color: rgb(113, 126, 149);
+	font-size: 11px;
+	background-color: transparent;
+}
+
+/* ---- Sidebar ---------------------------------------------- */
+QFrame#sidebar,
+QFrame[role="sidebarPanel"] {
+	background-color: rgb(33, 37, 43);
+	border-right: 1px solid rgb(44, 49, 58);
+}
+
+QLabel[role="sidebarSectionTitle"] {
+	color: rgb(113, 126, 149);
+	font-size: 10px;
+	font-weight: bold;
+	background-color: transparent;
+	padding: 4px 2px 2px 2px;
+}
+
+QPushButton[role="sidebarButton"] {
+	background-color: transparent;
+	border: none;
+	border-radius: 4px;
+	color: rgb(200, 200, 210);
+	text-align: left;
+	padding: 6px 10px;
+	font-size: 13px;
+	min-height: 28px;
+}
+QPushButton[role="sidebarButton"]:hover {
+	background-color: rgb(40, 44, 52);
+	color: rgb(221, 221, 221);
+}
+QPushButton[role="sidebarButton"]:pressed {
+	background-color: rgb(189, 147, 249);
+	color: rgb(255, 255, 255);
+}
+
+QPushButton[role="sidebarSubButton"] {
+	background-color: transparent;
+	border: none;
+	border-radius: 4px;
+	color: rgb(113, 126, 149);
+	text-align: left;
+	padding: 5px 10px;
+	font-size: 11px;
+	min-height: 24px;
+}
+QPushButton[role="sidebarSubButton"]:hover {
+	background-color: rgb(40, 44, 52);
+	color: rgb(180, 180, 190);
+}
+QPushButton[role="sidebarSubButton"]:pressed {
+	background-color: rgb(189, 147, 249);
+	color: rgb(255, 255, 255);
+}
+
+/* ---- Central display area --------------------------------- */
+QWidget#centralDisplayArea {
+	background-color: rgb(27, 29, 35);
+}
+
+QWidget[role="viewerCard"] {
+	background-color: rgb(33, 37, 43);
+	border: 1px solid rgb(44, 49, 58);
+}
+
+QLabel[role="viewerTitle"] {
+	color: rgb(113, 126, 149);
+	font-size: 10px;
+	font-weight: bold;
+	background-color: transparent;
+}
+
+QLabel[role="viewerMeta"] {
+	color: rgb(80, 88, 104);
+	font-size: 10px;
+	background-color: transparent;
+}
+
+QLabel[role="divider"] {
+	background-color: rgb(44, 49, 58);
+}
+
+/* ---- Quick view panel ------------------------------------- */
+QFrame#quickViewPanel {
+	background-color: rgb(33, 37, 43);
+	border-left: 1px solid rgb(44, 49, 58);
+}
+
+QLabel[role="panelTitle"] {
+	color: rgb(221, 221, 221);
+	font-size: 13px;
+	font-weight: bold;
+	background-color: transparent;
+}
+
+QWidget[role="resultsSection"] {
+	background-color: transparent;
+}
+
+QLabel[role="sectionTitle"] {
+	color: rgb(113, 126, 149);
+	font-size: 10px;
+	font-weight: bold;
+	background-color: transparent;
+	padding-bottom: 4px;
+}
+
+QLabel[role="metricKey"] {
+	color: rgb(113, 126, 149);
+	font-size: 11px;
+	background-color: transparent;
+}
+
+QLabel[role="metricValue"] {
+	color: rgb(221, 221, 221);
+	font-size: 11px;
+	font-weight: bold;
+	background-color: transparent;
+}
+
+QLabel[role="statusHint"] {
+	color: rgb(80, 88, 104);
+	font-size: 11px;
+	font-style: italic;
+	background-color: transparent;
+}
+
+/* ---- Welcome screen --------------------------------------- */
+QWidget#welcomeRoot,
+QWidget[role="welcomeRoot"] {
+	background-color: rgb(40, 44, 52);
+}
+
+QLabel[role="welcomeHeadline"] {
+	color: rgb(221, 221, 221);
+	font-size: 20px;
+	font-weight: bold;
+	background-color: transparent;
+	padding: 30px 0 10px 0;
+}
+
+QWidget[role="welcomeSidePanel"] {
+	background-color: rgb(33, 37, 43);
+	border: 1px solid rgb(44, 49, 58);
+	border-radius: 6px;
+}
+
+QLabel[role="welcomeSectionTitle"] {
+	color: rgb(113, 126, 149);
+	font-size: 13px;
+	font-weight: bold;
+	background-color: transparent;
+}
+
+QPushButton[role="welcomePrimaryAction"] {
+	background-color: rgb(44, 35, 65);
+	border: 2px solid rgb(189, 147, 249);
+	border-radius: 5px;
+	color: rgb(221, 221, 221);
+	font-size: 13px;
+	padding: 12px 20px;
+	text-align: left;
+}
+QPushButton[role="welcomePrimaryAction"]:hover {
+	background-color: rgb(60, 48, 88);
+	border-color: rgb(210, 175, 255);
+	color: rgb(255, 255, 255);
+}
+QPushButton[role="welcomePrimaryAction"]:pressed {
+	background-color: rgb(189, 147, 249);
+	color: rgb(255, 255, 255);
+}
+
+QPushButton[role="welcomeInfoAction"] {
+	background-color: rgb(40, 44, 52);
+	border: 2px solid rgb(52, 59, 72);
+	border-radius: 5px;
+	color: rgb(180, 180, 190);
+	font-size: 13px;
+	padding: 10px 16px;
+	text-align: left;
+}
+QPushButton[role="welcomeInfoAction"]:hover {
+	background-color: rgb(44, 49, 57);
+	border-color: rgb(64, 71, 88);
+	color: rgb(221, 221, 221);
+}
+QPushButton[role="welcomeInfoAction"]:pressed {
+	background-color: rgb(189, 147, 249);
+	color: rgb(255, 255, 255);
+}
