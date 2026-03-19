@@ -36,12 +36,17 @@ def apply_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
     app.setPalette(_build_palette())
 
-    # Load bundled Segoe UI; fall back gracefully to system font
+    # Load any Inter TTF files found in assets/fonts/
     assets = Path(__file__).parent.parent / "assets" / "fonts"
-    for ttf in ("segoeui.ttf", "segoeuib.ttf"):
-        QFontDatabase.addApplicationFont(str(assets / ttf))
+    family = None
+    for ttf in sorted(assets.glob("Inter*.ttf")):
+        fid = QFontDatabase.addApplicationFont(str(ttf))
+        if fid != -1 and family is None:
+            names = QFontDatabase.applicationFontFamilies(fid)
+            if names:
+                family = names[0]
 
-    font = QFont("Segoe UI")
+    font = QFont(family) if family else app.font()
     font.setPointSize(10)
     app.setFont(font)
 

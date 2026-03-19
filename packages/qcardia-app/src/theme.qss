@@ -4,7 +4,7 @@
 
 QWidget {
 	color: rgb(221, 221, 221);
-	font: 10pt "Segoe UI";
+	font-size: 10pt;
 }
 
 QToolTip {
@@ -441,12 +441,23 @@ QWidget[role="welcomeRoot"] {
 	background-color: rgb(40, 44, 52);
 }
 
-QLabel[role="welcomeHeadline"] {
+QLabel[role="welcomeAppName"] {
 	color: rgb(221, 221, 221);
-	font-size: 20px;
+	font-size: 22px;
 	font-weight: bold;
 	background-color: transparent;
-	padding: 30px 0 10px 0;
+}
+
+QLabel[role="welcomeHeadline"] {
+	color: rgb(113, 126, 149);
+	font-size: 13px;
+	background-color: transparent;
+}
+
+QLabel[role="welcomeDescription"] {
+	color: rgb(80, 88, 104);
+	font-size: 11px;
+	background-color: transparent;
 }
 
 QWidget[role="welcomeSidePanel"] {
@@ -456,8 +467,8 @@ QWidget[role="welcomeSidePanel"] {
 }
 
 QLabel[role="welcomeSectionTitle"] {
-	color: rgb(113, 126, 149);
-	font-size: 13px;
+	color: rgb(189, 147, 249);
+	font-size: 16px;
 	font-weight: bold;
 	background-color: transparent;
 }
