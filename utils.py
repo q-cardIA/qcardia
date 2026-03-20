@@ -21,6 +21,70 @@ def get_colors(num_colors: int) -> List[Tuple[int, int, int]]:
     return colors
 
 
+def _sample_mask(myo: np.ndarray, x: float, y: float, height: int, width: int) -> int:
+    """Sample nearest pixel from floating point coordinates."""
+    ix = int(round(x))
+    iy = int(round(y))
+    if 0 <= iy < height and 0 <= ix < width:
+        return int(myo[iy, ix] > 0)
+    return 0
+
+
+def _refine_transition(
+    myo: np.ndarray,
+    start: Tuple[float, float],
+    end: Tuple[float, float],
+    start_val: int,
+    height: int,
+    width: int,
+    iterations: int = 8,
+) -> List[float]:
+    """Binary search between two samples that straddle the boundary."""
+    ax, ay = start
+    bx, by = end
+    for _ in range(iterations):
+        mx = (ax + bx) * 0.5
+        my = (ay + by) * 0.5
+        mid_val = _sample_mask(myo, mx, my, height, width)
+        if mid_val == start_val:
+            ax, ay = mx, my
+        else:
+            bx, by = mx, my
+    return [(ax + bx) * 0.5, (ay + by) * 0.5]
+
+
+def _trace_spoke_intersections(
+    myo: np.ndarray,
+    cx: float,
+    cy: float,
+    angle: float,
+    max_radius: float,
+    height: int,
+    width: int,
+    step: float = 0.25,
+    max_intersections: int = 2,
+):
+    dx = np.cos(angle)
+    dy = np.sin(angle)
+    radii = np.arange(step, max_radius + step, step)
+    prev_point = (cx, cy)
+    prev_val = _sample_mask(myo, cx, cy, height, width)
+    intersections = []
+    for r in radii:
+        x = cx + r * dx
+        y = cy + r * dy
+        curr_val = _sample_mask(myo, x, y, height, width)
+        if curr_val != prev_val:
+            intersections.append(
+                _refine_transition(myo, prev_point, (x, y), prev_val, height, width)
+            )
+            prev_val = curr_val
+            if len(intersections) >= max_intersections:
+                break
+        prev_point = (x, y)
+    return intersections
+
+
 def get_polar_points(myo, lv, rv, num_spokes=60):
 
     cy = lv[0]
@@ -37,34 +101,17 @@ def get_polar_points(myo, lv, rv, num_spokes=60):
     # Store intersection points for each spoke
     all_intersections = []
     for angle in angles:
-        # Calculate unit vector for this angle
-        dx = np.cos(angle)
-        dy = np.sin(angle)
-
-        # Generate points along the spoke
-        num_points = int(max_radius * 4)
-        radii = np.linspace(0, max_radius, num_points)
-        spoke_points = np.array([(cx + r * dx, cy + r * dy) for r in radii])
-
-        # Find intersections with the donut
-        intersections = []
-        for i in range(len(spoke_points) - 1):
-            x1, y1 = spoke_points[i]
-            x2, y2 = spoke_points[i + 1]
-
-            # Check if we're crossing the boundary
-            if (
-                0 <= int(y1) < height
-                and 0 <= int(x1) < width
-                and 0 <= int(y2) < height
-                and 0 <= int(x2) < width
-            ):
-                val1 = myo[int(y1), int(x1)]
-                val2 = myo[int(y2), int(x2)]
-                if val1 != val2:  # We found an intersection
-                    # Use the midpoint as the intersection point
-                    intersections.append([(x1 + x2) / 2, (y1 + y2) / 2])
-
+        intersections = _trace_spoke_intersections(
+            myo,
+            cx,
+            cy,
+            angle,
+            max_radius,
+            height,
+            width,
+            step=0.25,
+            max_intersections=2,
+        )
         all_intersections.append(intersections)
 
     return all_intersections
@@ -86,34 +133,17 @@ def get_rv_polar_points(myo, lv, rv_pt, num_spokes=60):
     # Store intersection points for each spoke
     all_intersections = []
     for angle in angles:
-        # Calculate unit vector for this angle
-        dx = np.cos(angle)
-        dy = np.sin(angle)
-
-        # Generate points along the spoke
-        num_points = int(max_radius * 4)
-        radii = np.linspace(0, max_radius, num_points)
-        spoke_points = np.array([(cx + r * dx, cy + r * dy) for r in radii])
-
-        # Find intersections with the donut
-        intersections = []
-        for i in range(len(spoke_points) - 1):
-            x1, y1 = spoke_points[i]
-            x2, y2 = spoke_points[i + 1]
-
-            # Check if we're crossing the boundary
-            if (
-                0 <= int(y1) < height
-                and 0 <= int(x1) < width
-                and 0 <= int(y2) < height
-                and 0 <= int(x2) < width
-            ):
-                val1 = myo[int(y1), int(x1)]
-                val2 = myo[int(y2), int(x2)]
-                if val1 != val2:  # We found an intersection
-                    # Use the midpoint as the intersection point
-                    intersections.append([(x1 + x2) / 2, (y1 + y2) / 2])
-
+        intersections = _trace_spoke_intersections(
+            myo,
+            cx,
+            cy,
+            angle,
+            max_radius,
+            height,
+            width,
+            step=0.125,
+            max_intersections=4,
+        )
         all_intersections.append(intersections)
 
     return all_intersections
