@@ -146,17 +146,46 @@ for patient in patient_list:
     # motion = smooth_ddf(motion)
     input_images = np.asarray(cine_seq.slice_data["slice06"]["pixel_array"])
     myo = cine_segmentation[cine_seq.mid_slice_num - 1, :] == 2
+    rv = cine_segmentation[cine_seq.mid_slice_num - 1, :] == 3
 
-    the_pts = utils.get_polar_points(
-        myo[0, ...].astype(float),
-        cine_seq.get_lv_center_points()[1][0],
-        cine_seq.get_rv_insertion_points(),
-        num_spokes=10,
-    )
-    
-    landmark_xy = np.array(
-        [[float(pt[0][0]), float(pt[0][1])] for pt in the_pts], dtype=np.float32
-    )
+    num_landmarks = 10
+
+    def contour_landmarks(mask, n):
+        contour = max(find_contours(mask.astype(float), level=0.5), key=len)
+        contour_closed = np.vstack([contour, contour[0]])
+        seglens = np.linalg.norm(np.diff(contour_closed, axis=0), axis=1)
+        arclen = np.concatenate([[0], np.cumsum(seglens)])
+        sample_arclen = np.linspace(0, arclen[-1], n, endpoint=False)
+        rows = np.interp(sample_arclen, arclen, contour_closed[:, 0])
+        cols = np.interp(sample_arclen, arclen, contour_closed[:, 1])
+        return np.stack([cols, rows], axis=1).astype(np.float32)  # (x, y)
+
+    lv_cavity = binary_fill_holes(myo[0]) & ~myo[0]
+    landmark_xy = contour_landmarks(lv_cavity, num_landmarks)
+
+    # RV free wall landmarks: arc between insertion points, excluding the septal wall
+    rv_insertion = cine_seq.get_rv_insertion_points()[1][0]  # [[x1,y1],[x2,y2]] at ED
+    ins_xy = np.array(rv_insertion, dtype=np.float32)  # (2, 2) in (x, y)
+    rv_contour = max(find_contours(rv[0].astype(float), level=0.5), key=len)  # (N, 2) row,col
+    rv_contour_xy = rv_contour[:, ::-1]  # convert to (x, y)
+    # find contour indices closest to each insertion point
+    dists = np.linalg.norm(rv_contour_xy[:, None, :] - ins_xy[None, :, :], axis=2)  # (N, 2)
+    i1, i2 = np.argmin(dists[:, 0]), np.argmin(dists[:, 1])
+    if i1 > i2:
+        i1, i2 = i2, i1
+    arc_a = rv_contour[i1:i2+1]         # i1 → i2 forward
+    arc_b = np.vstack([rv_contour[i2:], rv_contour[:i1+1]])  # i2 → wrap → i1
+    # free wall is the arc whose mean point is further from the LV center
+    lv_center = np.array(cine_seq.get_lv_center_points()[1][0])  # (row, col)
+    free_arc = arc_a if np.mean(np.linalg.norm(arc_a - lv_center, axis=1)) > \
+                        np.mean(np.linalg.norm(arc_b - lv_center, axis=1)) else arc_b
+    # uniform arc-length sampling
+    seglens = np.linalg.norm(np.diff(free_arc, axis=0), axis=1)
+    arclen = np.concatenate([[0], np.cumsum(seglens)])
+    sample_arclen = np.linspace(0, arclen[-1], num_landmarks, endpoint=True)
+    rows = np.interp(sample_arclen, arclen, free_arc[:, 0])
+    cols = np.interp(sample_arclen, arclen, free_arc[:, 1])
+    landmark_xy_rv = np.stack([cols, rows], axis=1).astype(np.float32)  # (x, y)
     
     # def warp_point(flow_hw, point_xy):
     #     """flow_hw: (2,H,W) backward flow in pixels, point_xy: (x,y) in pixels."""
@@ -213,27 +242,34 @@ for patient in patient_list:
     
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    colors = utils.get_colors(10)
+    colors = utils.get_colors(num_landmarks)
+
+    seg_ed = torch.from_numpy(myo[0].astype(np.float32)).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+    seg_ed_rv = torch.from_numpy(rv[0].astype(np.float32)).unsqueeze(0).unsqueeze(0)
 
     def animate(i):
 
         ax.clear()
         if i == 0:
             frame_pts = landmark_xy
-            im = ax.imshow(input_images[0, ...]/np.amax(input_images[0, ...])+myo[0], cmap="gray")
+            frame_pts_rv = landmark_xy_rv
+            warped_myo = myo[0]
+            warped_rv = rv[0]
         else:
+            flow = torch.from_numpy(motion[i-1, ...]).unsqueeze(0).float()  # (1,2,H,W)
             frame_pts = warp_landmarks_direct(motion[i-1, ...], landmark_xy)
-            im = ax.imshow(input_images[i, ...], cmap="gray")
+            frame_pts_rv = warp_landmarks_direct(motion[i-1, ...], landmark_xy_rv)
+            warped_myo = warp_layer(seg_ed, flow).squeeze().numpy() > 0.5
+            warped_rv = warp_layer(seg_ed_rv, flow).squeeze().numpy() > 0.5
+
+        im = ax.imshow(input_images[i, ...]/np.amax(input_images[i, ...])+warped_myo+warped_rv, cmap="gray")
 
         for idx, (pt_x, pt_y) in enumerate(frame_pts):
-            ax.plot(
-                pt_x,
-                pt_y,
-                "o",
-                color=matplotlib.colors.to_hex(colors[idx]),
-                markersize=3,
-                markeredgewidth=0.0,
-            )
+            ax.plot(pt_x, pt_y, "o", color=matplotlib.colors.to_hex(colors[idx]),
+                    markersize=3, markeredgewidth=0.0)
+        for idx, (pt_x, pt_y) in enumerate(frame_pts_rv):
+            ax.plot(pt_x, pt_y, "o", color=matplotlib.colors.to_hex(colors[idx]),
+                    markersize=3, markeredgewidth=0.0)
 
         ax.set_axis_off()
         return [im]
