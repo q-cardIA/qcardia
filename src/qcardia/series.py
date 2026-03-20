@@ -807,6 +807,97 @@ class CineSeries(BaseSeries):
 
         return self._rv_insertion_points
 
+    @staticmethod
+    def _contour_landmarks(
+        mask: np.ndarray, n: int, endpoint: bool = False
+    ) -> np.ndarray:
+        """Sample n landmarks at uniform arc-length intervals from a mask contour.
+
+        Returns (n, 2) in (x, y) / (col, row) order.
+        """
+        contour = max(find_contours(mask.astype(float), level=0.5), key=len)
+        contour_closed = np.vstack([contour, contour[0]])
+        seglens = np.linalg.norm(np.diff(contour_closed, axis=0), axis=1)
+        arclen = np.concatenate([[0], np.cumsum(seglens)])
+        sample_arclen = np.linspace(0, arclen[-1], n, endpoint=endpoint)
+        rows = np.interp(sample_arclen, arclen, contour_closed[:, 0])
+        cols = np.interp(sample_arclen, arclen, contour_closed[:, 1])
+        return np.stack([cols, rows], axis=1).astype(np.float32)
+
+    def get_lv_endo_landmarks(self, t: int = 0, n: int = 10) -> np.ndarray:
+        """Return n landmarks on the LV endocardial boundary at time t.
+
+        Uses the mid-slice segmentation. Returns (n, 2) in (x, y) order.
+        """
+        myo = self._myo[self.mid_slice_num, t].astype(bool)
+        lv_cavity = binary_fill_holes(myo) & ~myo
+        return self._contour_landmarks(lv_cavity, n, endpoint=False)
+
+    def get_rv_freewall_landmarks(self, t: int = 0, n: int = 10) -> np.ndarray:
+        """Return n landmarks along the RV free wall at time t.
+
+        Anchored at the insertion points; excludes the septal wall.
+        Returns (n, 2) in (x, y) order.
+        """
+        rv = self._rv[self.mid_slice_num, t].astype(bool)
+        ins_xy = np.array(
+            self._rv_insertion_points[1][t], dtype=np.float32
+        )  # (2, 2) in (x, y)
+        rv_contour = max(find_contours(rv.astype(float), level=0.5), key=len)
+        rv_contour_xy = rv_contour[:, ::-1]  # (N, 2) in (x, y)
+        dists = np.linalg.norm(
+            rv_contour_xy[:, None, :] - ins_xy[None, :, :], axis=2
+        )
+        i1, i2 = np.argmin(dists[:, 0]), np.argmin(dists[:, 1])
+        if i1 > i2:
+            i1, i2 = i2, i1
+        arc_a = rv_contour[i1:i2 + 1]
+        arc_b = np.vstack([rv_contour[i2:], rv_contour[:i1 + 1]])
+        lv_center = np.array(self._lv_center_points[1][t])  # (row, col)
+        mean_a = np.mean(np.linalg.norm(arc_a - lv_center, axis=1))
+        mean_b = np.mean(np.linalg.norm(arc_b - lv_center, axis=1))
+        free_arc = arc_a if mean_a > mean_b else arc_b
+        seglens = np.linalg.norm(np.diff(free_arc, axis=0), axis=1)
+        arclen = np.concatenate([[0], np.cumsum(seglens)])
+        sample_arclen = np.linspace(0, arclen[-1], n, endpoint=True)
+        rows = np.interp(sample_arclen, arclen, free_arc[:, 0])
+        cols = np.interp(sample_arclen, arclen, free_arc[:, 1])
+        return np.stack([cols, rows], axis=1).astype(np.float32)
+
+    def warp_landmarks(
+        self, flow_hw: np.ndarray, points_xy: np.ndarray
+    ) -> np.ndarray:
+        """Propagate landmarks through a DDF by direct bilinear sampling.
+
+        flow_hw: (2, H, W) backward DDF (flow_hw[0]=dy, flow_hw[1]=dx).
+        points_xy: (N, 2) in (x, y) / fixed-frame space.
+        Returns (N, 2) warped coordinates.
+        """
+        if flow_hw.shape[0] != 2:
+            flow_hw = np.moveaxis(flow_hw, -1, 0)
+        _, H, W = flow_hw.shape
+        coords = []
+        for x_coord, y_coord in points_xy:
+            x0 = int(np.clip(np.floor(x_coord), 0, W - 2))
+            y0 = int(np.clip(np.floor(y_coord), 0, H - 2))
+            x1, y1 = x0 + 1, y0 + 1
+            wx = float(x_coord - x0)
+            wy = float(y_coord - y0)
+            dx = (
+                (1 - wx) * (1 - wy) * flow_hw[1, y0, x0]
+                + wx * (1 - wy) * flow_hw[1, y0, x1]
+                + (1 - wx) * wy * flow_hw[1, y1, x0]
+                + wx * wy * flow_hw[1, y1, x1]
+            )
+            dy = (
+                (1 - wx) * (1 - wy) * flow_hw[0, y0, x0]
+                + wx * (1 - wy) * flow_hw[0, y0, x1]
+                + (1 - wx) * wy * flow_hw[0, y1, x0]
+                + wx * wy * flow_hw[0, y1, x1]
+            )
+            coords.append((x_coord - dx, y_coord - dy))
+        return np.array(coords, dtype=np.float32)
+
 
 class LGESeries(BaseSeries):
 
