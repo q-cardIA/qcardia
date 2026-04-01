@@ -268,15 +268,51 @@ class BaseSeries:
         temporal_positions = []
 
         # Read DICOM files and extract relevant information
-        for file in files:
+        for file_idx, file in enumerate(files):
             the_ds = pydicom.dcmread(file)
+
+            # Skip files that contain no image data (e.g. metadata-only DICOM files)
+            if 'PixelData' not in the_ds:
+                continue
+
             all_dicom_data.append(the_ds)
-            slice_position.append(the_ds.ImagePositionPatient)
-            slice_orientation.append(the_ds.ImageOrientationPatient)
-            if int(the_ds.NumberOfTemporalPositions) == 1:
-                temporal_positions.append(int(the_ds.InstanceNumber))
+
+            # Spatial position/orientation — fall back for non-standard DICOM
+            if hasattr(the_ds, 'ImagePositionPatient') and hasattr(the_ds, 'ImageOrientationPatient'):
+                slice_position.append(the_ds.ImagePositionPatient)
+                slice_orientation.append(the_ds.ImageOrientationPatient)
+            elif hasattr(the_ds, 'SliceLocation'):
+                # Construct a position along the z-axis using the scalar SliceLocation tag
+                slice_position.append([0.0, 0.0, float(the_ds.SliceLocation)])
+                slice_orientation.append([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
             else:
+                # Last resort: use file order as a proxy for slice position
+                slice_position.append([0.0, 0.0, float(file_idx)])
+                slice_orientation.append([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+
+            # Temporal position — fall back to InstanceNumber
+            n_temporal = int(getattr(the_ds, 'NumberOfTemporalPositions', 0))
+            if n_temporal == 1:
+                temporal_positions.append(int(the_ds.InstanceNumber))
+            elif hasattr(the_ds, 'TemporalPositionIdentifier'):
                 temporal_positions.append(int(the_ds.TemporalPositionIdentifier))
+            else:
+                temporal_positions.append(int(the_ds.InstanceNumber))
+
+        # Filter to the dominant image size — DICOM folders sometimes contain
+        # scout/localizer images or mixed acquisitions with different H×W.
+        if all_dicom_data:
+            from collections import Counter
+            all_shapes = [(ds.Rows, ds.Columns) for ds in all_dicom_data]
+            dominant_shape = Counter(all_shapes).most_common(1)[0][0]
+            if len(set(all_shapes)) > 1:
+                print(f"    Warning: mixed image sizes found; keeping {dominant_shape[0]}x{dominant_shape[1]} only "
+                      f"(skipping {sum(1 for s in all_shapes if s != dominant_shape)} file(s)).")
+                keep = [s == dominant_shape for s in all_shapes]
+                all_dicom_data   = [d for d, k in zip(all_dicom_data,   keep) if k]
+                slice_position   = [p for p, k in zip(slice_position,   keep) if k]
+                slice_orientation = [o for o, k in zip(slice_orientation, keep) if k]
+                temporal_positions = [t for t, k in zip(temporal_positions, keep) if k]
 
         # Gets unique positions from given positions and orientations.
         # assigns a slice index to each image based on its position.
@@ -403,12 +439,19 @@ class BaseSeries:
             ndarray: The pixel array for all slices/times.
         """
 
-        return np.asarray(
-            [
-                self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
-                for i in range(self.number_of_slices)
-            ]
-        )
+        from collections import Counter
+        arrays = [
+            self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
+            for i in range(self.number_of_slices)
+        ]
+        # Trim to the most common temporal length if slices have inconsistent frame counts
+        frame_counts = [len(a) for a in arrays]
+        if len(set(frame_counts)) > 1:
+            dominant_n = Counter(frame_counts).most_common(1)[0][0]
+            print(f"    Warning: inconsistent frame counts across slices {set(frame_counts)}; "
+                  f"trimming all slices to {dominant_n} frames.")
+            arrays = [a[:dominant_n] for a in arrays if len(a) >= dominant_n]
+        return np.asarray(arrays)
 
     def _reshape_array(self, pa: np.ndarray):
         """

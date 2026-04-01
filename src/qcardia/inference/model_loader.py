@@ -16,13 +16,22 @@ models_path = Path(__file__).parent.parent.parent.parent.parent / "qcardia-model
 if models_path.exists():
     sys.path.insert(0, str(models_path))
 
-# Import models from qcardia_models
+# Import models from qcardia_models — import separately so a missing
+# UNet_Transformer (not in the public package) doesn't block UNet2d.
 try:
-    from qcardia_models.models import UNet2d, UNet_Transformer
+    from qcardia_models.models import UNet2d
     MODELS_AVAILABLE = True
 except ImportError:
     MODELS_AVAILABLE = False
+    UNet2d = None
     print("Warning: qcardia_models not available. Model loading will fail.")
+
+try:
+    from qcardia_models.models import UNet_Transformer
+    TRANSFORMER_AVAILABLE = True
+except ImportError:
+    TRANSFORMER_AVAILABLE = False
+    UNet_Transformer = None
 
 
 def determine_model_type(config: Dict) -> str:
@@ -163,6 +172,11 @@ def load_model_from_config(config: Dict, wandb_run_path: Path,
             la_vector_integration=la_vector_integration
         )
     elif model_type == "transformer":
+        if not TRANSFORMER_AVAILABLE:
+            raise ImportError(
+                "UNet_Transformer is not available in the installed qcardia_models package. "
+                "Install qcardia-models-dev to use context-aware transformer models."
+            )
         model = UNet_Transformer(
             nr_input_channels=nr_image_channels,
             channels_list=channels_list,

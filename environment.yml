@@ -1,0 +1,23 @@
+name: qcardia-inference
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pytorch=2.3.1
+  - cpuonly          # remove this line and add pytorch-cuda=12.1 for GPU
+  - numpy
+  - matplotlib
+  - scipy
+  - scikit-image
+  - nibabel
+  - pydicom
+  - opencv
+  - natsort
+  - pyyaml
+  - tqdm
+  - pip
+  - pip:
+    - git+https://github.com/q-cardIA/qcardia-data.git
+    - git+https://github.com/q-cardIA/qcardia-models.git

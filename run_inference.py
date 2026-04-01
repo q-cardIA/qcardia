@@ -69,24 +69,24 @@ def parse_args():
     )
     parser.add_argument(
         "--model",
-        required=True,
         metavar="DIR",
-        help="WandB run directory containing files/config.yaml and files/best_model.pt.",
+        default=r"D:\code\QcardiaLocal\qcardia\weights\SAx_2d",
+        help="Path to model directory containing config-copy.yaml and best_model.pt.",
     )
     parser.add_argument(
         "--data-dir",
-        required=True,
         metavar="DIR",
+        default=r"D:\code\QcardiaLocal\data\newCMR\CardiSorted_QLGE04_",
         help="Subject directory containing CINE_SAX/, CINE_2CH/, etc. subfolders.",
     )
     parser.add_argument(
         "--views",
         nargs="+",
         metavar="VIEW",
-        default=None,
+        default=["CINE_SAX"],
         help=(
             "Which chamber folders to process, e.g. --views CINE_SAX CINE_2CH. "
-            "Defaults to all CINE_* folders found in data-dir."
+            "Defaults to CINE_SAX."
         ),
     )
     parser.add_argument(
