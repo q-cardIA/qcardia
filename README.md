@@ -58,18 +58,23 @@ Attempting to load a Transformer model will raise an `ImportError`.
 
 ## Model weights
 
-Trained weights are not bundled with the package. Each model is stored as a
-WandB run directory with the following layout:
+Trained weights are not bundled with the package. Point `--model` at a
+directory containing the config and weights. Two layouts are supported:
 
 ```
-<model-run-dir>/
+# Flat layout (e.g. weights/LAx/):
+<model-dir>/
+    config-copy.yaml
+    best_model.pt       (or last_model.pt)
+
+# WandB run layout:
+<model-dir>/
     files/
-        config.yaml      # model hyperparameters
-        best_model.pt    # trained weights  (or last_model.pt)
+        config-copy.yaml
+        best_model.pt   (or last_model.pt)
 ```
 
-Point `--la-model`, `--sax-model`, and `--context-model` at directories that
-follow this structure.
+`best_model.pt` is preferred over `last_model.pt` when both are present.
 
 ---
 
@@ -101,20 +106,31 @@ files manually.
 
 ### Multi-view pipeline (`run_multiview.py`)
 
-The main entry point for running one or more models across all cardiac views.
+The main entry point for running a model across cardiac views.
 
 ```bash
+# Run on all available CINE_* views found in the subject folder:
 python run_multiview.py \
-    --data-dir  /path/to/CardiSorted_QLGE01_ \
-    --la-model  /path/to/wandb/LAx \
-    --sax-model /path/to/wandb/SAx_2d \
-    [--context-model /path/to/wandb/SAx_context] \
-    [--output-dir /path/to/results]
+    --model    /path/to/wandb/run \
+    --data-dir /path/to/CardiSorted_QLGE01_
+
+# Run on specific views only:
+python run_multiview.py \
+    --model    /path/to/wandb/run \
+    --data-dir /path/to/CardiSorted_QLGE01_ \
+    --views CINE_SAX CINE_2CH
+
+# Custom output location and label for the model:
+python run_multiview.py \
+    --model    /path/to/wandb/run \
+    --data-dir /path/to/CardiSorted_QLGE01_ \
+    --name MyModel \
+    --output-dir /path/to/results
 ```
 
-At least one of `--la-model`, `--sax-model`, or `--context-model` must be
-provided. Arguments can be freely combined: for example, pass only `--sax-model`
-to run a single SAX model without processing LA views.
+`--views` defaults to every `CINE_*` subfolder found in `--data-dir`. Pass it
+explicitly if you only want to process a subset. `--name` sets the label used in
+output folder naming and defaults to the model directory name.
 
 ### Output directory layout
 

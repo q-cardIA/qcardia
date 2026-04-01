@@ -176,15 +176,20 @@ def load_model_from_config(config: Dict, wandb_run_path: Path,
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
-    # Load weights
-    weights_path = wandb_run_path / "files" / "last_model.pt"
+    # Load weights — support flat layout and WandB files/ subdirectory
+    weights_path = wandb_run_path / "last_model.pt"
     if not weights_path.exists():
-        # Try alternative filename
+        weights_path = wandb_run_path / "best_model.pt"
+    if not weights_path.exists():
+        weights_path = wandb_run_path / "files" / "last_model.pt"
+    if not weights_path.exists():
         weights_path = wandb_run_path / "files" / "best_model.pt"
-    
+
     if not weights_path.exists():
-        raise FileNotFoundError(f"Model weights not found at {wandb_run_path / 'files'}. "
-                              f"Expected 'last_model.pt' or 'best_model.pt'")
+        raise FileNotFoundError(
+            f"Model weights not found in {wandb_run_path} or {wandb_run_path / 'files'}. "
+            f"Expected 'last_model.pt' or 'best_model.pt'."
+        )
     
     model_weights = torch.load(weights_path, map_location=device)
     model.load_state_dict(model_weights)

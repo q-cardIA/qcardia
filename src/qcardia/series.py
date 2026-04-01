@@ -205,8 +205,12 @@ class BaseSeries:
                 nr_output_scales=config["unet"]["nr_output_scales"],
             ).to("cpu")
             
-            # Try both possible weight file names
-            weights_path = wandb_run_path / "files" / "last_model.pt"
+            # Try flat layout first, then WandB files/ subdirectory
+            weights_path = wandb_run_path / "last_model.pt"
+            if not weights_path.exists():
+                weights_path = wandb_run_path / "best_model.pt"
+            if not weights_path.exists():
+                weights_path = wandb_run_path / "files" / "last_model.pt"
             if not weights_path.exists():
                 weights_path = wandb_run_path / "files" / "best_model.pt"
             
@@ -458,7 +462,11 @@ class BaseSeries:
             dict: The configuration loaded from the specified path.
         """
 
-        config_path = wandb_run_path / "files" / "config-copy.yaml"
+        # Support both flat layout (config-copy.yaml next to weights) and
+        # WandB run layout (files/config-copy.yaml).
+        config_path = wandb_run_path / "config-copy.yaml"
+        if not config_path.exists():
+            config_path = wandb_run_path / "files" / "config-copy.yaml"
         return yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
 
     def _get_pixel_spacing(self):
