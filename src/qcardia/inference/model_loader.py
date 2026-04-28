@@ -205,7 +205,7 @@ def load_model_from_config(config: Dict, wandb_run_path: Path,
             f"Expected 'last_model.pt' or 'best_model.pt'."
         )
     
-    model_weights = torch.load(weights_path, map_location=device)
+    model_weights = torch.load(weights_path, map_location=device, weights_only=False)
     model.load_state_dict(model_weights)
     
     # Move to device and set to eval mode
