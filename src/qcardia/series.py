@@ -1160,4 +1160,36 @@ class LGESeries(BaseSeries):
         else:
             self._run_model(wandb_run_path, image_type="psir")
 
-        return self._segmentation_prediction
+
+class PerfusionSeries(BaseSeries):
+    """Perfusion (PERF_REST / PERF_STRESS) series.
+
+    The acquisition protocol yields 4 short-axis slices where slice 3 (1-indexed)
+    is a test/calibration slice and must be excluded.  The filtering is applied
+    automatically when exactly 4 slices are present; other slice counts are left
+    unchanged so the class is safe for non-standard acquisitions.
+    """
+
+    # 0-based index of the test slice within a 4-slice acquisition
+    _TEST_SLICE_IDX: int = 1
+    _TEST_SLICE_N:   int = 4
+
+    def __init__(self, folder: Path, batch_size: int = 50):
+        super().__init__(folder, batch_size)
+        print(f"[PerfusionSeries] loaded {self.number_of_slices} slices from {folder}")
+        if self.number_of_slices == self._TEST_SLICE_N:
+            self._drop_test_slice()
+            print(f"[PerfusionSeries] test slice (idx {self._TEST_SLICE_IDX}) dropped → {self.number_of_slices} slices remain")
+
+    def _drop_test_slice(self) -> None:
+        """Remove the test/calibration slice and renumber remaining slices."""
+        old_keys = sorted(self.slice_data.keys())  # ["slice01", ..., "slice04"]
+        new_data = {}
+        new_idx = 1
+        for i, key in enumerate(old_keys):
+            if i == self._TEST_SLICE_IDX:
+                continue
+            new_data[f"slice{new_idx:02}"] = self.slice_data[key]
+            new_idx += 1
+        self.slice_data = new_data
+        self.number_of_slices = len(new_data)
