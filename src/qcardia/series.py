@@ -1161,6 +1161,99 @@ class LGESeries(BaseSeries):
             self._run_model(wandb_run_path, image_type="psir")
 
 
+class PCFlowSeries:
+    """Phase-contrast flow series.
+
+    Loads all DICOMs in a PC_AORTA / PC_MPA folder and splits them into
+    magnitude and phase components.
+
+    Phase detection: any DICOM whose ImageType contains the standalone element
+    'P' is phase (velocity-encoded).  This covers both Siemens style
+    ('ORIGINAL','PRIMARY','P',...) and Philips style ('ORIGINAL','PRIMARY',
+    'PHASE CONTRAST M','P','PCA').
+
+    When multiple magnitude sub-types are present, priority is:
+      M > M_FFE > M_PCA > MAG > (most-common fallback)
+    M_FFE (standard FFE magnitude) gives the clearest anatomy for PC display.
+
+    Attributes:
+        magnitude_frames (list[np.ndarray]): per-frame 2-D magnitude arrays.
+        phase_frames     (list[np.ndarray]): per-frame 2-D phase arrays.
+        magnitude_meta   (list[pydicom.Dataset]): DICOM headers for magnitude frames.
+        phase_meta       (list[pydicom.Dataset]): DICOM headers for phase frames.
+        rows, columns    (int): image dimensions.
+        n_mag, n_phase   (int): number of temporal frames per component.
+    """
+
+    _MAG_PRIORITY = ["M", "M_FFE", "M_PCA", "MAG"]
+
+    def __init__(self, folder: Path):
+        self.folder = Path(folder)
+        (
+            self.magnitude_frames,
+            self.phase_frames,
+            self.magnitude_meta,
+            self.phase_meta,
+            self.rows,
+            self.columns,
+        ) = self._load_and_split()
+        self.n_mag   = len(self.magnitude_frames)
+        self.n_phase = len(self.phase_frames)
+
+    def _load_and_split(self):
+        from natsort import natsorted
+
+        files = natsorted([
+            f for f in self.folder.iterdir()
+            if f.is_file() and not f.stem.startswith(".")
+        ])
+
+        mag_by_type: dict = {}   # type_str → list of (instance_num, ds)
+        phase_list:  list = []   # list of (instance_num, ds)
+
+        for f in files:
+            try:
+                ds = pydicom.dcmread(f)
+                if "PixelData" not in ds:
+                    continue
+                img_type = list(getattr(ds, "ImageType", []))
+                inst     = int(getattr(ds, "InstanceNumber", 0))
+                # Phase detection: look for standalone 'P' anywhere in ImageType.
+                if "P" in img_type:
+                    phase_list.append((inst, ds))
+                else:
+                    component = img_type[2] if len(img_type) > 2 else "M"
+                    mag_by_type.setdefault(component, []).append((inst, ds))
+            except Exception:
+                continue
+
+        # Pick best magnitude sub-type
+        best_type = None
+        for t in self._MAG_PRIORITY:
+            if t in mag_by_type:
+                best_type = t
+                break
+        if best_type is None and mag_by_type:
+            best_type = max(mag_by_type, key=lambda t: len(mag_by_type[t]))
+
+        mag_list = mag_by_type.get(best_type, []) if best_type else []
+
+        def _sort_and_split(pairs):
+            pairs = sorted(pairs, key=lambda p: p[0])
+            frames = [ds.pixel_array for _, ds in pairs]
+            metas  = [ds               for _, ds in pairs]
+            return frames, metas
+
+        mag_frames, mag_metas     = _sort_and_split(mag_list)
+        phase_frames, phase_metas = _sort_and_split(phase_list)
+
+        all_ds = (mag_metas or phase_metas)
+        rows    = all_ds[0].Rows    if all_ds else 64
+        columns = all_ds[0].Columns if all_ds else 64
+
+        return mag_frames, phase_frames, mag_metas, phase_metas, rows, columns
+
+
 class PerfusionSeries(BaseSeries):
     """Perfusion (PERF_REST / PERF_STRESS) series.
 
