@@ -505,12 +505,21 @@ class BaseSeries:
             dict: The configuration loaded from the specified path.
         """
 
-        # Support both flat layout (config-copy.yaml next to weights) and
-        # WandB run layout (files/config-copy.yaml).
-        config_path = wandb_run_path / "config-copy.yaml"
-        if not config_path.exists():
-            config_path = wandb_run_path / "files" / "config-copy.yaml"
-        return yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+        # Search order: flat dir first, then WandB files/ subdir.
+        # Accept both config-copy.yaml (old WandB export) and config.yaml.
+        candidates = [
+            wandb_run_path / "config-copy.yaml",
+            wandb_run_path / "config.yaml",
+            wandb_run_path / "files" / "config-copy.yaml",
+            wandb_run_path / "files" / "config.yaml",
+        ]
+        for config_path in candidates:
+            if config_path.exists():
+                return yaml.load(config_path.open(), Loader=yaml.FullLoader)
+        raise FileNotFoundError(
+            f"No config file found in {wandb_run_path}. "
+            f"Expected config-copy.yaml or config.yaml."
+        )
 
     def _get_pixel_spacing(self):
         """

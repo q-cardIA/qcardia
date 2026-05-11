@@ -50,9 +50,15 @@ from qcardia.vis import (
     compute_ejection_fraction,
     create_segmentation_gif,
     create_static_segmentation_plot,
-    plot_all_sax_visualizations,
     plot_marker_points,
     plot_volume_curves,
+)
+from qcardia.vis.sax_viz import (
+    compute_sax_volume_curves,
+    plot_sax_total_volume_curves,
+    compute_sax_volume_heatmap_data,
+    plot_sax_volume_heatmaps,
+    create_sax_3d_animation,
 )
 
 # Chamber types that are treated as long-axis views (volume curves, single GIF)
@@ -105,6 +111,15 @@ def parse_args():
         help=(
             "Directory to write all results. "
             "Defaults to <data-dir>_results/ next to the subject folder."
+        ),
+    )
+    parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help=(
+            "Skip data-check images, static plots, per-slice GIFs, 3D animation, "
+            "and marker-point plots. Only saves NIfTI segmentation masks, "
+            "sax_total_volume_curves.png, and sax_volume_heatmaps.png."
         ),
     )
     return parser.parse_args()
@@ -194,10 +209,13 @@ def main():
             print(f"    Slices: {cine_seq.number_of_slices}  Frames: {cine_seq.number_of_temporal_positions}")
 
             # 2 / 7  Data check visualisation
-            print(f"  [2/7] Creating data check visualisation...")
-            vis_path = OUTPUT_PATH / f"{chamber_type}_data_check.png"
-            pipeline_utils.create_data_check_visualization(cine_seq, chamber_type, vis_path)
-            print(f"    Saved: {vis_path.name}")
+            if not args.minimal:
+                print(f"  [2/7] Creating data check visualisation...")
+                vis_path = OUTPUT_PATH / f"{chamber_type}_data_check.png"
+                pipeline_utils.create_data_check_visualization(cine_seq, chamber_type, vis_path)
+                print(f"    Saved: {vis_path.name}")
+            else:
+                print(f"  [2/7] Skipped (--minimal)")
 
             # 3 / 7  Inference
             print(f"  [3/7] Running inference...")
@@ -206,65 +224,92 @@ def main():
             if cine_segmentation.max() == 0:
                 print(f"    WARNING: Prediction is all zeros — check model path and weights.")
 
-            # 4 / 7  Prepare visualisation helpers
-            print(f"  [4/7] Preparing visualisations...")
-            mid_slice_idx, mid_frame_idx, pred_slice, input_image = (
-                pipeline_utils.get_middle_slice_and_frame(cine_seq, cine_segmentation)
-            )
-
-            # 5 / 7  Static segmentation plot
-            print(f"  [5/7] Creating static segmentation plot...")
-            vis_path = OUTPUT_PATH / f"segmentation_frame{mid_frame_idx}.png"
-            create_static_segmentation_plot(
-                input_image, pred_slice,
-                f"{chamber_type} ({MODEL_NAME})",
-                mid_frame_idx, vis_path,
-            )
-            print(f"    Saved: {vis_path.name}")
-
-            # 6 / 7  Animated GIFs
-            print(f"  [6/7] Creating segmentation animation...")
             seg_shape = cine_segmentation.shape
 
-            if chamber_type in SAX_CHAMBERS and len(seg_shape) == 4:
-                n_slices = seg_shape[0]
-                print(f"    Creating {n_slices} GIFs (one per slice)...")
-                for slice_idx in range(n_slices):
-                    gif_path = OUTPUT_PATH / f"segmentation_animation_slice{slice_idx:02d}.gif"
+            # 4 / 7  Prepare visualisation helpers (only needed when not minimal)
+            if not args.minimal:
+                print(f"  [4/7] Preparing visualisations...")
+                mid_slice_idx, mid_frame_idx, pred_slice, input_image = (
+                    pipeline_utils.get_middle_slice_and_frame(cine_seq, cine_segmentation)
+                )
+            else:
+                print(f"  [4/7] Skipped (--minimal)")
+
+            # 5 / 7  Static segmentation plot
+            if not args.minimal:
+                print(f"  [5/7] Creating static segmentation plot...")
+                vis_path = OUTPUT_PATH / f"segmentation_frame{mid_frame_idx}.png"
+                create_static_segmentation_plot(
+                    input_image, pred_slice,
+                    f"{chamber_type} ({MODEL_NAME})",
+                    mid_frame_idx, vis_path,
+                )
+                print(f"    Saved: {vis_path.name}")
+            else:
+                print(f"  [5/7] Skipped (--minimal)")
+
+            # 6 / 7  Animated GIFs
+            if not args.minimal:
+                print(f"  [6/7] Creating segmentation animation...")
+                if chamber_type in SAX_CHAMBERS and len(seg_shape) == 4:
+                    n_slices = seg_shape[0]
+                    print(f"    Creating {n_slices} GIFs (one per slice)...")
+                    for slice_idx in range(n_slices):
+                        gif_path = OUTPUT_PATH / f"segmentation_animation_slice{slice_idx:02d}.gif"
+                        try:
+                            create_segmentation_gif(
+                                cine_segmentation, cine_seq.slice_data,
+                                f"{chamber_type} ({MODEL_NAME})",
+                                cine_seq.number_of_temporal_positions, gif_path,
+                                slice_idx=slice_idx,
+                            )
+                        except Exception as e:
+                            print(f"    Animation failed for slice {slice_idx}: {e}")
+                    print(f"    Saved: {n_slices} GIFs (slice00-{n_slices - 1:02d})")
+                else:
+                    gif_path = OUTPUT_PATH / "segmentation_animation.gif"
                     try:
                         create_segmentation_gif(
                             cine_segmentation, cine_seq.slice_data,
                             f"{chamber_type} ({MODEL_NAME})",
                             cine_seq.number_of_temporal_positions, gif_path,
-                            slice_idx=slice_idx,
                         )
+                        print(f"    Saved: {gif_path.name}")
                     except Exception as e:
-                        print(f"    Animation failed for slice {slice_idx}: {e}")
-                print(f"    Saved: {n_slices} GIFs (slice00-{n_slices - 1:02d})")
+                        print(f"    Animation failed: {e}")
             else:
-                gif_path = OUTPUT_PATH / "segmentation_animation.gif"
-                try:
-                    create_segmentation_gif(
-                        cine_segmentation, cine_seq.slice_data,
-                        f"{chamber_type} ({MODEL_NAME})",
-                        cine_seq.number_of_temporal_positions, gif_path,
-                    )
-                    print(f"    Saved: {gif_path.name}")
-                except Exception as e:
-                    print(f"    Animation failed: {e}")
+                print(f"  [6/7] Skipped (--minimal)")
 
             # 7 / 7  Save NIfTI predictions
             print(f"  [7/7] Saving segmentation masks (NIfTI)...")
             cine_seq.save_predictions(seg_output_path)
             print(f"    Saved to: {seg_output_path}")
 
-            # Extra: SAX volume heatmaps and 3-D animation
+            # Extra: SAX volume curves + heatmaps (always); 3D animation (not minimal)
             if chamber_type in SAX_CHAMBERS and len(seg_shape) == 4:
                 print(f"  [Extra] SAX-specific visualisations...")
                 try:
-                    plot_all_sax_visualizations(
-                        cine_segmentation, chamber_type, MODEL_NAME, OUTPUT_PATH, fps=10
+                    volume_curves = compute_sax_volume_curves(cine_segmentation)
+                    print(f"  Creating total volume curves...")
+                    plot_sax_total_volume_curves(
+                        volume_curves, chamber_type, MODEL_NAME,
+                        OUTPUT_PATH / "sax_total_volume_curves.png",
                     )
+                    print(f"  Creating volume heatmaps...")
+                    heatmap_data = compute_sax_volume_heatmap_data(cine_segmentation)
+                    plot_sax_volume_heatmaps(
+                        heatmap_data, chamber_type, MODEL_NAME,
+                        OUTPUT_PATH / "sax_volume_heatmaps.png",
+                    )
+                    print(f"    ✓ sax_total_volume_curves.png")
+                    print(f"    ✓ sax_volume_heatmaps.png")
+                    if not args.minimal:
+                        print(f"  Creating 3D animation (this may take a minute)...")
+                        create_sax_3d_animation(
+                            cine_segmentation, chamber_type, MODEL_NAME,
+                            OUTPUT_PATH / "sax_3d_animation.gif", fps=10,
+                        )
+                        print(f"    ✓ sax_3d_animation.gif")
                 except Exception as e:
                     print(f"    SAX visualisation failed: {e}")
                     traceback.print_exc()
@@ -291,22 +336,23 @@ def main():
                     print(f"    Volume computation failed: {e}")
 
             # Extra: anatomical marker points
-            print(f"  [Extra] Computing anatomical marker points...")
-            try:
-                cine_seq._compute_marker_points()
-                lv_centers = cine_seq.get_lv_center_points()
-                rv_centers = cine_seq.get_rv_center_points()
-                rv_insertions = cine_seq.get_rv_insertion_points()
+            if not args.minimal:
+                print(f"  [Extra] Computing anatomical marker points...")
+                try:
+                    cine_seq._compute_marker_points()
+                    lv_centers = cine_seq.get_lv_center_points()
+                    rv_centers = cine_seq.get_rv_center_points()
+                    rv_insertions = cine_seq.get_rv_insertion_points()
 
-                vis_path = OUTPUT_PATH / f"marker_points_frame{mid_frame_idx}.png"
-                plot_marker_points(
-                    input_image, pred_slice,
-                    lv_centers, rv_centers, rv_insertions,
-                    f"{chamber_type} ({MODEL_NAME})", mid_frame_idx, vis_path,
-                )
-                print(f"    Saved: {vis_path.name}")
-            except Exception as e:
-                print(f"    Marker point visualisation failed: {e}")
+                    vis_path = OUTPUT_PATH / f"marker_points_frame{mid_frame_idx}.png"
+                    plot_marker_points(
+                        input_image, pred_slice,
+                        lv_centers, rv_centers, rv_insertions,
+                        f"{chamber_type} ({MODEL_NAME})", mid_frame_idx, vis_path,
+                    )
+                    print(f"    Saved: {vis_path.name}")
+                except Exception as e:
+                    print(f"    Marker point visualisation failed: {e}")
 
             print(f"\n  SUCCESS: {MODEL_NAME} on {chamber_type}")
             results_summary.append({"chamber": chamber_type, "status": "SUCCESS", "output": OUTPUT_PATH})

@@ -34,14 +34,31 @@ def get_data_directory(chamber_dir: Path) -> Optional[Path]:
     if dcm_files:
         return chamber_dir
     
-    # Look for subdirectory with data (LA case)
-    subdirs = [d for d in chamber_dir.iterdir() 
-               if d.is_dir() 
-               and 'segmentation' not in d.name.lower() 
-               and 'result' not in d.name.lower()]
-    
-    if subdirs:
-        return subdirs[0]
+    # Look for subdirectory with DICOM data.
+    # Prefer known primary-series names; fall back to the subdirectory with the most DICOMs.
+    _PREFERRED = {"sa stack", "2ch", "3ch", "4ch", "scar_sa", "scar_2ch"}
+    subdirs = [
+        d for d in chamber_dir.iterdir()
+        if d.is_dir()
+        and "segmentation" not in d.name.lower()
+        and "result" not in d.name.lower()
+        and not d.name.startswith(".")
+    ]
+
+    if not subdirs:
+        return None
+
+    # Prefer a subdir whose name matches a known primary series
+    for preferred in _PREFERRED:
+        for d in subdirs:
+            if d.name.lower() == preferred:
+                return d
+
+    # Otherwise return the subdir containing the most DICOM files
+    def _dcm_count(d: Path) -> int:
+        return sum(1 for f in d.iterdir() if f.suffix.lower() == ".dcm" and not f.name.startswith("."))
+
+    return max(subdirs, key=_dcm_count)
     
     return None
 
