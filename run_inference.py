@@ -34,6 +34,7 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 import traceback
 from pathlib import Path
@@ -284,6 +285,21 @@ def main():
             print(f"  [7/7] Saving segmentation masks (NIfTI)...")
             cine_seq.save_predictions(seg_output_path)
             print(f"    Saved to: {seg_output_path}")
+
+            # Save voxel spacing for downstream metric computation
+            try:
+                _pixdims = cine_seq._get_pixel_spacing().tolist()
+                _spacing = {
+                    'pixel_spacing_mm': [_pixdims[0], _pixdims[1]],
+                    'slice_thickness_mm': _pixdims[2],
+                    'n_slices': cine_seq.number_of_slices,
+                    'n_frames': cine_seq.number_of_temporal_positions,
+                }
+                with open(seg_output_path / 'spacing.json', 'w') as _f:
+                    json.dump(_spacing, _f, indent=2)
+                print(f"    Saved: spacing.json")
+            except Exception as _e:
+                print(f"    WARNING: Could not save spacing.json: {_e}")
 
             # Extra: SAX volume curves + heatmaps (always); 3D animation (not minimal)
             if chamber_type in SAX_CHAMBERS and len(seg_shape) == 4:
