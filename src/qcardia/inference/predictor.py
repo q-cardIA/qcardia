@@ -69,33 +69,25 @@ class InferencePredictor:
         else:
             self.context_builder = None
     
-    def predict(self, preprocessed_tensor: torch.Tensor) -> torch.Tensor:
+    def predict(self, preprocessed_tensor: torch.Tensor,
+               la_vectors: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Main prediction method.
-        
-        Automatically selects appropriate inference path based on model type.
-        
+
         Args:
             preprocessed_tensor: Preprocessed input tensor
-                Shape varies by dimensionality:
-                - Simple: (N, C, H, W) - batch of images
-                - 2D+T: (N, C, H, W, T) - with time
-                - 2D+Z: (N, C, H, W, Z) - with slices
-                - 4D: (N, C, H, W, Z, T) - full 4D
-        
+                - Simple: (N, C, H, W)
+                - 4D:     (N, C, H, W, Z, T)
+            la_vectors: Optional LA conditioning vectors, shape (Z, T, la_vector_dim).
+                        Only used by context-aware models with la_vector_integration.
+
         Returns:
             predictions: Tensor with class predictions
-                Shape: (N, num_classes, H_target, W_target, ...)
         """
-        # Detect tensor dimensionality
-        tensor_dims = len(preprocessed_tensor.shape)
-        
         if not self.needs_context:
-            # Simple per-image inference (original behavior)
             return self._predict_simple(preprocessed_tensor)
         else:
-            # Context-aware inference
-            return self._predict_context_aware(preprocessed_tensor)
+            return self._predict_context_aware(preprocessed_tensor, la_vectors=la_vectors)
     
     def _predict_simple(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -151,71 +143,76 @@ class InferencePredictor:
         
         return model_output
     
-    def _predict_context_aware(self, tensor: torch.Tensor) -> torch.Tensor:
+    def _predict_context_aware(self, tensor: torch.Tensor,
+                               la_vectors: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Context-aware inference for Transformer models.
-        
-        Extracts spatial and temporal context for each position and runs
-        inference with context windows.
-        
+        Context-aware inference for Transformer models, with optional LA vectors.
+
         Args:
-            tensor: Shape (N, C, H, W, Z, T) or similar
-            
+            tensor:     Shape (N, C, H, W, Z, T)
+            la_vectors: Shape (Z, T, la_vector_dim) or None.
+                        When provided, la_vectors[z, t] is passed to the model's
+                        `la_vectors` keyword argument for each (slice, frame) position.
+
         Returns:
             predictions: Shape (N, num_classes, H_target, W_target, Z, T)
         """
-        # Ensure 6D tensor: (B, C, H, W, Z, T)
         tensor_6d = self._ensure_6d(tensor)
         B, C, H, W, Z, T = tensor_6d.shape
-        
-        # Initialize output
+
         output = torch.zeros(
-            B, 
+            B,
             self.config.nr_classes,
             self.config.target_size[0],
             self.config.target_size[1],
-            Z, 
-            T
+            Z,
+            T,
         )
-        
+
+        has_la = la_vectors is not None
+        if has_la:
+            print(f"  [predictor] LA vectors provided: shape={la_vectors.shape}")
+        else:
+            print(f"  [predictor] No LA vectors — model runs without LA conditioning")
+
         self.model.eval()
         with torch.no_grad():
-            # Iterate over all positions with progress bar
-            total_positions = Z * T
-            pbar = tqdm(total=total_positions, 
-                       desc="Inference (context-aware)")
-            
+            pbar = tqdm(total=Z * T, desc="Inference (context-aware)")
+
             for z in range(Z):
                 for t in range(T):
-                    # Build context for this position
                     context = self.context_builder.build_context(tensor_6d, z, t)
-                    
-                    # Process batch elements one at a time to minimize GPU memory
-                    # This is critical for context-aware models with large context windows
+
+                    # Extract LA vector for this (slice, frame) if available
+                    la_vec_zt = None
+                    if has_la and z < la_vectors.shape[0] and t < la_vectors.shape[1]:
+                        # Shape: (1, la_vector_dim) — float for the FiLM MLP
+                        la_vec_zt = la_vectors[z, t].unsqueeze(0).float().to(self.device)
+
                     batch_preds = []
                     for b_idx in range(B):
-                        # Forward pass with single batch element
-                        pred = self.model(context[b_idx:b_idx+1].to(self.device))
-                        
-                        # Handle different output formats
+                        pred = self.model(
+                            context[b_idx:b_idx+1].to(self.device),
+                            la_vectors=la_vec_zt,
+                        )
+
                         if isinstance(pred, (tuple, list)):
                             pred = pred[0]
                             if isinstance(pred, (tuple, list)):
                                 pred = pred[0]
-                        
-                        # Handle decode_all_context mode
+
                         if self.config.decode_all_context and len(pred.shape) > 4:
-                            pred = pred[:, 0, ...]  # Take first output
-                        
+                            pred = pred[:, 0, ...]
+
                         batch_preds.append(pred.cpu())
-                    
-                    # Concatenate batch predictions
+
                     output[..., z, t] = torch.cat(batch_preds, dim=0)
                     pbar.update(1)
-                    pbar.set_postfix({'slice': z+1, 'frame': t+1})
-            
+                    pbar.set_postfix({"slice": z + 1, "frame": t + 1,
+                                      "la": "yes" if la_vec_zt is not None else "no"})
+
             pbar.close()
-        
+
         return output
     
     def _ensure_6d(self, tensor: torch.Tensor) -> torch.Tensor:

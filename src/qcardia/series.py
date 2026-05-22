@@ -98,15 +98,19 @@ class BaseSeries:
             seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
             nib.save(seg_nib, output_path / "segmentation.nii")
 
-    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
+    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel",
+                   lax_dicom_dir: Path = None, lax_model_path: Path = None,
+                   _preloaded_model=None, _preloaded_config=None) -> None:
         """
         Runs the model inference on preprocessed slices.
-        
+
         Now supports both simple UNet models and context-aware Transformer models.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
             image_type (str): Type of image array to use ('pixel' or other)
+            _preloaded_model: Optional pre-loaded model (skips load_model_from_config).
+            _preloaded_config: Optional pre-parsed InferenceConfig (skips re-parsing).
         """
         # Import helper modules
         try:
@@ -127,20 +131,22 @@ class BaseSeries:
         if USE_NEW_INFERENCE:
             # NEW: Use helper modules for context-aware inference
             try:
-                # Parse config with new handler
-                config = InferenceConfig(raw_config)
-                
+                # Parse config (reuse pre-parsed config if provided)
+                config = _preloaded_config if _preloaded_config is not None else InferenceConfig(raw_config)
+
                 # Store inference parameters
                 self.inference_dict["target_pixdim"] = torch.tensor(config.target_pixdim)
                 self.inference_dict["target_size"] = torch.tensor(config.target_size)
                 self.inference_dict["grid_sample_modes"] = [config.image_grid_sample_mode]
                 self.inference_dict["nr_output_classes"] = config.nr_classes
-                
-                # Load model dynamically (supports both UNet and Transformer)
-                # Auto-detect device (prefer GPU if available)
+
+                # Load model (skip if caller supplies a pre-loaded model)
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                print(f"  Using device: {device}")
-                the_model = load_model_from_config(raw_config, wandb_run_path, device=device)
+                if _preloaded_model is not None:
+                    the_model = _preloaded_model
+                else:
+                    print(f"  Using device: {device}")
+                    the_model = load_model_from_config(raw_config, wandb_run_path, device=device)
                 
                 # Rescale and standardize (unchanged)
                 self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
@@ -162,9 +168,48 @@ class BaseSeries:
                     ).permute(2, 3, 4, 0, 1).unsqueeze(0)
                     print(f"    Reshaped for context-aware: {standardised_tensor.shape}")
                 
+                # Compute LA conditioning vectors if the model requires them
+                la_vectors = None
+                self._la_vectors = None          # expose for external debug saving
+                self._la_intersection_masks = None
+                if config.la_vector_integration and lax_dicom_dir is not None:
+                    try:
+                        from qcardia.inference.la_conditioning import compute_la_vectors
+                        # Resolve the plain nnUNet path (caller override takes priority)
+                        _resolved_lax_model = (
+                            Path(lax_model_path) if lax_model_path else None
+                        )
+                        if _resolved_lax_model is None or not _resolved_lax_model.exists():
+                            # Try the weights_path baked into the wLA model config.
+                            # Unwrap WandB value-wrapper if present.
+                            _model_cfg = raw_config.get("model", {})
+                            if isinstance(_model_cfg, dict) and "value" in _model_cfg:
+                                _model_cfg = _model_cfg["value"]
+                            _cfg_weights = _model_cfg.get("weights_path") if isinstance(_model_cfg, dict) else None
+                            if _cfg_weights:
+                                _resolved_lax_model = Path(_cfg_weights)
+                        if _resolved_lax_model is None or not _resolved_lax_model.exists():
+                            # Last resort: sibling directory named CINE_SAX
+                            _resolved_lax_model = wandb_run_path.parent / "CINE_SAX"
+                        lax_model_path = _resolved_lax_model
+                        la_vectors = compute_la_vectors(
+                            sax_dicom_dir=self.folder,
+                            lax_dicom_dir=Path(lax_dicom_dir),
+                            lax_model_path=lax_model_path,
+                            n_samples=config.la_vector_dim,
+                            device=device,
+                        )
+                        self._la_vectors = la_vectors
+                    except Exception as _la_err:
+                        print(f"  WARNING: LA vector computation failed ({_la_err}); "
+                              f"running without LA conditioning")
+                elif config.la_vector_integration and lax_dicom_dir is None:
+                    print(f"  WARNING: Model has la_vector_integration='{config.la_vector_integration}' "
+                          f"but no lax_dicom_dir provided — running without LA conditioning.")
+
                 # NEW: Use predictor for inference (handles context automatically)
                 predictor = InferencePredictor(the_model, config, device=device, batch_size=self.batch_size)
-                model_output = predictor.predict(standardised_tensor)
+                model_output = predictor.predict(standardised_tensor, la_vectors=la_vectors)
                 
                 # Reshape output back for downstream processing
                 if config.needs_context() and len(model_output.shape) == 6:
@@ -711,17 +756,32 @@ class CineSeries(BaseSeries):
     def __init__(self, folder: Path, batch_size: int = 50):
         super().__init__(folder, batch_size)
 
-    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+    def predict_segmentation(self, wandb_run_path: Path,
+                             lax_dicom_dir: Path = None,
+                             lax_model_path: Path = None,
+                             _preloaded_model=None,
+                             _preloaded_config=None) -> np.ndarray:
         """
         Predict the segmentation for the DICOM data using the specified model.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            lax_dicom_dir (Path, optional): Directory of the CINE_4CH view for
+                LA vector conditioning.  Required for wLA models; graceful no-op
+                if omitted.
+            lax_model_path (Path, optional): Override for the plain nnUNet used
+                to pre-segment the 4CH view.  If None, resolved from the wLA
+                model's own config (weights_path field).
+            _preloaded_model: Optional pre-loaded model to skip load_model_from_config.
+            _preloaded_config: Optional pre-parsed InferenceConfig to skip re-parsing.
 
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path)
+        self._run_model(wandb_run_path, lax_dicom_dir=lax_dicom_dir,
+                        lax_model_path=lax_model_path,
+                        _preloaded_model=_preloaded_model,
+                        _preloaded_config=_preloaded_config)
         self._lv = 1.0 * (self._segmentation_prediction == 1)
         self._myo = 1.0 * (self._segmentation_prediction == 2)
         self._rv = 1.0 * (self._segmentation_prediction == 3)

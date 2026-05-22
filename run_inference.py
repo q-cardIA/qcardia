@@ -123,6 +123,47 @@ def parse_args():
             "sax_total_volume_curves.png, and sax_volume_heatmaps.png."
         ),
     )
+    parser.add_argument(
+        "--lax-dir",
+        metavar="DIR",
+        default=None,
+        help=(
+            "Directory containing the CINE_4CH DICOM data (the folder that "
+            "contains 4CH .dcm files, or a parent with a 4ch/ subfolder). "
+            "Required for models with la_vector_integration.  If omitted, the "
+            "script auto-detects a CINE_4CH sibling of CINE_SAX in --data-dir, "
+            "and falls back to running without LA conditioning if not found."
+        ),
+    )
+    parser.add_argument(
+        "--lax-model",
+        metavar="DIR",
+        default=None,
+        help=(
+            "WandB model directory for the plain nnUNet used to pre-segment the "
+            "4CH view (required only with --lax-dir).  Defaults to the "
+            "weights_path in the main model config."
+        ),
+    )
+    parser.add_argument(
+        "--lvis",
+        action="store_true",
+        help=(
+            "LA Vector Influence Score: after the main inference, run a second "
+            "pass with zeroed LA vectors and save results to no_la_segmentations/. "
+            "Only has an effect when the model uses la_vector_integration and a "
+            "--lax-dir is provided.  Skipped gracefully otherwise."
+        ),
+    )
+    parser.add_argument(
+        "--no-lax",
+        action="store_true",
+        help=(
+            "Disable LAx conditioning entirely, including auto-detection of CINE_4CH. "
+            "Use this for the LVIS no-LA inference pass to ensure the model runs "
+            "without any LAx conditioning even when CINE_4CH exists alongside CINE_SAX."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -137,6 +178,20 @@ def main():
         if args.output_dir
         else DATA_PATH.parent / f"{DATA_PATH.name}_results"
     )
+
+    # ── Resolve LAx dir for LA-conditioned models ──────────────────────────
+    LAX_DIR = None
+    if not args.no_lax:
+        if args.lax_dir:
+            LAX_DIR = Path(args.lax_dir)
+        else:
+            # Auto-detect: look for CINE_4CH sibling of CINE_SAX in DATA_PATH
+            candidate = DATA_PATH / "CINE_4CH"
+            if candidate.exists():
+                LAX_DIR = candidate
+                print(f"  Auto-detected 4CH folder: {LAX_DIR}")
+
+    LAX_MODEL = Path(args.lax_model) if args.lax_model else None
 
     # -----------------------------------------------------------------------
     # Header
@@ -220,7 +275,14 @@ def main():
 
             # 3 / 7  Inference
             print(f"  [3/7] Running inference...")
-            cine_segmentation = cine_seq.predict_segmentation(MODEL_PATH)
+            # For SAx with LA-conditioned models, pass the 4CH directory.
+            # lax_dicom_dir=None is safe — the model just skips LA conditioning.
+            # lax_model_path overrides the weights_path in the wLA model's own config.
+            cine_segmentation = cine_seq.predict_segmentation(
+                MODEL_PATH,
+                lax_dicom_dir=LAX_DIR if chamber_type in SAX_CHAMBERS else None,
+                lax_model_path=LAX_MODEL if chamber_type in SAX_CHAMBERS else None,
+            )
             print(f"    Output shape: {cine_segmentation.shape}  Classes: {np.unique(cine_segmentation)}")
             if cine_segmentation.max() == 0:
                 print(f"    WARNING: Prediction is all zeros — check model path and weights.")
@@ -285,6 +347,60 @@ def main():
             print(f"  [7/7] Saving segmentation masks (NIfTI)...")
             cine_seq.save_predictions(seg_output_path)
             print(f"    Saved to: {seg_output_path}")
+
+            # Save LA conditioning debug output whenever a LAx dir was provided.
+            # Placed at  <output>/<model_name>/LAx_conditioning/  — sibling of
+            # plots/ and segmentations/, survives _rename_qcardia_outputs intact.
+            if LAX_DIR is not None and chamber_type in SAX_CHAMBERS:
+                debug_dir = seg_output_path.parent / "LAx_conditioning"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                la_vecs = getattr(cine_seq, '_la_vectors', None)
+                try:
+                    from qcardia.inference.la_conditioning import save_la_debug
+                    if la_vecs is not None:
+                        masks = getattr(la_vecs, '_debug_intersection_masks', None)
+                        lax_seg_d = getattr(la_vecs, '_debug_lax_seg', None)
+                        if masks is None:
+                            masks = np.zeros((la_vecs.shape[0], 4, 4), dtype=np.uint8)
+                        if lax_seg_d is None:
+                            lax_seg_d = np.zeros((la_vecs.shape[1], 4, 4), dtype=np.int32)
+                        save_la_debug(la_vecs, masks, lax_seg_d, debug_dir)
+                        print(f"    LA conditioning debug saved: {debug_dir}")
+                    else:
+                        # LA vectors were not computed — write a diagnostic note
+                        (debug_dir / "la_conditioning_failed.txt").write_text(
+                            "LA vectors were not computed for this subject.\n"
+                            "Inference ran without LA conditioning (graceful fallback).\n"
+                            f"4CH dir passed : {LAX_DIR}\n"
+                            f"lax_model      : {LAX_MODEL}\n"
+                            "Check the inference log for WARNING or traceback output.\n"
+                        )
+                        print(f"    WARNING: LA vectors unavailable — "
+                              f"see LAx_conditioning/la_conditioning_failed.txt")
+                except Exception as _dbg_err:
+                    import traceback as _tb
+                    print(f"    WARNING: LA debug save failed: {_dbg_err}")
+                    _tb.print_exc()
+
+            # ── LVIS second pass ──────────────────────────────────────────
+            # Re-run inference with la_vectors=None (no LAx conditioning) so that
+            # consistency_metrics.py can compute the LA Vector Influence Score.
+            # Only triggered when: --lvis flag + model has LA conditioning + LA vectors
+            # were successfully computed on the first pass.
+            if (args.lvis
+                    and chamber_type in SAX_CHAMBERS
+                    and getattr(cine_seq, '_la_vectors', None) is not None):
+                try:
+                    print(f"  [LVIS] Running second inference with no LA conditioning …")
+                    no_la_seg_output = OUTPUT_BASE / MODEL_NAME / f"{chamber_type}_no_la_segmentation"
+                    # predict_segmentation without lax_dicom_dir → la_vectors=None
+                    _no_la_seg = cine_seq.predict_segmentation(MODEL_PATH)
+                    cine_seq.save_predictions(no_la_seg_output)
+                    # Restore main inference result so downstream code is unaffected
+                    cine_seq._segmentation_prediction = cine_segmentation
+                    print(f"    LVIS no-LA masks saved: {no_la_seg_output}")
+                except Exception as _lvis_err:
+                    print(f"    WARNING: LVIS second pass failed: {_lvis_err}")
 
             # Save voxel spacing for downstream metric computation
             try:
