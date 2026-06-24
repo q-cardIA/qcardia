@@ -65,7 +65,7 @@ class CustomQGraphicsView(QGraphicsView):
         self._handle_pick_radius = self._handle_radius * 2.0
         self._segment_pick_radius = 28.0
         self._snap_to_image_enabled = True
-        self._snap_to_image_radius = 6.0
+        self._snap_to_image_radius = 2.0
         self._snap_edge_mask = None
         self._snap_edge_strength = None
         self._active_contour_drag = None
@@ -269,14 +269,14 @@ class CustomQGraphicsView(QGraphicsView):
         if self.edit_mode and self._active_handle is not None:
             target = pos + self._handle_drag_offset
             clamped = self.__clamp_scene_to_image(target)
-            if self._snap_to_image_enabled and not (event.modifiers() & Qt.AltModifier):
+            if self._snap_to_image_enabled and (event.modifiers() & Qt.AltModifier):
                 clamped = self.__snap_scene_point_to_image(clamped)
             self.__move_active_handle(clamped)
             return
 
         if self.edit_mode and self._active_contour_drag is not None:
             target = self.__clamp_scene_to_image(pos)
-            if self._snap_to_image_enabled and not (event.modifiers() & Qt.AltModifier):
+            if self._snap_to_image_enabled and (event.modifiers() & Qt.AltModifier):
                 target = self.__snap_scene_point_to_image(target)
             self.__drag_active_contour(target)
             return
@@ -961,7 +961,7 @@ class CustomQGraphicsView(QGraphicsView):
             self._snap_edge_strength = edge_strength
             return
 
-        threshold = max(float(np.percentile(valid, 80.0)), max_strength * 0.25)
+        threshold = max(float(np.percentile(valid, 95.0)), max_strength * 0.5)
         mask = edge_strength >= threshold
 
         self._snap_edge_strength = edge_strength
