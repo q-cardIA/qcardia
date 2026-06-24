@@ -143,7 +143,9 @@ class DICOMModel:
                 f"Unexpected LGE segmentation shape {seg_arr.shape}; expected (Z,H,W)"
             )
 
-        self.lge_segmentation_volume = seg_arr.astype(np.uint8)
+        # qcardia sorts slices descending by position; _build_lge_volume sorts ascending,
+        # so reverse here to align segmentation indexing with the display volume.
+        self.lge_segmentation_volume = seg_arr[::-1].astype(np.uint8)
         return self.lge_segmentation_volume
 
     def apply_window(self, image, center, width):

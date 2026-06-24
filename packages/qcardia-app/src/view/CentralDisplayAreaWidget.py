@@ -1,6 +1,7 @@
 import logging
 import traceback
 
+import cv2
 import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
@@ -11,7 +12,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from scipy.ndimage import binary_dilation, binary_erosion
 
 from view.CustomQGraphicsView import CustomQGraphicsView
 from view.utils import SoftwareConfigResources
@@ -62,13 +62,14 @@ class CentralDisplayAreaWidget(QWidget):
         )
         self.lge_slice_positions = None  # Physical locations along LGE stack
         self.lge_segmentation_volume = None
+        self.contour_edit_mode = False
 
     def resizeEvent(self, event):
         # Default resize behavior retained.
         super().resizeEvent(event)
 
     def __set_interface(self):
-        self.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        self.setObjectName("centralDisplayArea")
         self.layout = QGridLayout(self)
         self.layout.setHorizontalSpacing(0)
         self.layout.setVerticalSpacing(0)
@@ -77,7 +78,7 @@ class CentralDisplayAreaWidget(QWidget):
         self.lge_volume = None
         self.lge_slice_index = 0
         self.lge_container = QWidget()
-        self.lge_container.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        self.lge_container.setProperty("role", "viewerCard")
         self.lge_container_layout = QVBoxLayout(self.lge_container)
         self.lge_container_layout.setContentsMargins(2, 2, 2, 2)
         self.lge_container_layout.setSpacing(2)
@@ -121,8 +122,10 @@ class CentralDisplayAreaWidget(QWidget):
 
         self.horizontal_line = QLabel()
         self.horizontal_line.setFixedHeight(3)
+        self.horizontal_line.setProperty("role", "divider")
         self.vertical_line = QLabel()
         self.vertical_line.setFixedWidth(3)
+        self.vertical_line.setProperty("role", "divider")
         # Place containers (keeping existing spatial semantics for now)
         self.layout.addWidget(self.sagittal_container, 0, 0)
         self.layout.addWidget(self.lge_container, 0, 2)
@@ -134,15 +137,10 @@ class CentralDisplayAreaWidget(QWidget):
     # Removed unused __set_layout_dimensions (previously only comments).
 
     def __set_stylesheets(self):
-        dark_view = (
-            "QGraphicsView{background-color:rgb(0,0,0); border:1px solid #2F3440;}"
-        )
-        self.secondary_viewer.setStyleSheet(dark_view)
-        self.axial_viewer.setStyleSheet(dark_view)
-        self.coronal_viewer.setStyleSheet(dark_view)
-        self.sagittal_viewer.setStyleSheet(dark_view)
-        self.horizontal_line.setStyleSheet("""QLabel{background-color: #2F3440;}""")
-        self.vertical_line.setStyleSheet("""QLabel{background-color: #2F3440;}""")
+        self.secondary_viewer.setProperty("role", "imageViewport")
+        self.axial_viewer.setProperty("role", "imageViewport")
+        self.coronal_viewer.setProperty("role", "imageViewport")
+        self.sagittal_viewer.setProperty("role", "imageViewport")
 
     def __set_connections(self):
         self.axial_viewer.coordinates_changed.connect(
@@ -181,6 +179,12 @@ class CentralDisplayAreaWidget(QWidget):
         self.sagittal_viewer.annotation_display_state_changed.connect(
             self.annotation_display_state_changed
         )
+        self.sagittal_viewer.contours_updated.connect(
+            self.__on_sagittal_contours_updated
+        )
+        self.secondary_viewer.contours_updated.connect(
+            self.__on_lge_contours_updated
+        )
         # self.sagittal_viewer.patient_imported.connect(self.patient_imported)
 
     def reset_viewer(self):
@@ -203,6 +207,8 @@ class CentralDisplayAreaWidget(QWidget):
         self.axial_viewer.cleanse_annotations()
         self.coronal_viewer.cleanse_annotations()
         self.sagittal_viewer.cleanse_annotations()
+        self.sagittal_viewer.clear_contours()
+        self.secondary_viewer.clear_contours()
         self.overlaid_volumes.clear()
 
     def on_import_data(self):
@@ -564,9 +570,78 @@ class CentralDisplayAreaWidget(QWidget):
         self.lge_segmentation_volume = seg_volume
         self.__update_lge_segmentation_overlay()
 
+    def set_contour_edit_mode(self, enabled):
+        self.contour_edit_mode = bool(enabled)
+        if hasattr(self, "sagittal_viewer"):
+            self.sagittal_viewer.set_edit_mode(self.contour_edit_mode)
+            if not self.contour_edit_mode:
+                self.sagittal_viewer.set_edit_tool("move")
+            self.__update_segmentation_overlay()
+        if hasattr(self, "secondary_viewer"):
+            self.secondary_viewer.set_edit_mode(self.contour_edit_mode)
+            if not self.contour_edit_mode:
+                self.secondary_viewer.set_edit_tool("move")
+            self.__update_lge_segmentation_overlay()
+
+    def set_contour_edit_tool(self, tool):
+        if hasattr(self, "sagittal_viewer"):
+            self.sagittal_viewer.set_edit_tool(tool)
+        if hasattr(self, "secondary_viewer"):
+            self.secondary_viewer.set_edit_tool(tool)
+
+    def __on_sagittal_contours_updated(self, contour_defs):
+        if (
+            not self.contour_edit_mode
+            or self.segmentation_volume is None
+            or contour_defs is None
+        ):
+            return
+        try:
+            depth = self.segmentation_volume.shape[0]
+            x_idx = self.point_clicker_position[0]
+            if x_idx < 0 or x_idx >= depth:
+                return
+            slice_idx = depth - x_idx - 1
+            if slice_idx < 0 or slice_idx >= depth:
+                return
+            target_shape = self.segmentation_volume[slice_idx].shape
+            updated_slice = self.__rasterize_contours(contour_defs, target_shape)
+            if updated_slice is None:
+                return
+            self.segmentation_volume[slice_idx] = updated_slice
+            self.sagittal_viewer.update_overlay(None)
+        except Exception as exc:
+            logging.error(
+                "[CentralDisplayAreaWidget] Failed to persist contour edit: %s",
+                exc,
+            )
+
+    def __on_lge_contours_updated(self, contour_defs):
+        if (
+            not self.contour_edit_mode
+            or self.lge_segmentation_volume is None
+            or contour_defs is None
+        ):
+            return
+        try:
+            depth = self.lge_segmentation_volume.shape[0]
+            z = min(max(0, self.lge_slice_index), depth - 1)
+            target_shape = self.lge_segmentation_volume[z].shape
+            updated_slice = self.__rasterize_contours(contour_defs, target_shape)
+            if updated_slice is None:
+                return
+            self.lge_segmentation_volume[z] = updated_slice
+            self.secondary_viewer.update_overlay(None)
+        except Exception as exc:
+            logging.error(
+                "[CentralDisplayAreaWidget] Failed to persist LGE contour edit: %s",
+                exc,
+            )
+
     def __update_segmentation_overlay(self):
         if self.segmentation_volume is None:
             self.sagittal_viewer.update_overlay(None)
+            self.sagittal_viewer.clear_contours()
             return
 
         try:
@@ -575,8 +650,9 @@ class CentralDisplayAreaWidget(QWidget):
             if x_idx < 0 or x_idx >= self.segmentation_volume.shape[0]:
                 return
             seg_slice = self.segmentation_volume[-x_idx - 1, :, :]
-            overlay = self.__build_segmentation_overlay(seg_slice)
-            self.sagittal_viewer.update_overlay(overlay)
+            contours = self.__extract_segmentation_contours(seg_slice)
+            self.sagittal_viewer.update_contour_paths(contours)
+            self.sagittal_viewer.update_overlay(None)
         except Exception as e:
             logging.error(
                 "[CentralDisplayAreaWidget] Failed to update segmentation overlay: %s",
@@ -586,6 +662,7 @@ class CentralDisplayAreaWidget(QWidget):
     def __update_lge_segmentation_overlay(self):
         if self.lge_segmentation_volume is None:
             self.secondary_viewer.update_overlay(None)
+            self.secondary_viewer.clear_contours()
             return
 
         try:
@@ -593,8 +670,9 @@ class CentralDisplayAreaWidget(QWidget):
                 max(0, self.lge_slice_index), self.lge_segmentation_volume.shape[0] - 1
             )
             seg_slice = self.lge_segmentation_volume[z, :, :]
-            overlay = self.__build_segmentation_overlay(seg_slice)
-            self.secondary_viewer.update_overlay(overlay)
+            contours = self.__extract_segmentation_contours(seg_slice)
+            self.secondary_viewer.update_contour_paths(contours)
+            self.secondary_viewer.update_overlay(None)
         except Exception as e:
             logging.error(
                 "[CentralDisplayAreaWidget] Failed to update LGE segmentation overlay: %s",
@@ -602,34 +680,67 @@ class CentralDisplayAreaWidget(QWidget):
             )
             self.secondary_viewer.update_overlay(None)
 
+
     @staticmethod
-    def __build_segmentation_overlay(seg_slice):
-        h, w = seg_slice.shape
-        overlay = np.zeros((h, w, 4), dtype=np.uint8)
-        class_colors = {
-            3: (0, 0, 255, 192),
-            1: (255, 0, 0, 192),
-        }
-        for cls, color in class_colors.items():
-            mask = seg_slice == cls
+    def __extract_segmentation_contours(seg_slice):
+        contours = []
+        if seg_slice is None:
+            return contours
+        class_ids = (1, 2, 3)
+        for class_id in class_ids:
+            mask = (seg_slice == class_id).astype(np.uint8)
             if not mask.any():
                 continue
-            eroded = binary_erosion(mask)
-            edges = mask & (~eroded)
-            edges = binary_dilation(edges)
-            overlay[edges] = color
+            found, _ = cv2.findContours(
+                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            for contour in found:
+                if len(contour) < 3:
+                    continue
+                epsilon = 0.005 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+                points = [(float(point[0][1]), float(point[0][0])) for point in approx]
+                if len(points) >= 3:
+                    contours.append({"class_id": class_id, "points": points})
+        return contours
 
-        myo_mask = seg_slice == 2
-        if myo_mask.any():
-            lv_mask = seg_slice == 1
-            lv_dilated = binary_dilation(lv_mask)
-            myo_eroded = binary_erosion(myo_mask)
-            myo_edges = myo_mask & (~myo_eroded)
-            myo_outer_edges = myo_edges & (~lv_dilated)
-            myo_outer_edges = binary_dilation(myo_outer_edges)
-            overlay[myo_outer_edges] = (0, 255, 0, 192)
+    def __rasterize_contours(self, contour_defs, target_shape):
+        vol = self.segmentation_volume if self.segmentation_volume is not None else self.lge_segmentation_volume
+        if contour_defs is None or target_shape is None or vol is None:
+            return None
+        height, width = target_shape
+        if height <= 0 or width <= 0:
+            return None
+        canvas = np.zeros(target_shape, dtype=vol.dtype)
+        class_order = (2, 1, 3)
+        for class_id in class_order:
+            polygons = []
+            for contour in contour_defs:
+                if contour.get("class_id") != class_id:
+                    continue
+                poly = self.__contour_to_polygon(
+                    contour.get("points", []), height, width
+                )
+                if poly is not None:
+                    polygons.append(poly)
+            if polygons:
+                cv2.fillPoly(canvas, polygons, int(class_id))
+        return canvas
 
-        return overlay
+    @staticmethod
+    def __contour_to_polygon(points, height, width):
+        if not points or height <= 0 or width <= 0:
+            return None
+        converted = []
+        for row, col in points:
+            r = int(round(row))
+            c = int(round(col))
+            r = min(max(0, r), height - 1)
+            c = min(max(0, c), width - 1)
+            converted.append([c, r])
+        if len(converted) < 3:
+            return None
+        return np.asarray(converted, dtype=np.int32).reshape((-1, 1, 2))
 
     def on_annotation_layer_toggled(self, volume_uid, state):
         if state:
@@ -770,9 +881,9 @@ class CentralDisplayAreaWidget(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(8)
         lbl_title = QLabel(title)
-        lbl_title.setStyleSheet("color:#FFFFFF; font-weight:500; font-size:13px;")
+        lbl_title.setProperty("role", "viewerTitle")
         lbl_slice = QLabel("")  # dynamic slice info
-        lbl_slice.setStyleSheet("color:#A0A0A0; font-size:11px;")
+        lbl_slice.setProperty("role", "viewerMeta")
         layout.addWidget(lbl_title)
         layout.addStretch(1)
         layout.addWidget(lbl_slice)
@@ -784,18 +895,12 @@ class CentralDisplayAreaWidget(QWidget):
         slider.setMaximum(0)
         slider.setEnabled(False)
         slider.setMinimumHeight(20)
-        slider.setStyleSheet(
-            "QSlider {background: transparent;}"
-            "QSlider::groove:horizontal {background:#2F3440; height:6px; border-radius:3px;}"
-            "QSlider::handle:horizontal {background:#85aaff; width:14px; height:14px; margin:-4px 0; border-radius:7px;}"
-            "QSlider::handle:horizontal:hover {background:#a0c0ff;}"
-            "QSlider::handle:horizontal:disabled {background:#555555;}"
-        )
+        slider.setProperty("role", "sliceSlider")
         return slider
 
     def __make_plane_view(self, title, view_type, size, cb):
         container = QWidget()
-        container.setStyleSheet("QWidget{background-color:#1E1E1E;}")
+        container.setProperty("role", "viewerCard")
         vlayout = QVBoxLayout(container)
         vlayout.setContentsMargins(2, 2, 2, 2)
         vlayout.setSpacing(2)

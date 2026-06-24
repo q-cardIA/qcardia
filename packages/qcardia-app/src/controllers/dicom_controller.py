@@ -2,8 +2,6 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
-from view.utils import SoftwareConfigResources
-
 
 class DICOMController:
     def __init__(self, view, model):
@@ -66,6 +64,8 @@ class DICOMController:
                 self.view.display_area_widget.set_segmentation_volume(
                     temporal_segmentations[idx]
                 )
+            if hasattr(self.view, "quick_view_panel"):
+                self.view.quick_view_panel.show_cine_results()
         except Exception as e:
             logging.error(f"Segmentation failed: {e}")
             self._show_error_dialog(
@@ -122,37 +122,12 @@ class DICOMController:
                 "Save Failed", f"Failed to save segmentation:\n{str(e)}"
             )
 
-    def _get_dialog_style(self):
-        """Get dark theme styling for dialogs."""
-        colors = SoftwareConfigResources.getInstance().stylesheet_components
-        return f"""
-            QMessageBox {{
-                background-color: {colors["Color2"]};
-                color: {colors["Color7"]};
-            }}
-            QMessageBox QPushButton {{
-                background-color: {colors["Color3"]};
-                color: {colors["Color7"]};
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                min-width: 80px;
-            }}
-            QMessageBox QPushButton:hover {{
-                background-color: {colors["Color4"]};
-            }}
-            QMessageBox QLabel {{
-                color: {colors["Color7"]};
-            }}
-        """
-
     def _show_warning_dialog(self, title, message):
         """Show a warning dialog with dark theme."""
         msg = QMessageBox(self.view)
         msg.setIcon(QMessageBox.Warning)
         msg.setWindowTitle(title)
         msg.setText(message)
-        msg.setStyleSheet(self._get_dialog_style())
         msg.exec()
 
     def _show_info_dialog(self, title, message):
@@ -161,7 +136,6 @@ class DICOMController:
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle(title)
         msg.setText(message)
-        msg.setStyleSheet(self._get_dialog_style())
         msg.exec()
 
     def _show_error_dialog(self, title, message):
@@ -170,5 +144,4 @@ class DICOMController:
         msg.setIcon(QMessageBox.Critical)
         msg.setWindowTitle(title)
         msg.setText(message)
-        msg.setStyleSheet(self._get_dialog_style())
         msg.exec()

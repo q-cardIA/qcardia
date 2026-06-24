@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
-    QSpacerItem,
     QVBoxLayout,
     QWidget,
 )
@@ -16,503 +15,256 @@ from view.utils import SoftwareConfigResources
 
 
 class WelcomeWidget(QWidget):
-    """
-    Starting page when launching the software.
-    """
+    """Starting page when launching the software."""
 
-    transition_signal = Signal()  # Signal to notify MainWindow
+    transition_signal = Signal()
 
     def __init__(self, parent=None):
-        super(WelcomeWidget, self).__init__()
-        self.widget_name = "welcome_widget"
+        super().__init__()
         self.setObjectName("welcomeRoot")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.parent = parent
-        self.__set_interface()
-        self.__set_layout_dimensions()
-        self.__set_stylesheets()
-        self.__set_connections()
+        self._build()
+        self._size()
+        self._connect()
 
-    def __set_interface(self):
-        self.__top_title_interface()
-        self.__set_right_panel_interface()
-        self.__set_left_panel_interface()
-        self.__bottom_logo_panel_interface()
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-        # Use QWidget containers for left and right panels
-        self.left_panel = QWidget()
-        self.left_panel.setObjectName("welcomeLeftPanel")
-        self.left_panel.setAttribute(Qt.WA_StyledBackground, True)
-        self.left_panel.setLayout(self.left_panel_layout)
-        self.right_panel = QWidget()
-        self.right_panel.setObjectName("welcomeRightPanel")
-        self.right_panel.setAttribute(Qt.WA_StyledBackground, True)
-        self.right_panel.setLayout(self.right_panel_layout)
+    def _asset(self, filename):
+        return os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            "../../assets/images",
+            filename,
+        )
 
+    def _icon_btn(self, text, image_file, role):
+        btn = QPushButton(f"  {text}")
+        btn.setProperty("role", role)
+        pix = QPixmap(self._asset(image_file))
+        if not pix.isNull():
+            btn.setIcon(QIcon(pix))
+            btn.setIconSize(QSize(20, 20))
+        return btn
+
+    # ------------------------------------------------------------------
+    # Build
+    # ------------------------------------------------------------------
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(60, 0, 60, 40)
+        root.setSpacing(0)
+
+        # ---- Header (logo + title + subtitle) ----
+        root.addStretch(2)
+
+        header = QHBoxLayout()
+        header.setSpacing(20)
+        header.setContentsMargins(0, 0, 0, 0)
+
+        logo_label = QLabel()
+        pix = QPixmap(self._asset("q-cardIA.png")).scaled(
+            64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        logo_label.setPixmap(pix)
+        logo_label.setFixedSize(64, 64)
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(4)
+        title_col.setContentsMargins(0, 0, 0, 0)
+
+        self.top_logo_panel_label = QLabel("q-cardIA")
+        self.top_logo_panel_label.setProperty("role", "welcomeAppName")
+
+        subtitle = QLabel("Quantitative cardiac image analysis")
+        subtitle.setProperty("role", "welcomeHeadline")
+
+        title_col.addWidget(self.top_logo_panel_label)
+        title_col.addWidget(subtitle)
+
+        header.addStretch(1)
+        header.addWidget(logo_label, 0, Qt.AlignVCenter)
+        header.addLayout(title_col)
+        header.addStretch(1)
+
+        root.addLayout(header)
+        root.addSpacing(36)
+
+        # ---- Card (left + right panels) ----
         self.central_label = QWidget()
         self.central_label.setObjectName("centralContainer")
         self.central_label.setAttribute(Qt.WA_StyledBackground, True)
-        self.central_label.setContentsMargins(0, 0, 0, 0)
-        self.central_layout = QHBoxLayout()
-        self.central_layout.setContentsMargins(0, 0, 0, 0)
-        self.central_layout.setSpacing(0)
-        self.central_layout.addStretch(1)
-        self.central_layout.addWidget(self.left_panel)
-        self.central_layout.addWidget(self.right_panel)
-        self.central_layout.addStretch(1)
-        self.central_label.setLayout(self.central_layout)
+        self.central_label.setProperty("role", "welcomeCentral")
 
-        self.layout = QVBoxLayout(self)
-        self.layout.addLayout(self.top_logo_panel_layout)
-        self.layout.addWidget(self.central_label)
-        self.layout.addLayout(self.bottom_logo_panel_layout)
+        card_layout = QHBoxLayout(self.central_label)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
 
-    def __top_title_interface(self):
-        self.top_logo_panel_layout = QHBoxLayout()
-        self.top_logo_panel_label = QLabel("Quantitative cardiac image analysis")
-        self.top_logo_panel_layout.addStretch(1)
-        self.top_logo_panel_layout.addWidget(self.top_logo_panel_label, Qt.AlignCenter)
-        self.top_logo_panel_layout.addStretch(1)
+        self.left_panel = self._build_left_panel()
+        self.right_panel = self._build_right_panel()
 
-    def __bottom_logo_panel_interface(self):
-        self.bottom_logo_panel_layout = QHBoxLayout()
-        self.bottom_logo_panel_layout.setContentsMargins(0, 30, 30, 30)
-        self.bottom_logo_panel_label = QLabel()
-        self.bottom_logo_panel_label.setPixmap(
-            QPixmap(
-                os.path.join(
-                    os.path.dirname(os.path.realpath(__file__)),
-                    "../../assets/images/q-cardIA.png",
-                )
-            ).scaled(180, 270, Qt.KeepAspectRatio)
+        divider = QLabel()
+        divider.setFixedWidth(1)
+        divider.setProperty("role", "divider")
+        divider.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+
+        card_layout.addWidget(self.left_panel)
+        card_layout.addWidget(divider)
+        card_layout.addWidget(self.right_panel)
+
+        card_row = QHBoxLayout()
+        card_row.addStretch(1)
+        card_row.addWidget(self.central_label, 4)
+        card_row.addStretch(1)
+        root.addLayout(card_row)
+
+        root.addStretch(3)
+
+    def _build_left_panel(self):
+        panel = QWidget()
+        panel.setAttribute(Qt.WA_StyledBackground, True)
+        panel.setProperty("role", "welcomeSidePanel")
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(12)
+
+        title = QLabel("Get started")
+        title.setProperty("role", "welcomeSectionTitle")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        layout.addSpacing(8)
+
+        self.left_panel_single_patient_pushbutton = self._icon_btn(
+            "Single patient mode", "patient-icon.png", "welcomePrimaryAction"
         )
-        self.bottom_logo_panel_layout.addStretch(1)
-        self.bottom_logo_panel_layout.addWidget(
-            self.bottom_logo_panel_label, Qt.AlignCenter
-        )
-        self.bottom_logo_panel_layout.addStretch(1)
+        layout.addWidget(self.left_panel_single_patient_pushbutton)
 
-    def __set_right_panel_interface(self):
-        self.right_panel_layout = QVBoxLayout()
-        self.right_panel_layout.setContentsMargins(0, 0, 0, 0)
-        self.right_panel_layout.setSpacing(5)
-        self.right_panel_title_layout = QHBoxLayout()
-        self.right_panel_title_layout.setSpacing(0)
-        self.right_panel_title_layout.setContentsMargins(0, 50, 0, 0)
-        self.right_panel_title_layout.addStretch(1)
-        self.right_panel_title_label = QLabel("For more information")
-        self.right_panel_title_layout.addWidget(self.right_panel_title_label)
-        self.right_panel_title_layout.addStretch(1)
-        self.right_panel_layout.addLayout(self.right_panel_title_layout)
-        self.right_panel_top_spaceritem = QSpacerItem(1, 30)
-        self.right_panel_layout.addItem(self.right_panel_top_spaceritem)
+        desc = QLabel("Load and analyse a single patient's cardiac MRI study.")
+        desc.setProperty("role", "welcomeDescription")
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
 
-        self.right_panel_community_layout = QHBoxLayout()
-        self.right_panel_community_layout.setSpacing(5)
-        self.right_panel_community_layout.setContentsMargins(50, 0, 50, 0)
-        self.right_panel_community_pushbutton = QPushButton("  Research community")
-        self.right_panel_community_pushbutton.setIcon(
-            QIcon(
-                QPixmap(
-                    os.path.join(
-                        os.path.dirname(os.path.realpath(__file__)),
-                        "../../assets/images/globe-icon.png",
-                    )
-                )
-            )
-        )
-        self.right_panel_community_layout.addWidget(
-            self.right_panel_community_pushbutton
-        )
-        self.right_panel_layout.addLayout(self.right_panel_community_layout)
+        layout.addStretch(1)
+        return panel
 
-        self.right_panel_about_layout = QHBoxLayout()
-        self.right_panel_about_layout.setSpacing(5)
-        self.right_panel_about_layout.setContentsMargins(50, 25, 50, 0)
-        self.right_panel_about_software_pushbutton = QPushButton("  About q-cardIA")
-        self.right_panel_about_software_pushbutton.setIcon(
-            QIcon(
-                QPixmap(
-                    os.path.join(
-                        os.path.dirname(os.path.realpath(__file__)),
-                        "../../assets/images/circle_question_icon.png",
-                    )
-                )
-            )
-        )
-        self.right_panel_about_layout.addWidget(
-            self.right_panel_about_software_pushbutton
-        )
-        self.right_panel_layout.addLayout(self.right_panel_about_layout)
+    def _build_right_panel(self):
+        panel = QWidget()
+        panel.setAttribute(Qt.WA_StyledBackground, True)
+        panel.setProperty("role", "welcomeSidePanel")
 
-        self.right_panel_helpwiki_layout = QHBoxLayout()
-        self.right_panel_helpwiki_layout.setSpacing(5)
-        self.right_panel_helpwiki_layout.setContentsMargins(50, 25, 50, 0)
-        self.right_panel_helpwiki_pushbutton = QPushButton("  Tutorials and wiki")
-        self.right_panel_helpwiki_pushbutton.setIcon(
-            QIcon(
-                QPixmap(
-                    os.path.join(
-                        os.path.dirname(os.path.realpath(__file__)),
-                        "../../assets/images/help_wavy_question_icon_blue.png",
-                    )
-                )
-            )
-        )
-        self.right_panel_helpwiki_layout.addWidget(self.right_panel_helpwiki_pushbutton)
-        self.right_panel_layout.addLayout(self.right_panel_helpwiki_layout)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(10)
 
-        self.right_panel_issues_layout = QHBoxLayout()
-        self.right_panel_issues_layout.setSpacing(5)
-        self.right_panel_issues_layout.setContentsMargins(50, 25, 50, 0)
-        self.right_panel_issues_pushbutton = QPushButton("  Issues and suggestions")
-        self.right_panel_issues_pushbutton.setIcon(
-            QIcon(
-                QPixmap(
-                    os.path.join(
-                        os.path.dirname(os.path.realpath(__file__)),
-                        "../../assets/images/github-icon.png",
-                    )
-                ).scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            )
-        )
-        self.right_panel_issues_layout.addWidget(self.right_panel_issues_pushbutton)
-        self.right_panel_layout.addLayout(self.right_panel_issues_layout)
-        self.right_panel_layout.addStretch(1)
+        title = QLabel("Resources")
+        title.setProperty("role", "welcomeSectionTitle")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        layout.addSpacing(8)
 
-    def __set_left_panel_interface(self):
-        self.left_panel_layout = QVBoxLayout()
-        self.left_panel_layout.setContentsMargins(0, 0, 0, 0)
-        self.left_panel_layout.setSpacing(5)
-        self.left_panel_title_layout = QHBoxLayout()
-        self.left_panel_title_layout.setSpacing(0)
-        self.left_panel_title_layout.setContentsMargins(0, 50, 0, 0)
-        self.left_panel_title_layout.addStretch(1)
-        self.left_panel_title_label = QLabel("Start by")
-        self.left_panel_title_layout.addWidget(self.left_panel_title_label)
-        self.left_panel_title_layout.addStretch(1)
-        self.left_panel_layout.addLayout(self.left_panel_title_layout)
-        self.left_panel_top_spaceritem = QSpacerItem(1, 30)
-        self.left_panel_layout.addItem(self.left_panel_top_spaceritem)
-
-        self.left_panel_single_layout = QHBoxLayout()
-        self.left_panel_single_layout.setSpacing(5)
-        self.left_panel_single_layout.setContentsMargins(50, 0, 50, 0)
-        self.left_panel_single_patient_pushbutton = QPushButton("  Single patient mode")
-        self.left_panel_single_patient_pushbutton.setIcon(
-            QIcon(
-                QPixmap(
-                    os.path.join(
-                        os.path.dirname(os.path.realpath(__file__)),
-                        "../../assets/images/patient-icon.png",
-                    )
-                )
-            )
+        self.right_panel_community_pushbutton = self._icon_btn(
+            "Research community", "globe-icon.png", "welcomeInfoAction"
         )
-        self.left_panel_single_layout.addWidget(
-            self.left_panel_single_patient_pushbutton
+        self.right_panel_about_software_pushbutton = self._icon_btn(
+            "About q-cardIA", "circle_question_icon.png", "welcomeInfoAction"
         )
-        self.left_panel_layout.addLayout(self.left_panel_single_layout)
-        self.left_panel_layout.addStretch(1)
+        self.right_panel_helpwiki_pushbutton = self._icon_btn(
+            "Tutorials and wiki",
+            "help_wavy_question_icon_blue.png",
+            "welcomeInfoAction",
+        )
+        self.right_panel_issues_pushbutton = self._icon_btn(
+            "Issues and suggestions", "github-icon.png", "welcomeInfoAction"
+        )
 
-    def __set_layout_dimensions(self):
+        for btn in (
+            self.right_panel_community_pushbutton,
+            self.right_panel_about_software_pushbutton,
+            self.right_panel_helpwiki_pushbutton,
+            self.right_panel_issues_pushbutton,
+        ):
+            layout.addWidget(btn)
+
+        layout.addStretch(1)
+        return panel
+
+    # ------------------------------------------------------------------
+    # Size
+    # ------------------------------------------------------------------
+
+    def _size(self):
         opt = SoftwareConfigResources.getInstance().get_optimal_dimensions()
-        target_size = opt
         if self.parent is not None:
-            parent_size = self.parent.size()
-            if parent_size.width() > 0 and parent_size.height() > 0:
-                target_size = parent_size
-            else:  # Ensure the main window is at least the optimal dimensions
+            ps = self.parent.size()
+            if ps.width() > 0 and ps.height() > 0:
+                opt = ps
+            else:
                 self.parent.resize(opt)
+        self.setMinimumSize(opt)
+        self.resize(opt)
 
-        self.setMinimumSize(target_size)
-        self.resize(target_size)
+        btn_h = 52
 
-        # Central area
-        self.central_label.setMinimumSize(400, 550)
-        self.central_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.left_panel_single_patient_pushbutton.setFixedHeight(btn_h)
+        self.left_panel.setMinimumWidth(340)
+        self.left_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        # Top title
-        self.top_logo_panel_label.setMinimumSize(400, 120)
-        self.top_logo_panel_label.setSizePolicy(
-            QSizePolicy.Expanding, QSizePolicy.Fixed
+        self.right_panel.setMinimumWidth(340)
+        self.right_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        for btn in (
+            self.right_panel_community_pushbutton,
+            self.right_panel_about_software_pushbutton,
+            self.right_panel_helpwiki_pushbutton,
+            self.right_panel_issues_pushbutton,
+        ):
+            btn.setFixedHeight(btn_h)
+
+    # ------------------------------------------------------------------
+    # Connections
+    # ------------------------------------------------------------------
+
+    def _connect(self):
+        self.left_panel_single_patient_pushbutton.clicked.connect(
+            self.transition_signal.emit
         )
-
-        # Bottom logo
-        self.bottom_logo_panel_label.setMinimumSize(100, 200)
-        self.bottom_logo_panel_label.setSizePolicy(
-            QSizePolicy.Expanding, QSizePolicy.Fixed
-        )
-
-        # Left panel buttons
-        self.left_panel_single_patient_pushbutton.setMinimumHeight(75)
-        self.left_panel_single_patient_pushbutton.setMinimumWidth(350)
-        self.left_panel_single_patient_pushbutton.setIconSize(QSize(40, 40))
-        self.left_panel.setMinimumSize(300, 300)
-        self.left_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        # Right panel buttons
-        self.right_panel_community_pushbutton.setMinimumHeight(75)
-        self.right_panel_community_pushbutton.setMinimumWidth(350)
-        self.right_panel_community_pushbutton.setIconSize(QSize(40, 40))
-        self.right_panel_about_software_pushbutton.setMinimumHeight(75)
-        self.right_panel_about_software_pushbutton.setMinimumWidth(350)
-        self.right_panel_about_software_pushbutton.setIconSize(QSize(40, 40))
-        self.right_panel_helpwiki_pushbutton.setMinimumHeight(75)
-        self.right_panel_helpwiki_pushbutton.setMinimumWidth(350)
-        self.right_panel_helpwiki_pushbutton.setIconSize(QSize(40, 40))
-        self.right_panel_issues_pushbutton.setMinimumHeight(75)
-        self.right_panel_issues_pushbutton.setMinimumWidth(350)
-        self.right_panel_issues_pushbutton.setIconSize(QSize(40, 40))
-        self.right_panel.setMinimumSize(300, 300)
-        self.right_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-    def __set_stylesheets(self):
-        software_ss = SoftwareConfigResources.getInstance().stylesheet_components
-        self.setStyleSheet(
-            "#welcomeRoot { background-color: " + software_ss["Color2"] + "; }"
-        )
-        self.central_label.setStyleSheet(
-            "background-color: " + software_ss["Color2"] + ";"
-        )
-
-        self.top_logo_panel_label.setStyleSheet(
-            """
-        QLabel{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        font-size: 56px;
-        font-weight: bold;
-        margin-top: 30px;
-        margin-bottom: 20px;
-        qproperty-alignment: AlignCenter;
-        }"""
-        )
-
-        self.right_panel.setStyleSheet(
-            "#welcomeRightPanel {\n            min-width: 200px;\n            min-height: 200px;\n            background-color: "
-            + software_ss["Color2"]
-            + ";\n        }"
-        )
-
-        self.right_panel_title_label.setStyleSheet(
-            """
-        QLabel{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        border: 0px;
-        font-size: 32px;
-        font-weight: bold;
-        }"""
-        )
-
-        self.right_panel_community_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.right_panel_about_software_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.right_panel_helpwiki_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.right_panel_issues_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Color3"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Color4"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        self.left_panel.setStyleSheet(
-            "#welcomeLeftPanel {\n            min-width: 200px;\n            min-height: 200px;\n            background-color: "
-            + software_ss["Color2"]
-            + ";\n        }"
-        )
-
-        self.left_panel_title_label.setStyleSheet(
-            """
-        QLabel{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        border: 0px;
-        font-size: 32px;
-        font-weight: bold;
-        }"""
-        )
-
-        self.left_panel_single_patient_pushbutton.setStyleSheet(
-            """
-        QPushButton{
-        color: """
-            + software_ss["Color7"]
-            + """;
-        background-color: """
-            + software_ss["Process"]
-            + """;
-        font-size: 22px;
-        text-align: left;
-        border-radius:12px;
-        padding: 16px;
-        padding-left: 20px;
-        margin-left:5px;
-        margin-right:5px;
-        font-weight:bold}
-        QPushButton:pressed{
-        background-color: """
-            + software_ss["Process_pressed"]
-            + """;
-        border-style:inset
-        }"""
-        )
-
-        # self.left_panel_multiple_patients_pushbutton.setStyleSheet(
-        #     """
-        # QPushButton{
-        # color: """
-        #     + software_ss["Color7"]
-        #     + """;
-        # background-color: """
-        #     + software_ss["Process"]
-        #     + """;
-        # font-size: 18px;
-        # text-align: center;
-        # border-radius:12px;
-        # padding: 12px;
-        # margin-left:5px;
-        # margin-right:5px;
-        # font-weight:bold}
-        # QPushButton:pressed{
-        # background-color: """
-        #     + software_ss["Process_pressed"]
-        #     + """;
-        # border-style:inset
-        # }"""
-        # )
-
-    def __set_connections(self):
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)
         self.right_panel_about_software_pushbutton.clicked.connect(self.about_clicked)
         self.right_panel_helpwiki_pushbutton.clicked.connect(self.help_clicked)
         self.right_panel_issues_pushbutton.clicked.connect(self.issues_clicked)
-        self.left_panel_single_patient_pushbutton.clicked.connect(
-            self.emit_transition_signal
-        )
+
+    # ------------------------------------------------------------------
+    # Slots
+    # ------------------------------------------------------------------
 
     def get_widget_name(self):
-        return self.widget_name
+        return "welcome_widget"
 
     def emit_transition_signal(self):
         self.transition_signal.emit()
 
     def community_clicked(self):
-        """Open research community link in browser."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
 
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA"))
 
     def about_clicked(self):
-        """Open about/documentation page in browser."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
 
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia"))
 
     def help_clicked(self):
-        """Open tutorials and wiki in browser."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
 
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia/wiki"))
 
     def issues_clicked(self):
-        """Open issues page in browser."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
 

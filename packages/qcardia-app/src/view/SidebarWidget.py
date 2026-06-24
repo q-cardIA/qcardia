@@ -21,11 +21,12 @@ class SidebarWidget(QFrame):
         self.layout.setSpacing(6)
 
         self.title_label = QLabel("Home")
-        self.title_label.setObjectName("sidebarSectionTitle")
+        self.title_label.setProperty("role", "sidebarSectionTitle")
         self.layout.addWidget(self.title_label)
 
         # Load patient button (Cine SAX)
         self.btn_load = QPushButton("Cine SAX")
+        self.btn_load.setProperty("role", "sidebarButton")
         self.btn_load.clicked.connect(self._on_load_patient_clicked)
         self.layout.addWidget(self.btn_load)
 
@@ -36,12 +37,13 @@ class SidebarWidget(QFrame):
 
         # Load Image button - always visible (LGE)
         self.btn_load_image = QPushButton("LGE")
+        self.btn_load_image.setProperty("role", "sidebarButton")
         self.btn_load_image.clicked.connect(self.load_image_requested.emit)
         self.layout.addWidget(self.btn_load_image)
 
         # Predict segmentation for currently loaded LGE stack
         self.btn_predict_lge = QPushButton("  Predict LGE")
-        self.btn_predict_lge.setObjectName("subButton")
+        self.btn_predict_lge.setProperty("role", "sidebarSubButton")
         self.btn_predict_lge.clicked.connect(self.predict_lge_requested.emit)
         self.layout.addWidget(self.btn_predict_lge)
 
@@ -74,13 +76,13 @@ class SidebarWidget(QFrame):
 
         # Create and insert Predict labels button (sub-button style)
         self.btn_predict = QPushButton("  Predict labels")
-        self.btn_predict.setObjectName("subButton")
+        self.btn_predict.setProperty("role", "sidebarSubButton")
         self.btn_predict.clicked.connect(self.predict_requested.emit)
         self.layout.insertWidget(load_image_index, self.btn_predict)
 
         # Create and insert Save button (sub-button style)
         self.btn_save = QPushButton("  Save new labels")
-        self.btn_save.setObjectName("subButton")
+        self.btn_save.setProperty("role", "sidebarSubButton")
         self.btn_save.clicked.connect(self.save_requested.emit)
         self.layout.insertWidget(load_image_index + 1, self.btn_save)
 
@@ -90,16 +92,4 @@ class SidebarWidget(QFrame):
     def _style(self):
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.setFixedWidth(210)
-        self.setStyleSheet(
-            """
-            #sidebar {background-color:#22262E; border:1px solid #2F3440;}
-            #sidebarSectionTitle {color:#E6E6E6; font-size:16px; font-weight:bold; margin-top:4px;}
-            QPushButton {background-color:#2F3440; color:#E6E6E6; border:1px solid #3A404C; padding:10px 12px; text-align:left; border-radius:4px; font-size:14px;}
-            QPushButton:hover {background-color:#3A404C;}
-            QPushButton:pressed {background-color:#4A5060;}
-            QPushButton:disabled {color:#80848A; background-color:#242830;}
-            QPushButton#subButton {background-color:#242830; border-left:3px solid #85aaff; padding:8px 12px; font-size:13px; margin-left:8px;}
-            QPushButton#subButton:hover {background-color:#2A2E36;}
-            QPushButton#subButton:pressed {background-color:#3A404C;}
-            """
-        )
+        self.setProperty("role", "sidebarPanel")
