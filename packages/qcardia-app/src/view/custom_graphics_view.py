@@ -1,14 +1,11 @@
 import logging
-import os
 
 import numpy as np
 
-# from gui.UtilsWidgets.CustomQDialog.ImportDataQDialog import ImportDataQDialog
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
-    QGraphicsOpacityEffect,
     QGraphicsPathItem,
     QGraphicsPixmapItem,
     QGraphicsScene,
@@ -16,29 +13,11 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
-from view.utils import SoftwareConfigResources
-
-# from scipy.ndimage import rotate  # Unused; keep disabled until rotation is required
-
 
 class CustomQGraphicsView(QGraphicsView):
     """ """
 
-    mri_volume_imported = Signal(
-        str
-    )  # From the drag/drop event to include more MRI volumes
-    annotation_volume_imported = Signal(
-        str
-    )  # From the drag/drop event to include more annotations
-    patient_imported = Signal(
-        str
-    )  # From the drag/drop event to include more patients to the project?
-    coordinates_changed = Signal(
-        int, int
-    )  # From the mouse move event to change the point-of-view.
-    annotation_display_state_changed = (
-        Signal()
-    )  # When pressing 's' to toggle on/off the annotations
+    coordinates_changed = Signal(int, int)
     contours_updated = Signal(list)
 
     def __init__(self, view_type="axial", size=QSize(150, 150), parent=None):
@@ -48,13 +27,6 @@ class CustomQGraphicsView(QGraphicsView):
         # self.setMinimumSize(size)
         # logging.debug("Setting CustomQGraphicsView dimensions to {}.\n".format(self.size()))
         self.view_type = view_type
-        self.original_annotations = {}  # Placeholder for the raw annotation 2d slices
-        self.display_annotations = (
-            {}
-        )  # Placeholder for the annotation 2d slices, after display transform
-        self.overlaid_items = {}  # Placeholder for the QGraphicsPixmapItem
-        # Placeholder for color and opacity for now: {color:QColor(255,255,255), opacity:0.5}
-        self.overlaid_items_display_parameters = {}
         self.edit_mode = False
         self._contour_definitions = []
         self._contour_items = []
@@ -102,7 +74,6 @@ class CustomQGraphicsView(QGraphicsView):
         self.scene = QGraphicsScene(self)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
-        self.setAcceptDrops(True)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setEnabled(
             False
@@ -187,16 +158,6 @@ class CustomQGraphicsView(QGraphicsView):
 
     def zoom_out(self):
         self.__apply_zoom_step(-0.1)
-
-    def keyPressEvent(self, event) -> None:
-        """
-        Shortcuts for displaying or hiding elements, only if there is an active patient.
-        S key: display or hide the tumor annotation.
-        """
-        if event.key() == Qt.Key_S:
-            if not SoftwareConfigResources.getInstance().is_patient_list_empty():
-                logging.info("Changing annotations display state.")
-                self.annotation_display_state_changed.emit()
 
     def mousePressEvent(self, event):
         """
@@ -349,61 +310,6 @@ class CustomQGraphicsView(QGraphicsView):
             self.horizontal_line = self.scene.addLine(0, y, view_width, y, pen)
             self.horizontal_line.setZValue(100)
 
-    def dragEnterEvent(self, event):
-        entered_content_raw = event.mimeData().urls()
-        entered_content_list = [
-            x.toLocalFile() for x in entered_content_raw
-        ]  # entered_content_raw.strip().split("\n")
-        eligibility_file_states = [
-            ".".join(os.path.basename(x).split(".")[1:]).strip()
-            in SoftwareConfigResources.getInstance().accepted_image_format
-            for x in entered_content_list
-        ]
-        eligibility_dir_states = [
-            os.path.isdir(x.strip()) for x in entered_content_list
-        ]
-        accept_state = True in (eligibility_file_states or eligibility_dir_states)
-
-        if accept_state:
-            event.accept()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        pass
-
-    def dragLeaveEvent(self, event):
-        event.ignore()
-
-    def dropEvent(self, event):
-        """
-        Enabling the possibility to open / add to the current patient, a new volume
-        """
-        # entered_content_raw = event.mimeData().text()
-        # entered_content_list = entered_content_raw.strip().split("\n")
-        entered_content_raw = event.mimeData().urls()
-        entered_content_list = [x.toLocalFile() for x in entered_content_raw]
-        entered_eligible_files = []
-        entered_eligible_dir = []
-        for elem in entered_content_list:
-            if os.path.isdir(elem):
-                entered_eligible_dir.append(elem)
-            elif (
-                ".".join(os.path.basename(elem).split(".")[1:]).strip()
-                in SoftwareConfigResources.getInstance().accepted_image_format
-            ):
-                entered_eligible_files.append(elem.strip())
-
-        # dialog = ImportDataQDialog(self)
-        # dialog.mri_volume_imported.connect(self.mri_volume_imported)
-        # dialog.annotation_volume_imported.connect(self.annotation_volume_imported)
-        # dialog.patient_imported.connect(self.patient_imported)
-
-        # dialog.setup_interface_from_files(entered_eligible_files)
-        # code = dialog.exec()
-
-        # if code == QDialog.Accepted:
-
     def update_overlay(self, overlay_image):
         """Store the overlay and trigger a redraw with compositing."""
         if overlay_image is None:
@@ -413,87 +319,6 @@ class CustomQGraphicsView(QGraphicsView):
         # Redraw the slice view to composite overlay
         if hasattr(self, "display_2d") and self.display_2d is not None:
             self.update_slice_view(self.display_2d)
-
-    def update_annotation_view(self, annotation_uid, annotation_slice):
-        """ """
-        if annotation_uid not in self.overlaid_items.keys():
-            self.original_annotations[annotation_uid] = None
-            self.display_annotations[annotation_uid] = None
-            self.overlaid_items[annotation_uid] = QGraphicsPixmapItem()
-            self.scene.addItem(self.overlaid_items[annotation_uid])
-        if annotation_uid not in self.overlaid_items_display_parameters.keys():
-            annotation_color = (
-                SoftwareConfigResources.getInstance()
-                .get_active_patient()
-                .get_annotation_by_uid(annotation_uid)
-                .display_color
-            )
-            self.overlaid_items_display_parameters[annotation_uid] = {
-                "color": QColor.fromRgb(
-                    annotation_color[0],
-                    annotation_color[1],
-                    annotation_color[2],
-                    annotation_color[3],
-                ),
-                "opacity": float(
-                    SoftwareConfigResources.getInstance()
-                    .get_active_patient()
-                    .get_annotation_by_uid(annotation_uid)
-                    .get_display_opacity()
-                    / 100.0
-                ),
-            }
-
-        self.original_annotations[annotation_uid] = annotation_slice
-        # Apply consistent display transform for all views (flip + rotate +180)
-        image_2d = annotation_slice[:, ::-1]
-        # image_2d = rotate(image_2d, 180).astype("uint8")
-        self.display_annotations[annotation_uid] = image_2d
-        self.__repaint_overlay(annotation_uid)
-
-    def reset_viewer(self):
-        """
-        Not used as of now, hasn't been tried either.
-        """
-        self.cleanse_annotations()
-        self.update_slice_view(np.zeros((150, 150), dtype="uint8"))
-
-    def cleanse_annotations(self):
-        for k in list(self.overlaid_items):
-            self.remove_annotation_view(k)
-        self.overlaid_items_display_parameters.clear()
-
-    def remove_annotation_view(self, annotation_uid):
-        graphics_item = self.overlaid_items[annotation_uid]
-        self.scene.removeItem(graphics_item)
-        self.overlaid_items.pop(annotation_uid)
-        self.original_annotations.pop(annotation_uid)
-        self.display_annotations.pop(annotation_uid)
-        # Should we keep the last parameters, so that it shows back as it was when it's toggled back, rather than
-        # set to default values? Not much memory use for this.
-        # self.overlaid_items_display_parameters.pop(annotation_uid)
-
-    def update_annotation_opacity(self, annotation_uid, value):
-        """
-        Opacity value comes from a QSlider with a value in the range [0, 100]
-        """
-        self.overlaid_items_display_parameters[annotation_uid]["opacity"] = (
-            value / 100.0
-        )
-        self.__repaint_overlay(annotation_uid)
-
-    def update_annotation_color(self, annotation_uid, color):
-        """
-        Update to the display color for the current annotation, indicated by annotation_uid.
-        """
-        self.overlaid_items_display_parameters[annotation_uid]["color"] = color
-        self.__repaint_overlay(annotation_uid)
-
-    def __update_point_clicker_lines(self, posx, posy):
-        """
-        Updates the location of the crosshair lines.
-        """
-        self.updateCrosshairPosition(posx, posy)
 
     def __from_graphics_position_to_raw_volume_position(self, graphics_point):
         """
@@ -639,10 +464,6 @@ class CustomQGraphicsView(QGraphicsView):
         self.image_item.setOffset(offset_x, offset_y)
         self.scene.setSceneRect(0, 0, view_w, view_h)
 
-        # Repaint any overlays to match the new base pixmap size
-        for overlay_uid in list(self.display_annotations.keys()):
-            self.__repaint_overlay(overlay_uid)
-
         # Crosshair lines: create centered on first paint, refresh thereafter
         if self.crosshair_pos is None:
             center_x = int(offset_x + max(1, pixmap.width()) / 2)
@@ -656,75 +477,9 @@ class CustomQGraphicsView(QGraphicsView):
         # Atlas-related overlay helpers removed (feature not used)
 
     def __repaint_view(self):
-        """
-        Full repainting of the scene, including the MRI volume, point-position lines,
-        and overlays.
-        """
         if self.display_2d is None:
             return
-
         self.update_slice_view(self.display_2d)
-
-    def __repaint_overlay(self, overlay_uid):
-        """
-        Recomputes the QPixmap, updates the QGraphicsPixmapItem, which repaints the scene accordingly for the
-        specified annotation to overlay indicated by overlay_uid.
-        """
-        if overlay_uid not in self.display_annotations:
-            return
-
-        overlay_image = self.display_annotations[overlay_uid]
-        if overlay_image is None:
-            return
-
-        if overlay_uid not in self.overlaid_items_display_parameters:
-            return
-
-        if self.image_item is None or self.image_item.pixmap().isNull():
-            return
-
-        # Mirror horizontally to match image display orientation
-        # overlay_image = np.fliplr(overlay_image)
-        h, w = overlay_image.shape  # h=rows(height), w=cols(width) in numpy
-        bytes_per_line = 3 * w
-        color_image = np.stack(
-            [np.zeros(overlay_image.shape, dtype=np.uint8)] * 3, axis=-1
-        )
-        color = self.overlaid_items_display_parameters[overlay_uid]["color"]
-        color_image[..., 0][overlay_image != 0] = color.red()
-        color_image[..., 1][overlay_image != 0] = color.green()
-        color_image[..., 2][overlay_image != 0] = color.blue()
-
-        # QImage expects (width, height) but numpy shape is (height, width)
-        qimage = QImage(color_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        qimage = qimage.convertToFormat(QImage.Format_RGBA8888)
-
-        alpha_channel = np.zeros(overlay_image.shape, dtype=np.uint8)
-        alpha_channel[overlay_image != 0] = 255
-        qimage.setAlphaChannel(
-            QImage(alpha_channel.data, w, h, w, QImage.Format_Alpha8)
-        )
-
-        pixmap = self.image_item.pixmap()
-        target_width = max(1, pixmap.width())
-        target_height = max(1, pixmap.height())
-        qimage_scaled = qimage.scaled(
-            target_width,
-            target_height,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-
-        graphics_item = self.overlaid_items[overlay_uid]
-        graphics_item.setPixmap(QPixmap.fromImage(qimage_scaled))
-        graphics_item.setOffset(self.image_item.offset())
-        graphics_item.setZValue(1)
-
-        opacity = QGraphicsOpacityEffect()
-        opacity.setOpacity(
-            self.overlaid_items_display_parameters[overlay_uid]["opacity"]
-        )
-        graphics_item.setGraphicsEffect(opacity)
 
     def set_edit_mode(self, enabled):
         self.edit_mode = bool(enabled)

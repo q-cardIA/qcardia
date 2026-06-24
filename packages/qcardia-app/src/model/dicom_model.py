@@ -8,7 +8,6 @@ import torch
 import yaml
 from qcardia.series import CineSeries, LGESeries
 from qcardia_models.models import UNet2d
-from scipy.ndimage import zoom
 
 
 class DICOMModel:
@@ -183,15 +182,11 @@ class DICOMModel:
 
         # Build temporal volumes
         self.temporal_volumes = []
-        zoom_factors = [1.0, 1.0, 1.0]
 
         for time_idx in range(self.num_time_frames):
             slices = [entry[1][time_idx] for entry in slice_entries]
             image_stack = np.stack(slices, axis=0)
-            stack_resampled = self.apply_window(
-                zoom(image_stack, zoom_factors, order=1), center, width
-            )
-            self.temporal_volumes.append(stack_resampled)
+            self.temporal_volumes.append(self.apply_window(image_stack, center, width))
 
         return self.temporal_volumes, self.num_time_frames
 

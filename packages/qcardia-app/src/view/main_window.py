@@ -4,15 +4,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSlider,
     QVBoxLayout,
     QWidget,
 )
 
-from view.CentralDisplayAreaWidget import CentralDisplayAreaWidget
-from view.QuickViewPanelWidget import QuickViewPanelWidget
-from view.SidebarWidget import SidebarWidget
+from view.central_display_area_widget import CentralDisplayAreaWidget
+from view.sidebar_widget import SidebarWidget
 from view.welcome_widget import WelcomeWidget
 
 
@@ -48,9 +48,6 @@ class MainWindow(QMainWindow):
 
         # Central display (3 orthogonal viewers + empty cell)
         self.display_area_widget = CentralDisplayAreaWidget(self)
-
-        # Quick view results panel (right)
-        self.quick_view_panel = QuickViewPanelWidget(self)
 
         # Time controls below central area (keep existing semantics)
         time_controls_container = QWidget()
@@ -112,7 +109,6 @@ class MainWindow(QMainWindow):
         content_row.setSpacing(0)
         content_row.addWidget(self.sidebar)
         content_row.addWidget(self.display_area_widget, 1)
-        content_row.addWidget(self.quick_view_panel)
         main_v.addLayout(content_row)
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)
@@ -186,61 +182,16 @@ class MainWindow(QMainWindow):
             self.display_area_widget.set_contour_edit_tool("move")
 
     def update_display(self, image_stack, slice_positions=None):
-        """Update display with new image stack, centering the view."""
         if hasattr(self, "display_area_widget"):
-            self.display_area_widget.displayed_image = image_stack
-            self.display_area_widget.displayed_image_uid = None
-            center_indices = [
-                image_stack.shape[0] // 2,
-                image_stack.shape[1] // 2,
-                image_stack.shape[2] // 2,
-            ]
-            self.display_area_widget.point_clicker_position = center_indices
-            if (
-                slice_positions is not None
-                and len(slice_positions) == image_stack.shape[0]
-            ):
-                self.display_area_widget.primary_slice_positions = [
-                    float(val) for val in slice_positions
-                ]
-            else:
-                self.display_area_widget.primary_slice_positions = None
-            self.display_area_widget.update_viewers_image()
+            self.display_area_widget.set_volume(image_stack, slice_positions)
 
     def update_display_with_position(
         self, image_stack, preserve_position=False, slice_positions=None
     ):
-        """Update display, optionally preserving crosshair position."""
         if hasattr(self, "display_area_widget"):
-            da = self.display_area_widget
-
-            if preserve_position:
-                # Get current position and clamp to new volume bounds
-                pos = getattr(da, "point_clicker_position", [0, 0, 0])
-                x = min(max(0, pos[0]), image_stack.shape[0] - 1)
-                y = min(max(0, pos[1]), image_stack.shape[1] - 1)
-                z = min(max(0, pos[2]), image_stack.shape[2] - 1)
-                da.displayed_image = image_stack
-                da.point_clicker_position = [x, y, z]
-            else:
-                # Center the view
-                center_indices = [
-                    image_stack.shape[0] // 2,
-                    image_stack.shape[1] // 2,
-                    image_stack.shape[2] // 2,
-                ]
-                da.displayed_image = image_stack
-                da.point_clicker_position = center_indices
-
-            da.displayed_image_uid = None
-            if (
-                slice_positions is not None
-                and len(slice_positions) == image_stack.shape[0]
-            ):
-                da.primary_slice_positions = [float(val) for val in slice_positions]
-            else:
-                da.primary_slice_positions = None
-            da.update_viewers_image()
+            self.display_area_widget.set_volume(
+                image_stack, slice_positions, preserve_position=preserve_position
+            )
 
     def has_folder_been_selected(self):
         return self.folder_selected
@@ -265,10 +216,29 @@ class MainWindow(QMainWindow):
             self.time_label.setText(f"Time Frame: 1 / {num_frames}")
 
     def on_time_slider_changed(self, value):
-        """Handle time slider changes and update the display."""
         if hasattr(self, "time_slider") and hasattr(self, "time_label"):
             max_val = self.time_slider.maximum()
             self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}")
-            # Emit signal to controller to update the displayed volume
             if hasattr(self, "time_frame_changed_signal"):
                 self.time_frame_changed_signal.emit(value)
+
+    def show_error(self, title, message):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()
+
+    def show_warning(self, title, message):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()
+
+    def show_info(self, title, message):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()

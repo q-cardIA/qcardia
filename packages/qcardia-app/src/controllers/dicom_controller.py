@@ -1,7 +1,5 @@
 import logging
 
-from PySide6.QtWidgets import QMessageBox
-
 
 class DICOMController:
     def __init__(self, view, model):
@@ -27,7 +25,7 @@ class DICOMController:
                 )
         except Exception as e:
             logging.error(f"Failed to load LGE series: {e}")
-            self._show_error_dialog(
+            self.view.show_error(
                 "LGE Load Error", f"Failed to load LGE series:\n{str(e)}"
             )
 
@@ -49,7 +47,7 @@ class DICOMController:
                 self.view.update_time_slider_range(num_frames)
         except Exception as e:
             logging.error(f"Failed to load DICOM files: {e}")
-            self._show_error_dialog(
+            self.view.show_error(
                 "Load Error", f"Failed to load DICOM files:\n{str(e)}"
             )
 
@@ -64,11 +62,9 @@ class DICOMController:
                 self.view.display_area_widget.set_segmentation_volume(
                     temporal_segmentations[idx]
                 )
-            if hasattr(self.view, "quick_view_panel"):
-                self.view.quick_view_panel.show_cine_results()
         except Exception as e:
             logging.error(f"Segmentation failed: {e}")
-            self._show_error_dialog(
+            self.view.show_error(
                 "Segmentation Error", f"Failed to run segmentation:\n{str(e)}"
             )
 
@@ -79,10 +75,10 @@ class DICOMController:
             if hasattr(self.view, "display_area_widget"):
                 self.view.display_area_widget.set_lge_segmentation_volume(seg_volume)
         except ValueError as e:
-            self._show_warning_dialog("No LGE Volume", str(e))
+            self.view.show_warning("No LGE Volume", str(e))
         except Exception as e:
             logging.error(f"LGE segmentation failed: {e}")
-            self._show_error_dialog(
+            self.view.show_error(
                 "LGE Segmentation Error", f"Failed to run LGE segmentation:\n{str(e)}"
             )
 
@@ -110,38 +106,15 @@ class DICOMController:
         try:
             output_path = self.model.save_segmentation()
             logging.info(f"Segmentation saved to {output_path}")
-            self._show_info_dialog(
+            self.view.show_info(
                 "Save Successful",
                 f"Segmentation saved successfully to:\n{output_path}",
             )
         except ValueError as e:
-            self._show_warning_dialog("No Segmentation", str(e))
+            self.view.show_warning("No Segmentation", str(e))
         except Exception as e:
             logging.error(f'Failed to save segmentation: {e}"')
-            self._show_error_dialog(
+            self.view.show_error(
                 "Save Failed", f"Failed to save segmentation:\n{str(e)}"
             )
 
-    def _show_warning_dialog(self, title, message):
-        """Show a warning dialog with dark theme."""
-        msg = QMessageBox(self.view)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        msg.exec()
-
-    def _show_info_dialog(self, title, message):
-        """Show an information dialog with dark theme."""
-        msg = QMessageBox(self.view)
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        msg.exec()
-
-    def _show_error_dialog(self, title, message):
-        """Show an error dialog with dark theme."""
-        msg = QMessageBox(self.view)
-        msg.setIcon(QMessageBox.Critical)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        msg.exec()

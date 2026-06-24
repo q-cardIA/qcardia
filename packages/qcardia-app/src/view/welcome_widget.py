@@ -1,7 +1,7 @@
 import os
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -10,9 +10,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-from view.utils import SoftwareConfigResources
-
 
 class WelcomeWidget(QWidget):
     """Starting page when launching the software."""
@@ -197,7 +194,7 @@ class WelcomeWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _size(self):
-        opt = SoftwareConfigResources.getInstance().get_optimal_dimensions()
+        opt = QSize(1280, 720)
         if self.parent is not None:
             ps = self.parent.size()
             if ps.width() > 0 and ps.height() > 0:
@@ -240,32 +237,14 @@ class WelcomeWidget(QWidget):
     # Slots
     # ------------------------------------------------------------------
 
-    def get_widget_name(self):
-        return "welcome_widget"
-
-    def emit_transition_signal(self):
-        self.transition_signal.emit()
-
     def community_clicked(self):
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA"))
 
     def about_clicked(self):
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia"))
 
     def help_clicked(self):
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia/wiki"))
 
     def issues_clicked(self):
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia/issues"))

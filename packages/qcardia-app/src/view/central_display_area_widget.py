@@ -1,9 +1,8 @@
 import logging
-import traceback
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -13,60 +12,34 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from view.CustomQGraphicsView import CustomQGraphicsView
-from view.utils import SoftwareConfigResources
-
-# add central area execution widget
+from view.custom_graphics_view import CustomQGraphicsView
 
 
 class CentralDisplayAreaWidget(QWidget):
-    # """ """
-
-    import_data_triggered = Signal()
-    # Unique id for the MRI volume, belonging to the active patient
-    mri_volume_imported = Signal(str)
-    # Unique id for the annotation volume, belonging to the active patient
-    annotation_volume_imported = Signal(str)
-    patient_imported = Signal(str)  # The str is the unique id for the patient
-    annotation_display_state_changed = Signal()
 
     def __init__(self, parent=None):
         super(CentralDisplayAreaWidget, self).__init__()
         self.parent = parent
-        # Previous dynamic min size logic removed for clarity.
-        opt = SoftwareConfigResources.getInstance().get_optimal_dimensions()
+        opt = QSize(1280, 720)
         self.setBaseSize(
             QSize(
                 (1325 / opt.width()) * self.parent.baseSize().width(),
                 (950 / opt.height()) * self.parent.baseSize().height(),
             )
         )
-        logging.debug("Setting CentralDisplayAreaWidget dimensions to %s.", self.size())
         self.__set_interface()
-        # self.__set_layout_dimensions()
         self.__set_stylesheets()
         self.__set_connections()
-        self.current_patient_parameters = None
         self.displayed_image = None
         self.displayed_image_uid = None
-        self.point_clicker_position = [
-            0,
-            0,
-            0,
-        ]  # Knowing at all time the center of the cross-hair blue lines.
-        self.overlaid_volumes = {}  # Annotation volumes to overlay on the image.
-        # Segmentation: class ids per voxel, shape (Z, H, W)
+        self.point_clicker_position = [0, 0, 0]
         self.segmentation_volume = None
-        self.primary_slice_positions = (
-            None  # Physical locations along primary volume depth
-        )
-        self.lge_slice_positions = None  # Physical locations along LGE stack
+        self.primary_slice_positions = None
+        self.lge_volume = None
+        self.lge_slice_index = 0
+        self.lge_slice_positions = None
         self.lge_segmentation_volume = None
         self.contour_edit_mode = False
-
-    def resizeEvent(self, event):
-        # Default resize behavior retained.
-        super().resizeEvent(event)
 
     def __set_interface(self):
         self.setObjectName("centralDisplayArea")
@@ -74,9 +47,6 @@ class CentralDisplayAreaWidget(QWidget):
         self.layout.setHorizontalSpacing(0)
         self.layout.setVerticalSpacing(0)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        # LGE volume viewer container (top-right)
-        self.lge_volume = None
-        self.lge_slice_index = 0
         self.lge_container = QWidget()
         self.lge_container.setProperty("role", "viewerCard")
         self.lge_container_layout = QVBoxLayout(self.lge_container)
@@ -134,8 +104,6 @@ class CentralDisplayAreaWidget(QWidget):
         self.layout.addWidget(self.coronal_container, 2, 2)
         self.layout.addWidget(self.vertical_line, 0, 1, 3, 1)
 
-    # Removed unused __set_layout_dimensions (previously only comments).
-
     def __set_stylesheets(self):
         self.secondary_viewer.setProperty("role", "imageViewport")
         self.axial_viewer.setProperty("role", "imageViewport")
@@ -143,206 +111,12 @@ class CentralDisplayAreaWidget(QWidget):
         self.sagittal_viewer.setProperty("role", "imageViewport")
 
     def __set_connections(self):
-        self.axial_viewer.coordinates_changed.connect(
-            self.__on_axial_coordinates_changed
-        )
-        self.coronal_viewer.coordinates_changed.connect(
-            self.__on_coronal_coordinates_changed
-        )
-        self.sagittal_viewer.coordinates_changed.connect(
-            self.__on_sagittal_coordinates_changed
-        )
-        self.secondary_viewer.coordinates_changed.connect(
-            self.__on_lge_coordinates_changed
-        )
-
-        self.axial_viewer.mri_volume_imported.connect(self.mri_volume_imported)
-        self.axial_viewer.annotation_volume_imported.connect(
-            self.annotation_volume_imported
-        )
-        self.axial_viewer.annotation_display_state_changed.connect(
-            self.annotation_display_state_changed
-        )
-        # self.axial_viewer.patient_imported.connect(self.patient_imported)
-        self.coronal_viewer.mri_volume_imported.connect(self.mri_volume_imported)
-        self.coronal_viewer.annotation_volume_imported.connect(
-            self.annotation_volume_imported
-        )
-        self.coronal_viewer.annotation_display_state_changed.connect(
-            self.annotation_display_state_changed
-        )
-        # self.coronal_viewer.patient_imported.connect(self.patient_imported)
-        self.sagittal_viewer.mri_volume_imported.connect(self.mri_volume_imported)
-        self.sagittal_viewer.annotation_volume_imported.connect(
-            self.annotation_volume_imported
-        )
-        self.sagittal_viewer.annotation_display_state_changed.connect(
-            self.annotation_display_state_changed
-        )
-        self.sagittal_viewer.contours_updated.connect(
-            self.__on_sagittal_contours_updated
-        )
-        self.secondary_viewer.contours_updated.connect(
-            self.__on_lge_contours_updated
-        )
-        # self.sagittal_viewer.patient_imported.connect(self.patient_imported)
-
-    def reset_viewer(self):
-        """ """
-        self.reset_overlay()
-        self.displayed_image = np.zeros(shape=(150, 150, 150), dtype="uint8")
-        self.primary_slice_positions = None
-        self.displayed_image_uid = None
-        self.point_clicker_position = [
-            int(self.displayed_image.shape[0] / 2),
-            int(self.displayed_image.shape[1] / 2),
-            int(self.displayed_image.shape[2] / 2),
-        ]
-        self.update_viewers_image()
-
-    def reset_overlay(self):
-        """
-        When the active patient or volume changes, clear all overlays.
-        """
-        self.axial_viewer.cleanse_annotations()
-        self.coronal_viewer.cleanse_annotations()
-        self.sagittal_viewer.cleanse_annotations()
-        self.sagittal_viewer.clear_contours()
-        self.secondary_viewer.clear_contours()
-        self.overlaid_volumes.clear()
-
-    def on_import_data(self):
-        """
-        DEPRECATED: To Remove.
-        """
-        if self.displayed_image is None:
-            self.current_patient_parameters = (
-                SoftwareConfigResources.getInstance().patients_parameters[
-                    SoftwareConfigResources.getInstance().active_patient_name
-                ]
-            )
-
-            # If the active patient has MRI volumes, display the first one.
-            if self.current_patient_parameters.get_patient_mri_volumes_number() != 0:
-                self.displayed_image = self.current_patient_parameters.get_mri_by_uid(
-                    self.current_patient_parameters.get_all_mri_volumes_uids()[0]
-                ).display_volume
-                self.primary_slice_positions = None
-                self.point_clicker_position = [
-                    int(self.displayed_image.shape[0] / 2),
-                    int(self.displayed_image.shape[1] / 2),
-                    int(self.displayed_image.shape[2] / 2),
-                ]
-                self.displayed_image = self.displayed_image[:, ::-1, :]
-                self.primary_slice_positions = None
-                self.update_viewers_image()
-            else:
-                self.displayed_image = np.zeros(shape=(150, 150, 150), dtype="uint8")
-                self.primary_slice_positions = None
-                self.point_clicker_position = [
-                    int(self.displayed_image.shape[0] / 2),
-                    int(self.displayed_image.shape[1] / 2),
-                    int(self.displayed_image.shape[2] / 2),
-                ]
-                self.update_viewers_image()
-                # self.axial_viewer.setEnabled(False)
-                # self.coronal_viewer.setEnabled(False)
-                # self.sagittal_viewer.setEnabled(False)
-
-    def on_patient_selected(self):
-        self.current_patient_parameters = (
-            SoftwareConfigResources.getInstance().patients_parameters[
-                SoftwareConfigResources.getInstance().active_patient_name
-            ]
-        )
-
-        self.reset_overlay()
-        # If active patient has MRI volumes, display current or first.
-        if self.current_patient_parameters.get_patient_mri_volumes_number() != 0:
-            if (
-                self.displayed_image_uid
-                in self.current_patient_parameters.get_all_mri_volumes_uids()
-            ):
-                self.displayed_image = self.current_patient_parameters.get_mri_by_uid(
-                    self.displayed_image_uid
-                ).display_volume
-                self.primary_slice_positions = None
-            else:  # New patient selected: use first volume
-                first_uid = self.current_patient_parameters.get_all_mri_volumes_uids()[
-                    0
-                ]
-                self.displayed_image = self.current_patient_parameters.get_mri_by_uid(
-                    first_uid
-                ).display_volume
-                self.primary_slice_positions = None
-                self.displayed_image_uid = first_uid
-            self.point_clicker_position = [
-                int(self.displayed_image.shape[0] / 2),
-                int(self.displayed_image.shape[1] / 2),
-                int(self.displayed_image.shape[2] / 2),
-            ]
-        else:  # Empty patient fallback
-            self.displayed_image = np.zeros(shape=(150, 150, 150), dtype="uint8")
-            self.primary_slice_positions = None
-            self.displayed_image_uid = None
-            self.point_clicker_position = [
-                int(self.displayed_image.shape[0] / 2),
-                int(self.displayed_image.shape[1] / 2),
-                int(self.displayed_image.shape[2] / 2),
-            ]
-        self.update_viewers_image()
-
-    def on_volume_layer_toggled(self, volume_uid, state):
-        """Toggle display of an MRI volume (state should normally be True)."""
-        if not self.current_patient_parameters:
-            self.current_patient_parameters = (
-                SoftwareConfigResources.getInstance().get_active_patient()
-            )
-
-        try:
-            if state:
-                # Clear overlays until multi-volume co-registration is supported.
-                self.reset_overlay()
-                self.displayed_image = self.current_patient_parameters.get_mri_by_uid(
-                    volume_uid
-                ).display_volume
-                self.primary_slice_positions = None
-                self.displayed_image_uid = volume_uid
-
-                # Reset viewpoint to center.
-                self.point_clicker_position = [
-                    int(self.displayed_image.shape[0] / 2),
-                    int(self.displayed_image.shape[1] / 2),
-                    int(self.displayed_image.shape[2] / 2),
-                ]
-                self.update_viewers_image()
-            else:  # If all images have been removed by the user, should display an empty view
-                self.displayed_image = np.zeros(shape=(150, 150, 150), dtype="uint8")
-                self.primary_slice_positions = None
-                self.displayed_image_uid = None
-                self.point_clicker_position = [
-                    int(self.displayed_image.shape[0] / 2),
-                    int(self.displayed_image.shape[1] / 2),
-                    int(self.displayed_image.shape[2] / 2),
-                ]
-                self.update_viewers_image()
-        except (
-            Exception
-        ) as e:  # Broad catch retained until specific exceptions are known.
-            logging.error(
-                "[Software error][CentralDisplayAreaWidget] Issue toggling view for volume: %s",
-                volume_uid,
-            )
-            logging.info("Collected: %s\n %s", e, traceback.format_exc())
-
-    def on_volume_contrast_changed(self, volume_uid):
-        # @TODO. Should group the viewer calls into another function somewhere, since all three above methods use it.
-        self.displayed_image = self.current_patient_parameters.get_mri_by_uid(
-            volume_uid
-        ).display_volume
-        self.primary_slice_positions = None
-        self.displayed_image_uid = volume_uid
-        self.update_viewers_image()
+        self.axial_viewer.coordinates_changed.connect(self.__on_axial_coordinates_changed)
+        self.coronal_viewer.coordinates_changed.connect(self.__on_coronal_coordinates_changed)
+        self.sagittal_viewer.coordinates_changed.connect(self.__on_sagittal_coordinates_changed)
+        self.secondary_viewer.coordinates_changed.connect(self.__on_lge_coordinates_changed)
+        self.sagittal_viewer.contours_updated.connect(self.__on_sagittal_contours_updated)
+        self.secondary_viewer.contours_updated.connect(self.__on_lge_contours_updated)
 
     def update_viewers_image(self):
         """
@@ -370,25 +144,33 @@ class CentralDisplayAreaWidget(QWidget):
             self.point_clicker_position[2],
         )
 
-        # for volume_uid, volume in self.overlaid_volumes.items():
-        #     # Display segmentation only on sagittal (top-left). Use correct sagittal slice: volume[x, :, :]
-        #     sagittal_slice = volume[self.point_clicker_position[0], :, :]
-
-        #     self.sagittal_viewer.update_annotation_view(volume_uid, sagittal_slice)
-
-        #     # Ensure other viewers do NOT retain stale overlays
-        #     if volume_uid in self.axial_viewer.overlaid_items:
-        #         self.axial_viewer.remove_annotation_view(volume_uid)
-        #     if volume_uid in self.coronal_viewer.overlaid_items:
-        #         self.coronal_viewer.remove_annotation_view(volume_uid)
-
         self.__synchronize_crosshairs()
-        # After base slices updated, refresh dynamic segmentation overlay
         self.__update_segmentation_overlay()
-        # Refresh LGE volume if present
         self.__sync_lge_with_primary()
-        # Sync sliders positions
         self.__sync_primary_sliders()
+
+    def set_volume(self, volume, slice_positions=None, preserve_position=False):
+        if preserve_position and self.displayed_image is not None:
+            pos = self.point_clicker_position
+            self.point_clicker_position = [
+                min(max(0, pos[0]), volume.shape[0] - 1),
+                min(max(0, pos[1]), volume.shape[1] - 1),
+                min(max(0, pos[2]), volume.shape[2] - 1),
+            ]
+        else:
+            self.point_clicker_position = [
+                volume.shape[0] // 2,
+                volume.shape[1] // 2,
+                volume.shape[2] // 2,
+            ]
+        self.displayed_image = volume
+        self.displayed_image_uid = None
+        self.primary_slice_positions = (
+            [float(v) for v in slice_positions]
+            if slice_positions is not None and len(slice_positions) == volume.shape[0]
+            else None
+        )
+        self.update_viewers_image()
 
     def set_lge_volume(self, volume, slice_positions=None):
         """Assign an LGE 3D volume (Z,H,W) plus optional physical slice positions."""
@@ -742,54 +524,7 @@ class CentralDisplayAreaWidget(QWidget):
             return None
         return np.asarray(converted, dtype=np.int32).reshape((-1, 1, 2))
 
-    def on_annotation_layer_toggled(self, volume_uid, state):
-        if state:
-            self.current_patient_parameters = (
-                SoftwareConfigResources.getInstance().patients_parameters[
-                    SoftwareConfigResources.getInstance().active_patient_name
-                ]
-            )
-            self.overlaid_volumes[volume_uid] = (
-                self.current_patient_parameters.get_annotation_by_uid(
-                    volume_uid
-                ).display_volume
-            )
-            # Only show contour on sagittal viewer (top left) using sagittal slice
-            sagittal_slice = self.overlaid_volumes[volume_uid][
-                self.point_clicker_position[0],
-                :,
-                :,
-            ]
-            self.sagittal_viewer.update_annotation_view(volume_uid, sagittal_slice)
-
-            # Ensure other viewers do NOT retain stale overlays
-            if volume_uid in self.axial_viewer.overlaid_items:
-                self.axial_viewer.remove_annotation_view(volume_uid)
-            if volume_uid in self.coronal_viewer.overlaid_items:
-                self.coronal_viewer.remove_annotation_view(volume_uid)
-
-        elif volume_uid in list(self.overlaid_volumes.keys()):
-            self.overlaid_volumes.pop(
-                volume_uid, None
-            )  # None should not be necessary as the key should be in the dict
-            self.sagittal_viewer.remove_annotation_view(volume_uid)
-            # Also ensure purge from other viewers if any stale overlays exist
-            if volume_uid in self.axial_viewer.overlaid_items:
-                self.axial_viewer.remove_annotation_view(volume_uid)
-            if volume_uid in self.coronal_viewer.overlaid_items:
-                self.coronal_viewer.remove_annotation_view(volume_uid)
-
-    def on_annotation_opacity_changed(self, volume_uid, value):
-        self.sagittal_viewer.update_annotation_opacity(volume_uid, value)
-
-    def on_annotation_color_changed(self, volume_uid, color):
-        self.sagittal_viewer.update_annotation_color(volume_uid, color)
-
     def __on_axial_coordinates_changed(self, x, y):
-        """
-        When a new location is clicked in the axial plane, the same location is set in focus in the coronal and
-        sagittal plane, for the main MRI volume and all overlaid annotations.
-        """
         if self.displayed_image is not None:
             self.point_clicker_position[0] = min(
                 max(0, y), self.displayed_image.shape[0] - 1
