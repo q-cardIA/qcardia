@@ -7,8 +7,7 @@ class DICOMController:
         self.model = model
         self.current_time_index = 0
 
-        # Connect signals
-        self.view.load_button_signal.connect(self.load_dicom_files)
+        self.view.load_button_signal.connect(self.load_cine_series)
         self.view.load_lge_button_signal.connect(self.load_lge_series)
         self.view.seg_button_signal.connect(self.run_segmentation)
         self.view.lge_seg_button_signal.connect(self.run_lge_segmentation)
@@ -16,47 +15,37 @@ class DICOMController:
         self.view.time_frame_changed_signal.connect(self.set_time_frame)
 
     def load_lge_series(self, folder_path):
-        """Load an LGE series through the model and display it."""
         try:
             volume, slice_positions = self.model.load_lge_series(folder_path)
-            if hasattr(self.view, "display_area_widget"):
-                self.view.display_area_widget.set_lge_volume(
-                    volume, slice_positions=slice_positions
-                )
+            self.view.display_area_widget.set_lge_volume(
+                volume, slice_positions=slice_positions
+            )
         except Exception as e:
             logging.error(f"Failed to load LGE series: {e}")
             self.view.show_error(
                 "LGE Load Error", f"Failed to load LGE series:\n{str(e)}"
             )
 
-    def load_dicom_files(self, folder_path):
-        """Load DICOM files through model and display."""
+    def load_cine_series(self, folder_path):
         try:
-            self.model.load_dicom_files(folder_path)
-            temporal_volumes, num_frames = self.model.process_temporal_volumes()
+            temporal_volumes, num_frames = self.model.load_cine_series(folder_path)
 
-            # Display first frame
             self.current_time_index = 0
             self.view.update_display(
                 temporal_volumes[self.current_time_index],
                 slice_positions=self.model.slice_positions,
             )
-
-            # Update time slider
-            if hasattr(self.view, "update_time_slider_range"):
-                self.view.update_time_slider_range(num_frames)
+            self.view.update_time_slider_range(num_frames)
         except Exception as e:
-            logging.error(f"Failed to load DICOM files: {e}")
+            logging.error(f"Failed to load cine series: {e}")
             self.view.show_error(
-                "Load Error", f"Failed to load DICOM files:\n{str(e)}"
+                "Load Error", f"Failed to load cine series:\n{str(e)}"
             )
 
     def run_segmentation(self):
-        """Run segmentation prediction through model."""
         try:
             temporal_segmentations = self.model.predict_segmentation()
 
-            # Display segmentation for current time frame
             if temporal_segmentations:
                 idx = min(self.current_time_index, len(temporal_segmentations) - 1)
                 self.view.display_area_widget.set_segmentation_volume(
@@ -69,11 +58,9 @@ class DICOMController:
             )
 
     def run_lge_segmentation(self):
-        """Predict segmentation for the currently loaded LGE stack."""
         try:
             seg_volume = self.model.predict_lge_segmentation()
-            if hasattr(self.view, "display_area_widget"):
-                self.view.display_area_widget.set_lge_segmentation_volume(seg_volume)
+            self.view.display_area_widget.set_lge_segmentation_volume(seg_volume)
         except ValueError as e:
             self.view.show_warning("No LGE Volume", str(e))
         except Exception as e:
@@ -83,7 +70,6 @@ class DICOMController:
             )
 
     def set_time_frame(self, time_index):
-        """Update the displayed volume to the specified time frame."""
         temporal_volumes = self.model.temporal_volumes
         temporal_segmentations = self.model.temporal_segmentations
 
@@ -95,14 +81,12 @@ class DICOMController:
                 slice_positions=self.model.slice_positions,
             )
 
-            # Update segmentation overlay if available
             if temporal_segmentations and time_index < len(temporal_segmentations):
                 self.view.display_area_widget.set_segmentation_volume(
                     temporal_segmentations[time_index]
                 )
 
     def save_segmentation(self):
-        """Save the segmentation results to default results folder."""
         try:
             output_path = self.model.save_segmentation()
             logging.info(f"Segmentation saved to {output_path}")
@@ -117,4 +101,3 @@ class DICOMController:
             self.view.show_error(
                 "Save Failed", f"Failed to save segmentation:\n{str(e)}"
             )
-

@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
 )
 
 class WelcomeWidget(QWidget):
-    """Starting page when launching the software."""
 
     transition_signal = Signal()
 

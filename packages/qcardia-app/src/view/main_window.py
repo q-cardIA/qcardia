@@ -28,17 +28,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.folder_selected = False
-        # Theme is applied at app startup; build welcome screen first.
         self.welcome_widget = WelcomeWidget(self)
         self.setCentralWidget(self.welcome_widget)
-        # Welcome transitions to analysis UI (data loaded later from left panel)
         self.welcome_widget.transition_signal.connect(self.build_analysis_interface)
-        # Default to full-screen so the welcome layout fills the display
         self.setWindowState(Qt.WindowMaximized)
 
     def build_analysis_interface(self):
-        """Construct analysis UI without loading data."""
-        # Sidebar
         self.sidebar = SidebarWidget(self)
         self.sidebar.load_requested.connect(self.on_load_button_clicked)
         self.sidebar.load_image_requested.connect(self.on_load_image_clicked)
@@ -46,10 +41,8 @@ class MainWindow(QMainWindow):
         self.sidebar.predict_lge_requested.connect(self.emit_lge_segmentation_signal)
         self.sidebar.save_requested.connect(self.emit_save_signal)
 
-        # Central display (3 orthogonal viewers + empty cell)
         self.display_area_widget = CentralDisplayAreaWidget(self)
 
-        # Time controls below central area (keep existing semantics)
         time_controls_container = QWidget()
         time_layout = QHBoxLayout(time_controls_container)
         time_layout.setContentsMargins(6, 4, 6, 4)
@@ -65,7 +58,6 @@ class MainWindow(QMainWindow):
         time_layout.addWidget(self.time_label)
         time_layout.addWidget(self.time_slider)
 
-        # Top bar
         self.top_bar = QWidget()
         self.top_bar.setProperty("role", "topBar")
         top_layout = QHBoxLayout(self.top_bar)
@@ -98,7 +90,6 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.app_title)
         top_layout.addStretch(1)
 
-        # Assemble main layout
         central = QWidget()
         main_v = QVBoxLayout(central)
         main_v.setContentsMargins(0, 0, 0, 0)
@@ -132,13 +123,11 @@ class MainWindow(QMainWindow):
         self.load_button_signal.emit(folder_path)
 
     def on_load_image_clicked(self):
-        """Prompt for an LGE folder and emit the selection to controllers."""
         folder_path = QFileDialog.getExistingDirectory(
             self, "Select DICOM Folder", "", self._directory_dialog_options()
         )
         if not folder_path:
             return
-
         self.load_lge_button_signal.emit(folder_path)
 
     def _on_toggle_sidebar(self, checked):
@@ -150,8 +139,6 @@ class MainWindow(QMainWindow):
             self.toggle_sidebar_btn.setText("Hide Menu")
 
     def _on_contour_edit_toggled(self, checked):
-        if not hasattr(self, "display_area_widget"):
-            return
         self.display_area_widget.set_contour_edit_mode(checked)
         self.contour_edit_btn.setText(
             "Editing Contours" if checked else "Edit Contours"
@@ -164,8 +151,6 @@ class MainWindow(QMainWindow):
             self.display_area_widget.set_contour_edit_tool("move")
 
     def _on_add_point_toggled(self, checked):
-        if not hasattr(self, "display_area_widget"):
-            return
         if checked:
             self.remove_point_btn.setChecked(False)
             self.display_area_widget.set_contour_edit_tool("add")
@@ -173,8 +158,6 @@ class MainWindow(QMainWindow):
             self.display_area_widget.set_contour_edit_tool("move")
 
     def _on_remove_point_toggled(self, checked):
-        if not hasattr(self, "display_area_widget"):
-            return
         if checked:
             self.add_point_btn.setChecked(False)
             self.display_area_widget.set_contour_edit_tool("remove")
@@ -182,16 +165,14 @@ class MainWindow(QMainWindow):
             self.display_area_widget.set_contour_edit_tool("move")
 
     def update_display(self, image_stack, slice_positions=None):
-        if hasattr(self, "display_area_widget"):
-            self.display_area_widget.set_volume(image_stack, slice_positions)
+        self.display_area_widget.set_volume(image_stack, slice_positions)
 
     def update_display_with_position(
         self, image_stack, preserve_position=False, slice_positions=None
     ):
-        if hasattr(self, "display_area_widget"):
-            self.display_area_widget.set_volume(
-                image_stack, slice_positions, preserve_position=preserve_position
-            )
+        self.display_area_widget.set_volume(
+            image_stack, slice_positions, preserve_position=preserve_position
+        )
 
     def has_folder_been_selected(self):
         return self.folder_selected
@@ -208,19 +189,15 @@ class MainWindow(QMainWindow):
             self.save_button_signal.emit()
 
     def update_time_slider_range(self, num_frames):
-        """Update the time slider to reflect the number of temporal frames."""
-        if hasattr(self, "time_slider"):
-            self.time_slider.setMaximum(num_frames - 1)
-            self.time_slider.setValue(0)
-            self.time_slider.setEnabled(num_frames > 1)
-            self.time_label.setText(f"Time Frame: 1 / {num_frames}")
+        self.time_slider.setMaximum(num_frames - 1)
+        self.time_slider.setValue(0)
+        self.time_slider.setEnabled(num_frames > 1)
+        self.time_label.setText(f"Time Frame: 1 / {num_frames}")
 
     def on_time_slider_changed(self, value):
-        if hasattr(self, "time_slider") and hasattr(self, "time_label"):
-            max_val = self.time_slider.maximum()
-            self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}")
-            if hasattr(self, "time_frame_changed_signal"):
-                self.time_frame_changed_signal.emit(value)
+        max_val = self.time_slider.maximum()
+        self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}")
+        self.time_frame_changed_signal.emit(value)
 
     def show_error(self, title, message):
         msg = QMessageBox(self)

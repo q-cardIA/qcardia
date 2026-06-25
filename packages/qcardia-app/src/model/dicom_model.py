@@ -1,9 +1,7 @@
 import logging
-import os
 from pathlib import Path
 
 import numpy as np
-import pydicom
 import torch
 import yaml
 from qcardia.series import CineSeries, LGESeries
@@ -12,7 +10,6 @@ from qcardia_models.models import UNet2d
 
 class DICOMModel:
     def __init__(self):
-        self.dicom_files = []
         self.cine_seq = None
         self.lge_seq = None
         self.folder_path = None
@@ -20,14 +17,9 @@ class DICOMModel:
         self.temporal_segmentations = []
         self.num_time_frames = 0
         self.slice_positions = []
-        self.lge_slice_positions = []
-        self.lge_segmentation_volume = None
-
-        # Load segmentation model
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
-        """Load the UNet2d segmentation model."""
         wandb_path = Path.cwd() / "wandb"
         config_path = wandb_path / "files" / "config-copy.yaml"
 
@@ -44,31 +36,14 @@ class DICOMModel:
         model_weights = torch.load(wandb_path / "files" / "last_model.pt")
         self.seg_model.load_state_dict(model_weights)
 
-    def load_dicom_files(self, folder_path):
-        """Load DICOM files and create CineSeries."""
+    def load_cine_series(self, folder_path):
         self.folder_path = Path(folder_path)
-        self.dicom_files = []
-
-        for root, dirs, files in os.walk(folder_path):
-            for file in files:
-                if file.lower().endswith(".dcm"):
-                    file_path = os.path.join(root, file)
-                    try:
-                        dicom_data = pydicom.read_file(file_path)
-                        self.dicom_files.append(dicom_data)
-                    except Exception as e:
-                        print(f"Error reading DICOM file '{file_path}': {e}")
-
-        # Create CineSeries for processing
         self.cine_seq = CineSeries(Path(folder_path), batch_size=200)
+        return self._process_temporal_volumes()
 
     def load_lge_series(self, folder_path):
-        """Load an LGE stack via LGESeries and return a normalized volume."""
         self.lge_seq = LGESeries(Path(folder_path))
-        volume, slice_positions = self._build_lge_volume()
-        self.lge_slice_positions = slice_positions
-        self.lge_segmentation_volume = None
-        return volume, slice_positions
+        return self._build_lge_volume()
 
     def _build_lge_volume(self):
         if self.lge_seq is None:
@@ -126,7 +101,6 @@ class DICOMModel:
         return (scaled * 255.0).astype(np.uint8)
 
     def predict_lge_segmentation(self):
-        """Run segmentation for the loaded LGE stack."""
         if self.lge_seq is None:
             raise ValueError("No LGE data loaded")
 
@@ -144,31 +118,25 @@ class DICOMModel:
 
         # qcardia sorts slices descending by position; _build_lge_volume sorts ascending,
         # so reverse here to align segmentation indexing with the display volume.
-        self.lge_segmentation_volume = seg_arr[::-1].astype(np.uint8)
-        return self.lge_segmentation_volume
+        return seg_arr[::-1].astype(np.uint8)
 
     def apply_window(self, image, center, width):
-        """Apply window/level to image for display."""
         min_val = center - width / 2
         max_val = center + width / 2
         windowed = np.clip(image, min_val, max_val)
         windowed = ((windowed - min_val) / (max_val - min_val) * 255).astype(np.uint8)
         return windowed
 
-    def process_temporal_volumes(self):
-        """Load and process all temporal frames from the cine sequence."""
+    def _process_temporal_volumes(self):
         if self.cine_seq is None:
             raise ValueError("No DICOM data loaded")
 
-        # Get window settings from first slice
         center = float(self.cine_seq.slice_data["slice01"]["meta_data"][0].WindowCenter)
         width = float(self.cine_seq.slice_data["slice01"]["meta_data"][0].WindowWidth)
 
-        # Get number of temporal frames
         first_key = sorted(self.cine_seq.slice_data.keys())[0]
         self.num_time_frames = len(self.cine_seq.slice_data[first_key]["pixel_array"])
 
-        # Sort slices by their physical position so scrolling respects anatomy
         slice_entries = []
         for idx, key in enumerate(sorted(self.cine_seq.slice_data.keys())):
             slice_meta = self.cine_seq.slice_data[key]["meta_data"][0]
@@ -180,9 +148,7 @@ class DICOMModel:
         slice_entries.sort(key=lambda item: item[0])
         self.slice_positions = [float(entry[0]) for entry in slice_entries]
 
-        # Build temporal volumes
         self.temporal_volumes = []
-
         for time_idx in range(self.num_time_frames):
             slices = [entry[1][time_idx] for entry in slice_entries]
             image_stack = np.stack(slices, axis=0)
@@ -192,8 +158,6 @@ class DICOMModel:
 
     @staticmethod
     def _extract_slice_position(meta, fallback_index):
-        """Compute a scalar slice position along the slice normal."""
-
         try:
             ipp = np.array(meta.ImagePositionPatient, dtype=float)
             iop = np.array(meta.ImageOrientationPatient, dtype=float)
@@ -217,7 +181,6 @@ class DICOMModel:
         return float(fallback_index)
 
     def predict_segmentation(self):
-        """Run segmentation prediction and organize results by time frame."""
         if self.cine_seq is None:
             raise ValueError("No DICOM data loaded")
 
@@ -225,11 +188,9 @@ class DICOMModel:
         arr = np.asarray(cine_segmentation)
         dims = arr.shape
 
-        # Identify axes
         nslices = len(sorted(self.cine_seq.slice_data.keys()))
         tframes = self.num_time_frames if self.num_time_frames else None
 
-        # Find optional scale axis
         scale_axis = None
         try:
             n_scales = int(self.config["unet"]["nr_output_scales"])
@@ -238,7 +199,6 @@ class DICOMModel:
         except Exception:
             scale_axis = None
 
-        # Helper to extract 3D volume for a time index
         def extract_ZHW_at_time(time_idx: int) -> np.ndarray:
             x = arr
             if scale_axis is not None and 0 <= scale_axis < x.ndim:
@@ -285,7 +245,6 @@ class DICOMModel:
             else:
                 return x.reshape(nslices, -1, x.shape[-1])
 
-        # Extract per-time segmentations
         self.temporal_segmentations = []
         if tframes and tframes > 1:
             for t in range(tframes):
@@ -309,7 +268,6 @@ class DICOMModel:
         return self.temporal_segmentations
 
     def save_segmentation(self, output_path=None):
-        """Save segmentation predictions to disk."""
         if self.cine_seq is None:
             raise ValueError("No DICOM data loaded")
 
