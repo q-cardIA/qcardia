@@ -1,0 +1,33 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: qcardia-data
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Cian
+    family-names: Scannell
+    email: c.m.scannell@tue.nl
+    affiliation: Eindhoven University of Technology
+  - given-names: Rob
+    name-particle: de
+    family-names: Mooij
+    affiliation: Eindhoven University of Technology
+    email: r.a.j.d.mooij@tue.nl
+repository-code: 'https://github.com/q-cardIA/qcardia-data'
+url: 'https://github.com/q-cardIA'
+abstract: >-
+  A PyTorch and MONAI based library to build and handle
+  medical imaging data pipelines. Can be used to quickly get
+  highly customisable Dataloaders, including data
+  augmentation, for deep learning purposes, especially for
+  already supported datasets.
+keywords:
+  - Deep learning
+  - Medical image analysis
+  - Cardiac MRI
+license: Apache-2.0
+version: 1.0.0
