@@ -1,0 +1,25 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: qcardia
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Cian
+    family-names: Scannell
+    email: c.m.scannell@tue.nl
+    affiliation: Eindhoven University of Technology
+repository-code: 'https://github.com/q-cardIA/qcardia'
+url: 'https://github.com/q-cardIA'
+abstract: >-
+  A library to deploy trained deep learning models 
+  for quantitative cardiac image analysis.
+keywords:
+  - Deep learning
+  - Medical image analysis
+  - Cardiac MRI
+license: Apache-2.0
+version: 1.0.0
