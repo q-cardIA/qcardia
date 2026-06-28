@@ -4,14 +4,13 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
-from qcardia.series import CineSeries, LGESeries
+from qcardia.series import BaseSeries, CineSeries, LGESeries
 from qcardia_models.models import UNet2d
 
 
 class DICOMModel:
     def __init__(self):
-        self.cine_seq = None
-        self.lge_seq = None
+        self.series: dict[str, BaseSeries] = {}
         self.folder_path = None
         self.temporal_volumes = []
         self.temporal_segmentations = []
@@ -38,21 +37,22 @@ class DICOMModel:
 
     def load_cine_series(self, folder_path):
         self.folder_path = Path(folder_path)
-        self.cine_seq = CineSeries(Path(folder_path), batch_size=200)
+        self.series["CINE_SAX"] = CineSeries(Path(folder_path), batch_size=200)
         return self._process_temporal_volumes()
 
     def load_lge_series(self, folder_path):
-        self.lge_seq = LGESeries(Path(folder_path))
+        self.series["LGE_SAX"] = LGESeries(Path(folder_path))
         return self._build_lge_volume()
 
     def _build_lge_volume(self):
-        if self.lge_seq is None:
+        lge = self.series.get("LGE_SAX")
+        if lge is None:
             raise ValueError("No LGE data loaded")
 
         slice_entries = []
-        for idx in range(self.lge_seq.number_of_slices):
+        for idx in range(lge.number_of_slices):
             key = f"slice{idx+1:02}"
-            slice_info = self.lge_seq.slice_data.get(key)
+            slice_info = lge.slice_data.get(key)
             if not slice_info:
                 continue
             try:
@@ -101,10 +101,10 @@ class DICOMModel:
         return (scaled * 255.0).astype(np.uint8)
 
     def predict_lge_segmentation(self):
-        if self.lge_seq is None:
+        if "LGE_SAX" not in self.series:
             raise ValueError("No LGE data loaded")
 
-        segmentation = self.lge_seq.predict_segmentation(self.wandb_run_path)
+        segmentation = self.series["LGE_SAX"].predict_segmentation(self.wandb_run_path)
         seg_arr = np.asarray(segmentation)
 
         if seg_arr.ndim == 4:
@@ -128,22 +128,21 @@ class DICOMModel:
         return windowed
 
     def _process_temporal_volumes(self):
-        if self.cine_seq is None:
+        cine = self.series.get("CINE_SAX")
+        if cine is None:
             raise ValueError("No DICOM data loaded")
 
-        center = float(self.cine_seq.slice_data["slice01"]["meta_data"][0].WindowCenter)
-        width = float(self.cine_seq.slice_data["slice01"]["meta_data"][0].WindowWidth)
+        center = float(cine.slice_data["slice01"]["meta_data"][0].WindowCenter)
+        width = float(cine.slice_data["slice01"]["meta_data"][0].WindowWidth)
 
-        first_key = sorted(self.cine_seq.slice_data.keys())[0]
-        self.num_time_frames = len(self.cine_seq.slice_data[first_key]["pixel_array"])
+        first_key = sorted(cine.slice_data.keys())[0]
+        self.num_time_frames = len(cine.slice_data[first_key]["pixel_array"])
 
         slice_entries = []
-        for idx, key in enumerate(sorted(self.cine_seq.slice_data.keys())):
-            slice_meta = self.cine_seq.slice_data[key]["meta_data"][0]
+        for idx, key in enumerate(sorted(cine.slice_data.keys())):
+            slice_meta = cine.slice_data[key]["meta_data"][0]
             position = self._extract_slice_position(slice_meta, idx)
-            slice_entries.append(
-                (position, self.cine_seq.slice_data[key]["pixel_array"])
-            )
+            slice_entries.append((position, cine.slice_data[key]["pixel_array"]))
 
         slice_entries.sort(key=lambda item: item[0])
         self.slice_positions = [float(entry[0]) for entry in slice_entries]
@@ -181,14 +180,15 @@ class DICOMModel:
         return float(fallback_index)
 
     def predict_segmentation(self):
-        if self.cine_seq is None:
+        cine = self.series.get("CINE_SAX")
+        if cine is None:
             raise ValueError("No DICOM data loaded")
 
-        cine_segmentation = self.cine_seq.predict_segmentation(self.wandb_run_path)
+        cine_segmentation = cine.predict_segmentation(self.wandb_run_path)
         arr = np.asarray(cine_segmentation)
         dims = arr.shape
 
-        nslices = len(sorted(self.cine_seq.slice_data.keys()))
+        nslices = len(sorted(cine.slice_data.keys()))
         tframes = self.num_time_frames if self.num_time_frames else None
 
         scale_axis = None
@@ -268,14 +268,15 @@ class DICOMModel:
         return self.temporal_segmentations
 
     def save_segmentation(self, output_path=None):
-        if self.cine_seq is None:
+        cine = self.series.get("CINE_SAX")
+        if cine is None:
             raise ValueError("No DICOM data loaded")
 
-        if not hasattr(self.cine_seq, "_segmentation_prediction"):
+        if not hasattr(cine, "_segmentation_prediction"):
             raise ValueError("No segmentation to save")
 
         if output_path is None:
             output_path = self.folder_path.parent / "results" / self.folder_path.name
 
-        self.cine_seq.save_predictions(Path(output_path))
+        cine.save_predictions(Path(output_path))
         return output_path
