@@ -65,6 +65,8 @@ class CustomQGraphicsView(QGraphicsView):
         self.vertical_line = None  # Store vertical crosshair line
         self.dragging_crosshair = False  # Track if we're dragging the crosshair
         self._last_indices = None
+        self.image_2d_h = 0
+        self.image_2d_w = 0
 
         self.__set_interface()
         self.__set_stylesheets()
@@ -309,6 +311,16 @@ class CustomQGraphicsView(QGraphicsView):
 
             self.horizontal_line = self.scene.addLine(0, y, view_width, y, pen)
             self.horizontal_line.setZValue(100)
+
+    def clear_display(self):
+        self.display_2d = None
+        self.image_2d_h = 0
+        self.image_2d_w = 0
+        self._last_indices = None
+        self.crosshair_pos = None
+        blank = np.zeros((150, 150), dtype=np.uint8)
+        self.update_slice_view(blank)
+        self.setEnabled(False)
 
     def update_overlay(self, overlay_image):
         """Store the overlay and trigger a redraw with compositing."""

@@ -164,16 +164,6 @@ class MainWindow(QMainWindow):
         elif not self.add_point_btn.isChecked():
             self.display_area_widget.set_contour_edit_tool("move")
 
-    def update_display(self, image_stack, slice_positions=None):
-        self.display_area_widget.set_volume(image_stack, slice_positions)
-
-    def update_display_with_position(
-        self, image_stack, preserve_position=False, slice_positions=None
-    ):
-        self.display_area_widget.set_volume(
-            image_stack, slice_positions, preserve_position=preserve_position
-        )
-
     def has_folder_been_selected(self):
         return self.folder_selected
 

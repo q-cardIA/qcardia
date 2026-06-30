@@ -1,6 +1,8 @@
-import logging
+from __future__ import annotations
 
-import cv2
+import logging
+from dataclasses import dataclass
+
 import numpy as np
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
@@ -13,666 +15,419 @@ from PySide6.QtWidgets import (
 )
 
 from view.custom_graphics_view import CustomQGraphicsView
+from view.volume_geometry import VolumeGeometry
+
+
+@dataclass
+class _Panel:
+    container: QWidget
+    viewer: CustomQGraphicsView
+    slider: QSlider
+    title_label: QLabel
+    slice_label: QLabel
 
 
 class CentralDisplayAreaWidget(QWidget):
 
     def __init__(self, parent=None):
-        super(CentralDisplayAreaWidget, self).__init__()
+        super().__init__()
         self.parent = parent
         opt = QSize(1280, 720)
         self.setBaseSize(
             QSize(
-                (1325 / opt.width()) * self.parent.baseSize().width(),
-                (950 / opt.height()) * self.parent.baseSize().height(),
+                int((1325 / opt.width()) * self.parent.baseSize().width()),
+                int((950 / opt.height()) * self.parent.baseSize().height()),
             )
         )
-        self.__set_interface()
-        self.__set_stylesheets()
-        self.__set_connections()
-        self.displayed_image = None
-        self.displayed_image_uid = None
-        self.point_clicker_position = [0, 0, 0]
-        self.segmentation_volume = None
-        self.primary_slice_positions = None
-        self.lge_volume = None
-        self.lge_slice_index = 0
-        self.lge_slice_positions = None
-        self.lge_segmentation_volume = None
-        self.contour_edit_mode = False
 
-    def __set_interface(self):
+        # Series data — keyed by series_key (e.g. "CINE_SAX", "LGE_SAX")
+        self._volumes: dict[str, np.ndarray] = {}       # (T,Z,H,W) or (Z,H,W) or (T,H,W)
+        self._is_temporal: dict[str, bool] = {}
+        self._geometries: dict[str, VolumeGeometry] = {}
+        self._segmentations: dict[str, np.ndarray] = {}
+
+        # Per-panel state — grows/shrinks with the grid
+        self._panel_series_key: list[str | None] = []
+        self._panel_axis: list[str] = []
+        self._panel_slice_idx: list[int] = []
+
+        # Shared world-space crosshair; None until the user first clicks
+        self._world_crosshair: np.ndarray | None = None
+
+        self.current_time_index: int = 0
+
+        # Live panel widgets (rebuilt by set_grid_size)
+        self._panels: list[_Panel] = []
+        self._grid_rows: int = 0
+        self._grid_cols: int = 0
+
         self.setObjectName("centralDisplayArea")
-        self.layout = QGridLayout(self)
-        self.layout.setHorizontalSpacing(0)
-        self.layout.setVerticalSpacing(0)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.lge_container = QWidget()
-        self.lge_container.setProperty("role", "viewerCard")
-        self.lge_container_layout = QVBoxLayout(self.lge_container)
-        self.lge_container_layout.setContentsMargins(2, 2, 2, 2)
-        self.lge_container_layout.setSpacing(2)
-        self.lge_header = self.__make_viewer_header("LGE Plane")
-        self.secondary_viewer = CustomQGraphicsView(
-            view_type="lge", size=QSize(100, 100), parent=self
-        )
-        self.secondary_slider = self.__make_slice_slider()
-        self.secondary_slider.valueChanged.connect(self.__on_secondary_slider_changed)
-        self.lge_container_layout.addLayout(self.lge_header)
-        self.lge_container_layout.addWidget(self.secondary_slider)
-        self.lge_container_layout.addWidget(self.secondary_viewer)
-        half_w = int(self.minimumWidth() / 2)
-        half_h = int(self.minimumHeight() / 2)
-        common_size = QSize(half_w, half_h)
-        # Wrap each primary viewer in a container with header + slider
-        (
-            self.sagittal_container,
-            self.sagittal_viewer,
-            self.sagittal_slider,
-            self.sagittal_header_labels,
-        ) = self.__make_plane_view(
-            "Sagittal Plane", "sagittal", common_size, self.__on_sagittal_slider_changed
-        )
-        (
-            self.axial_container,
-            self.axial_viewer,
-            self.axial_slider,
-            self.axial_header_labels,
-        ) = self.__make_plane_view(
-            "Transverse Plane", "axial", common_size, self.__on_axial_slider_changed
-        )
-        (
-            self.coronal_container,
-            self.coronal_viewer,
-            self.coronal_slider,
-            self.coronal_header_labels,
-        ) = self.__make_plane_view(
-            "Coronal Plane", "coronal", common_size, self.__on_coronal_slider_changed
-        )
+        self._layout = QGridLayout(self)
+        self._layout.setHorizontalSpacing(0)
+        self._layout.setVerticalSpacing(0)
+        self._layout.setContentsMargins(0, 0, 0, 0)
 
-        self.horizontal_line = QLabel()
-        self.horizontal_line.setFixedHeight(3)
-        self.horizontal_line.setProperty("role", "divider")
-        self.vertical_line = QLabel()
-        self.vertical_line.setFixedWidth(3)
-        self.vertical_line.setProperty("role", "divider")
-        # Place containers (keeping existing spatial semantics for now)
-        self.layout.addWidget(self.sagittal_container, 0, 0)
-        self.layout.addWidget(self.lge_container, 0, 2)
-        self.layout.addWidget(self.horizontal_line, 1, 0, 1, 3)
-        self.layout.addWidget(self.axial_container, 2, 0)
-        self.layout.addWidget(self.coronal_container, 2, 2)
-        self.layout.addWidget(self.vertical_line, 0, 1, 3, 1)
+        self.set_grid_size(2, 2)
 
-    def __set_stylesheets(self):
-        self.secondary_viewer.setProperty("role", "imageViewport")
-        self.axial_viewer.setProperty("role", "imageViewport")
-        self.coronal_viewer.setProperty("role", "imageViewport")
-        self.sagittal_viewer.setProperty("role", "imageViewport")
+    # ── Grid layout ───────────────────────────────────────────────────────
 
-    def __set_connections(self):
-        self.axial_viewer.coordinates_changed.connect(self.__on_axial_coordinates_changed)
-        self.coronal_viewer.coordinates_changed.connect(self.__on_coronal_coordinates_changed)
-        self.sagittal_viewer.coordinates_changed.connect(self.__on_sagittal_coordinates_changed)
-        self.secondary_viewer.coordinates_changed.connect(self.__on_lge_coordinates_changed)
-        self.sagittal_viewer.contours_updated.connect(self.__on_sagittal_contours_updated)
-        self.secondary_viewer.contours_updated.connect(self.__on_lge_contours_updated)
+    @property
+    def n_panels(self) -> int:
+        return self._grid_rows * self._grid_cols
 
-    def update_viewers_image(self):
-        """
-        Further send the current display image, at the selected point clicker position, to each of the 2D viewers
-        that are enabled in this widget (i.e., axial, coronal, and sagittal currently)
-        """
-        if self.displayed_image is None:
+    def set_grid_size(self, rows: int, cols: int):
+        if rows == self._grid_rows and cols == self._grid_cols:
             return
 
-        self.__ensure_primary_slice_positions()
+        # Preserve series assignments for panels that survive the resize
+        old_keys = list(self._panel_series_key)
+        old_axes = list(self._panel_axis)
+        old_slices = list(self._panel_slice_idx)
 
-        self.axial_viewer.update_slice_view(
-            self.displayed_image[:, :, self.point_clicker_position[2]],
-            self.point_clicker_position[0],
-            self.point_clicker_position[1],
-        )
-        self.coronal_viewer.update_slice_view(
-            self.displayed_image[:, self.point_clicker_position[1], :],
-            self.point_clicker_position[0],
-            self.point_clicker_position[2],
-        )
-        self.sagittal_viewer.update_slice_view(
-            self.displayed_image[self.point_clicker_position[0], :, :],
-            self.point_clicker_position[1],
-            self.point_clicker_position[2],
-        )
+        # Tear down existing layout and panels
+        while self._layout.count():
+            self._layout.takeAt(0)
+        for p in self._panels:
+            p.container.setParent(None)
+            p.container.deleteLater()
+        self._panels.clear()
 
-        self.__synchronize_crosshairs()
-        self.__update_segmentation_overlay()
-        self.__sync_lge_with_primary()
-        self.__sync_primary_sliders()
+        self._grid_rows = rows
+        self._grid_cols = cols
+        n = rows * cols
 
-    def set_volume(self, volume, slice_positions=None, preserve_position=False):
-        if preserve_position and self.displayed_image is not None:
-            pos = self.point_clicker_position
-            self.point_clicker_position = [
-                min(max(0, pos[0]), volume.shape[0] - 1),
-                min(max(0, pos[1]), volume.shape[1] - 1),
-                min(max(0, pos[2]), volume.shape[2] - 1),
-            ]
-        else:
-            self.point_clicker_position = [
-                volume.shape[0] // 2,
-                volume.shape[1] // 2,
-                volume.shape[2] // 2,
-            ]
-        self.displayed_image = volume
-        self.displayed_image_uid = None
-        self.primary_slice_positions = (
-            [float(v) for v in slice_positions]
-            if slice_positions is not None and len(slice_positions) == volume.shape[0]
-            else None
-        )
-        self.update_viewers_image()
+        # Extend or truncate per-panel state lists to match new count
+        self._panel_series_key = (old_keys + [None] * n)[:n]
+        self._panel_axis       = (old_axes + ["transverse"] * n)[:n]
+        self._panel_slice_idx  = (old_slices + [0] * n)[:n]
 
-    def set_lge_volume(self, volume, slice_positions=None):
-        """Assign an LGE 3D volume (Z,H,W) plus optional physical slice positions."""
-        if volume is None or volume.ndim != 3:
-            return
-        self.lge_volume = volume
-        self.lge_segmentation_volume = None
-        self.lge_slice_index = volume.shape[0] // 2
-        if slice_positions is not None and len(slice_positions) == volume.shape[0]:
-            self.lge_slice_positions = [float(val) for val in slice_positions]
-        else:
-            self.lge_slice_positions = [float(i) for i in range(volume.shape[0])]
-        self.secondary_slider.setMaximum(max(0, volume.shape[0] - 1))
-        self.secondary_slider.setValue(self.lge_slice_index)
-        self.secondary_slider.setEnabled(volume.shape[0] > 1)
-        self.secondary_viewer.update_overlay(None)
-        self.__sync_lge_with_primary()
+        # Build fresh panels
+        for idx in range(n):
+            p = self._make_panel(idx)
+            self._panels.append(p)
 
-    def __update_lge_viewer(self):
-        if self.lge_volume is None:
-            return
-        z = min(max(0, self.lge_slice_index), self.lge_volume.shape[0] - 1)
-        slice_2d = self.lge_volume[z, :, :]
-        self.secondary_viewer.update_slice_view(slice_2d)
-        self.__update_lge_crosshair()
-        self.__update_lge_segmentation_overlay()
+        # Place panels and dividers in the grid
+        for idx, p in enumerate(self._panels):
+            r, c = divmod(idx, cols)
+            self._layout.addWidget(p.container, 2 * r, 2 * c)
 
-    def __on_secondary_slider_changed(self, value):
-        if self.lge_volume is None:
-            return
-        max_lge = self.lge_volume.shape[0] - 1
-        clamped_value = min(max(0, value), max_lge)
-        self.lge_slice_index = clamped_value
+        for r in range(rows - 1):
+            div = _make_divider(horizontal=True)
+            self._layout.addWidget(div, 2 * r + 1, 0, 1, 2 * cols - 1)
 
-        if self.displayed_image is None:
-            self.__update_lge_viewer()
-            return
+        for c in range(cols - 1):
+            div = _make_divider(horizontal=False)
+            self._layout.addWidget(div, 0, 2 * c + 1, 2 * rows - 1, 1)
 
-        self.__ensure_primary_slice_positions()
-        ratio = self.__index_to_ratio(
-            clamped_value, self.lge_slice_positions, self.lge_volume.shape[0]
-        )
-        primary_depth = self.displayed_image.shape[0]
-        new_primary = self.__ratio_to_index(
-            ratio, self.primary_slice_positions, primary_depth
-        )
-        new_primary = min(max(0, new_primary), primary_depth - 1)
+        for r in range(2 * rows):
+            self._layout.setRowStretch(r, 1 if r % 2 == 0 else 0)
+        for c in range(2 * cols):
+            self._layout.setColumnStretch(c, 1 if c % 2 == 0 else 0)
 
-        if self.point_clicker_position[0] != new_primary:
-            self.point_clicker_position[0] = new_primary
-            self.update_viewers_image()
-        else:
-            self.__update_lge_viewer()
+        # Re-render any panels that already have a series assigned
+        for i in range(n):
+            if self._panel_series_key[i] is not None:
+                self._update_panel(i)
 
-    def __sync_lge_with_primary(self):
-        if self.lge_volume is None or self.displayed_image is None:
-            return
+    def _make_panel(self, idx: int) -> _Panel:
+        container = QWidget()
+        container.setProperty("role", "viewerCard")
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(2, 2, 2, 2)
+        vbox.setSpacing(2)
 
-        self.__ensure_primary_slice_positions()
-        primary_depth = self.displayed_image.shape[0]
-        ratio = self.__index_to_ratio(
-            self.point_clicker_position[0],
-            self.primary_slice_positions,
-            primary_depth,
-        )
-        target_index = self.__ratio_to_index(
-            ratio, self.lge_slice_positions, self.lge_volume.shape[0]
-        )
+        hdr = QHBoxLayout()
+        hdr.setContentsMargins(6, 4, 6, 4)
+        hdr.setSpacing(8)
+        title = QLabel("Empty")
+        title.setProperty("role", "viewerTitle")
+        slice_lbl = QLabel("")
+        slice_lbl.setProperty("role", "viewerMeta")
+        hdr.addWidget(title)
+        hdr.addStretch(1)
+        hdr.addWidget(slice_lbl)
 
-        if target_index != self.lge_slice_index:
-            self.lge_slice_index = target_index
-
-        block_state = self.secondary_slider.blockSignals(True)
-        self.secondary_slider.setValue(self.lge_slice_index)
-        self.secondary_slider.blockSignals(block_state)
-
-        self.__update_lge_viewer()
-        self.__update_lge_crosshair()
-
-    def __ensure_primary_slice_positions(self):
-        if self.displayed_image is None:
-            self.primary_slice_positions = None
-            return
-        depth = self.displayed_image.shape[0]
-        if (
-            self.primary_slice_positions is None
-            or len(self.primary_slice_positions) != depth
-        ):
-            self.primary_slice_positions = [float(i) for i in range(depth)]
-
-    @staticmethod
-    def __index_to_ratio(index, positions, length):
-        if length <= 1:
-            return 0.0
-        if positions is not None and len(positions) == length:
-            start = float(positions[0])
-            end = float(positions[-1])
-            if end == start:
-                return 0.0
-            value = float(positions[index])
-            return (value - start) / (end - start)
-        return index / float(length - 1)
-
-    @staticmethod
-    def __ratio_to_index(ratio, positions, length):
-        if length <= 0:
-            return 0
-        ratio = max(0.0, min(1.0, float(ratio)))
-        if positions is not None and len(positions) == length:
-            start = float(positions[0])
-            end = float(positions[-1])
-            value = start + ratio * (end - start)
-            closest = min(
-                range(length),
-                key=lambda idx: abs(float(positions[idx]) - value),
-            )
-            return closest
-        if length == 1:
-            return 0
-        return int(round(ratio * (length - 1)))
-
-    @staticmethod
-    def __map_index_between_volumes(source_index, source_len, target_len):
-        if target_len <= 0:
-            return 0
-        if source_len <= 1:
-            return min(target_len - 1, max(0, int(source_index)))
-        ratio = max(0.0, min(1.0, float(source_index) / float(source_len - 1)))
-        return int(round(ratio * (target_len - 1)))
-
-    def __update_lge_crosshair(self):
-        if self.lge_volume is None:
-            return
-
-        height = self.lge_volume.shape[1]
-        width = self.lge_volume.shape[2]
-
-        if self.displayed_image is None:
-            row_idx = height // 2
-            col_idx = width // 2
-        else:
-            primary_height = self.displayed_image.shape[1]
-            primary_width = self.displayed_image.shape[2]
-            row_idx = self.__map_index_between_volumes(
-                self.point_clicker_position[1], primary_height, height
-            )
-            col_idx = self.__map_index_between_volumes(
-                self.point_clicker_position[2], primary_width, width
-            )
-
-        self.secondary_viewer.set_crosshair_from_volume_indices(row_idx, col_idx)
-
-    # Primary plane slider callbacks
-    def __on_axial_slider_changed(self, value):
-        self.point_clicker_position[2] = value
-        self.update_viewers_image()
-
-    def __on_sagittal_slider_changed(self, value):
-        self.point_clicker_position[0] = value
-        self.update_viewers_image()
-
-    def __on_coronal_slider_changed(self, value):
-        self.point_clicker_position[1] = value
-        self.update_viewers_image()
-
-    def set_segmentation_volume(self, seg_volume):
-        """Store a predicted segmentation volume and trigger overlay refresh."""
-
-        self.segmentation_volume = seg_volume
-        self.__update_segmentation_overlay()
-
-    def set_lge_segmentation_volume(self, seg_volume):
-        """Store an LGE segmentation stack for overlay on the LGE viewer."""
-        if seg_volume is None or seg_volume.ndim != 3:
-            self.lge_segmentation_volume = None
-            self.secondary_viewer.update_overlay(None)
-            return
-
-        self.lge_segmentation_volume = seg_volume
-        self.__update_lge_segmentation_overlay()
-
-    def set_contour_edit_mode(self, enabled):
-        self.contour_edit_mode = bool(enabled)
-        if hasattr(self, "sagittal_viewer"):
-            self.sagittal_viewer.set_edit_mode(self.contour_edit_mode)
-            if not self.contour_edit_mode:
-                self.sagittal_viewer.set_edit_tool("move")
-            self.__update_segmentation_overlay()
-        if hasattr(self, "secondary_viewer"):
-            self.secondary_viewer.set_edit_mode(self.contour_edit_mode)
-            if not self.contour_edit_mode:
-                self.secondary_viewer.set_edit_tool("move")
-            self.__update_lge_segmentation_overlay()
-
-    def set_contour_edit_tool(self, tool):
-        if hasattr(self, "sagittal_viewer"):
-            self.sagittal_viewer.set_edit_tool(tool)
-        if hasattr(self, "secondary_viewer"):
-            self.secondary_viewer.set_edit_tool(tool)
-
-    def __on_sagittal_contours_updated(self, contour_defs):
-        if (
-            not self.contour_edit_mode
-            or self.segmentation_volume is None
-            or contour_defs is None
-        ):
-            return
-        try:
-            depth = self.segmentation_volume.shape[0]
-            x_idx = self.point_clicker_position[0]
-            if x_idx < 0 or x_idx >= depth:
-                return
-            slice_idx = depth - x_idx - 1
-            if slice_idx < 0 or slice_idx >= depth:
-                return
-            target_shape = self.segmentation_volume[slice_idx].shape
-            updated_slice = self.__rasterize_contours(contour_defs, target_shape)
-            if updated_slice is None:
-                return
-            self.segmentation_volume[slice_idx] = updated_slice
-            self.sagittal_viewer.update_overlay(None)
-        except Exception as exc:
-            logging.error(
-                "[CentralDisplayAreaWidget] Failed to persist contour edit: %s",
-                exc,
-            )
-
-    def __on_lge_contours_updated(self, contour_defs):
-        if (
-            not self.contour_edit_mode
-            or self.lge_segmentation_volume is None
-            or contour_defs is None
-        ):
-            return
-        try:
-            depth = self.lge_segmentation_volume.shape[0]
-            z = min(max(0, self.lge_slice_index), depth - 1)
-            target_shape = self.lge_segmentation_volume[z].shape
-            updated_slice = self.__rasterize_contours(contour_defs, target_shape)
-            if updated_slice is None:
-                return
-            self.lge_segmentation_volume[z] = updated_slice
-            self.secondary_viewer.update_overlay(None)
-        except Exception as exc:
-            logging.error(
-                "[CentralDisplayAreaWidget] Failed to persist LGE contour edit: %s",
-                exc,
-            )
-
-    def __update_segmentation_overlay(self):
-        if self.segmentation_volume is None:
-            self.sagittal_viewer.update_overlay(None)
-            self.sagittal_viewer.clear_contours()
-            return
-
-        try:
-            # Sagittal viewer uses an X-oriented slice: volume[x, :, :]
-            x_idx = self.point_clicker_position[0]
-            if x_idx < 0 or x_idx >= self.segmentation_volume.shape[0]:
-                return
-            seg_slice = self.segmentation_volume[-x_idx - 1, :, :]
-            contours = self.__extract_segmentation_contours(seg_slice)
-            self.sagittal_viewer.update_contour_paths(contours)
-            self.sagittal_viewer.update_overlay(None)
-        except Exception as e:
-            logging.error(
-                "[CentralDisplayAreaWidget] Failed to update segmentation overlay: %s",
-                e,
-            )
-
-    def __update_lge_segmentation_overlay(self):
-        if self.lge_segmentation_volume is None:
-            self.secondary_viewer.update_overlay(None)
-            self.secondary_viewer.clear_contours()
-            return
-
-        try:
-            z = min(
-                max(0, self.lge_slice_index), self.lge_segmentation_volume.shape[0] - 1
-            )
-            seg_slice = self.lge_segmentation_volume[z, :, :]
-            contours = self.__extract_segmentation_contours(seg_slice)
-            self.secondary_viewer.update_contour_paths(contours)
-            self.secondary_viewer.update_overlay(None)
-        except Exception as e:
-            logging.error(
-                "[CentralDisplayAreaWidget] Failed to update LGE segmentation overlay: %s",
-                e,
-            )
-            self.secondary_viewer.update_overlay(None)
-
-
-    @staticmethod
-    def __extract_segmentation_contours(seg_slice):
-        contours = []
-        if seg_slice is None:
-            return contours
-        class_ids = (1, 2, 3)
-        for class_id in class_ids:
-            mask = (seg_slice == class_id).astype(np.uint8)
-            if not mask.any():
-                continue
-            found, _ = cv2.findContours(
-                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-            for contour in found:
-                if len(contour) < 3:
-                    continue
-                epsilon = 0.005 * cv2.arcLength(contour, True)
-                approx = cv2.approxPolyDP(contour, epsilon, True)
-                points = [(float(point[0][1]), float(point[0][0])) for point in approx]
-                if len(points) >= 3:
-                    contours.append({"class_id": class_id, "points": points})
-        return contours
-
-    def __rasterize_contours(self, contour_defs, target_shape):
-        vol = self.segmentation_volume if self.segmentation_volume is not None else self.lge_segmentation_volume
-        if contour_defs is None or target_shape is None or vol is None:
-            return None
-        height, width = target_shape
-        if height <= 0 or width <= 0:
-            return None
-        canvas = np.zeros(target_shape, dtype=vol.dtype)
-        class_order = (2, 1, 3)
-        for class_id in class_order:
-            polygons = []
-            for contour in contour_defs:
-                if contour.get("class_id") != class_id:
-                    continue
-                poly = self.__contour_to_polygon(
-                    contour.get("points", []), height, width
-                )
-                if poly is not None:
-                    polygons.append(poly)
-            if polygons:
-                cv2.fillPoly(canvas, polygons, int(class_id))
-        return canvas
-
-    @staticmethod
-    def __contour_to_polygon(points, height, width):
-        if not points or height <= 0 or width <= 0:
-            return None
-        converted = []
-        for row, col in points:
-            r = int(round(row))
-            c = int(round(col))
-            r = min(max(0, r), height - 1)
-            c = min(max(0, c), width - 1)
-            converted.append([c, r])
-        if len(converted) < 3:
-            return None
-        return np.asarray(converted, dtype=np.int32).reshape((-1, 1, 2))
-
-    def __on_axial_coordinates_changed(self, x, y):
-        if self.displayed_image is not None:
-            self.point_clicker_position[0] = min(
-                max(0, y), self.displayed_image.shape[0] - 1
-            )
-            self.point_clicker_position[1] = min(
-                max(0, x), self.displayed_image.shape[1] - 1
-            )
-            self.update_viewers_image()
-        else:
-            self.point_clicker_position[0] = 0
-            self.point_clicker_position[1] = 0
-
-    def __on_coronal_coordinates_changed(self, x, y):
-        if self.displayed_image is not None:
-            self.point_clicker_position[0] = min(
-                max(0, y), self.displayed_image.shape[0] - 1
-            )
-            self.point_clicker_position[2] = min(
-                max(0, x), self.displayed_image.shape[2] - 1
-            )
-            self.update_viewers_image()
-        else:
-            self.point_clicker_position[0] = 0
-            self.point_clicker_position[2] = 0
-
-    def __on_sagittal_coordinates_changed(self, x, y):
-        if self.displayed_image is not None:
-            self.point_clicker_position[1] = min(
-                max(0, y), self.displayed_image.shape[1] - 1
-            )
-            self.point_clicker_position[2] = min(
-                max(0, x), self.displayed_image.shape[2] - 1
-            )
-            self.update_viewers_image()
-        else:
-            self.point_clicker_position[1] = 0
-            self.point_clicker_position[2] = 0
-
-    def __on_lge_coordinates_changed(self, x, y):
-        if self.lge_volume is None or self.displayed_image is None:
-            return
-
-        height = self.lge_volume.shape[1]
-        width = self.lge_volume.shape[2]
-        if height <= 0 or width <= 0:
-            return
-
-        row_idx = max(0, min(height - 1, int(y)))
-        col_idx = max(0, min(width - 1, int(x)))
-
-        primary_height = self.displayed_image.shape[1]
-        primary_width = self.displayed_image.shape[2]
-        mapped_y = self.__map_index_between_volumes(row_idx, height, primary_height)
-        mapped_x = self.__map_index_between_volumes(col_idx, width, primary_width)
-
-        updated = False
-        if self.point_clicker_position[1] != mapped_y:
-            self.point_clicker_position[1] = mapped_y
-            updated = True
-        if self.point_clicker_position[2] != mapped_x:
-            self.point_clicker_position[2] = mapped_x
-            updated = True
-
-        if updated:
-            self.update_viewers_image()
-
-    def __synchronize_crosshairs(self):
-        if self.displayed_image is None:
-            return
-
-        self.axial_viewer.set_crosshair_from_volume_indices(
-            self.point_clicker_position[0],
-            self.point_clicker_position[1],
-        )
-        self.coronal_viewer.set_crosshair_from_volume_indices(
-            self.point_clicker_position[0],
-            self.point_clicker_position[2],
-        )
-        self.sagittal_viewer.set_crosshair_from_volume_indices(
-            self.point_clicker_position[1],
-            self.point_clicker_position[2],
-        )
-        # Update headers slice labels
-        self.__update_header_slice_labels()
-
-    # Helpers for viewer containers
-    def __make_viewer_header(self, title):
-        layout = QHBoxLayout()
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(8)
-        lbl_title = QLabel(title)
-        lbl_title.setProperty("role", "viewerTitle")
-        lbl_slice = QLabel("")  # dynamic slice info
-        lbl_slice.setProperty("role", "viewerMeta")
-        layout.addWidget(lbl_title)
-        layout.addStretch(1)
-        layout.addWidget(lbl_slice)
-        return layout
-
-    def __make_slice_slider(self):
         slider = QSlider(Qt.Horizontal)
         slider.setMinimum(0)
         slider.setMaximum(0)
         slider.setEnabled(False)
+        slider.setVisible(False)
         slider.setMinimumHeight(20)
         slider.setProperty("role", "sliceSlider")
-        return slider
+        slider.valueChanged.connect(lambda val, i=idx: self._on_panel_slider_changed(i, val))
 
-    def __make_plane_view(self, title, view_type, size, cb):
-        container = QWidget()
-        container.setProperty("role", "viewerCard")
-        vlayout = QVBoxLayout(container)
-        vlayout.setContentsMargins(2, 2, 2, 2)
-        vlayout.setSpacing(2)
-        header_layout = self.__make_viewer_header(title)
-        # Header layout last widget is slice label; keep reference
-        slice_label = header_layout.itemAt(header_layout.count() - 1).widget()
-        slider = self.__make_slice_slider()
-        slider.valueChanged.connect(cb)
-        viewer = CustomQGraphicsView(view_type=view_type, size=size, parent=self)
-        vlayout.addLayout(header_layout)
-        vlayout.addWidget(slider)
-        vlayout.addWidget(viewer)
-        return container, viewer, slider, {"slice_label": slice_label, "title": title}
+        viewer = CustomQGraphicsView(
+            view_type=f"panel_{idx}", size=QSize(100, 100), parent=self
+        )
+        viewer.setProperty("role", "imageViewport")
+        viewer.coordinates_changed.connect(
+            lambda x, y, i=idx: self._on_panel_coordinates_changed(i, x, y)
+        )
 
-    def __sync_primary_sliders(self):
-        if self.displayed_image is None:
+        vbox.addLayout(hdr)
+        vbox.addWidget(slider)
+        vbox.addWidget(viewer)
+
+        return _Panel(
+            container=container,
+            viewer=viewer,
+            slider=slider,
+            title_label=title,
+            slice_label=slice_lbl,
+        )
+
+    # ── External API ──────────────────────────────────────────────────────
+
+    def register_series(
+        self,
+        series_key: str,
+        volume: np.ndarray,
+        is_temporal: bool,
+        geometry: VolumeGeometry | None = None,
+    ):
+        """Register a loaded series volume (and optional DICOM geometry)."""
+        self._volumes[series_key] = volume
+        self._is_temporal[series_key] = is_temporal
+        if geometry is not None:
+            self._geometries[series_key] = geometry
+
+    def set_geometry(self, series_key: str, geom: VolumeGeometry):
+        self._geometries[series_key] = geom
+
+    def set_panel_series(
+        self, panel_idx: int, series_key: str, axis: str = "transverse"
+    ):
+        """Assign a registered series to a panel slot."""
+        if panel_idx < 0 or panel_idx >= self.n_panels:
             return
-        # Set ranges
-        self.sagittal_slider.setMaximum(self.displayed_image.shape[0] - 1)
-        self.axial_slider.setMaximum(self.displayed_image.shape[2] - 1)
-        self.coronal_slider.setMaximum(self.displayed_image.shape[1] - 1)
-        for sl in (self.sagittal_slider, self.axial_slider, self.coronal_slider):
-            sl.setEnabled(sl.maximum() > 0)
-        # Set positions
-        self.sagittal_slider.setValue(self.point_clicker_position[0])
-        self.coronal_slider.setValue(self.point_clicker_position[1])
-        self.axial_slider.setValue(self.point_clicker_position[2])
+        self._panel_series_key[panel_idx] = series_key
+        self._panel_axis[panel_idx] = axis.lower()
 
-    def __update_header_slice_labels(self):
-        if self.displayed_image is None:
+        n = self._n_slices(series_key, axis)
+        mid = n // 2 if n > 0 else 0
+        self._panel_slice_idx[panel_idx] = mid
+
+        sl = self._panels[panel_idx].slider
+        sl.blockSignals(True)
+        sl.setMaximum(max(0, n - 1))
+        sl.setValue(mid)
+        sl.setEnabled(n > 1)
+        sl.setVisible(n > 1)
+        sl.blockSignals(False)
+
+        self._panels[panel_idx].title_label.setText(f"{series_key} / {axis}")
+        self._update_panel(panel_idx)
+
+    def set_panel_empty(self, panel_idx: int):
+        if panel_idx < 0 or panel_idx >= self.n_panels:
             return
-        self.sagittal_header_labels["slice_label"].setText(
-            f"Slice: {self.point_clicker_position[0]}/{self.displayed_image.shape[0]-1}"
-        )
-        self.coronal_header_labels["slice_label"].setText(
-            f"Slice: {self.point_clicker_position[1]}/{self.displayed_image.shape[1]-1}"
-        )
-        self.axial_header_labels["slice_label"].setText(
-            f"Slice: {self.point_clicker_position[2]}/{self.displayed_image.shape[2]-1}"
-        )
+        self._panel_series_key[panel_idx] = None
+        p = self._panels[panel_idx]
+        p.title_label.setText("Empty")
+        p.slice_label.setText("")
+        p.slider.setEnabled(False)
+        p.slider.setVisible(False)
+        p.viewer.clear_display()
+
+    def set_segmentation(self, series_key: str, seg_volume: np.ndarray):
+        self._segmentations[series_key] = seg_volume
+        for i in range(self.n_panels):
+            if self._panel_series_key[i] == series_key:
+                self._update_panel(i)
+
+    def set_time_index(self, t: int):
+        self.current_time_index = t
+        for i in range(self.n_panels):
+            key = self._panel_series_key[i]
+            if key and self._is_temporal.get(key, False):
+                self._update_panel(i)
+
+    # ── Slice/axis helpers ────────────────────────────────────────────────
+
+    def _n_slices(self, series_key: str, axis: str) -> int:
+        vol = self._volumes.get(series_key)
+        if vol is None:
+            return 0
+        is_temporal = self._is_temporal.get(series_key, False)
+        if vol.ndim == 4:                               # (T, Z, H, W)
+            return {"transverse": vol.shape[1],
+                    "coronal":    vol.shape[2],
+                    "sagittal":   vol.shape[3]}.get(axis, vol.shape[1])
+        if vol.ndim == 3 and not is_temporal:           # (Z, H, W)
+            return {"transverse": vol.shape[0],
+                    "coronal":    vol.shape[1],
+                    "sagittal":   vol.shape[2]}.get(axis, vol.shape[0])
+        return 0                                        # (T, H, W) — no z navigation
+
+    @staticmethod
+    def _extract_slice(vol_3d: np.ndarray, axis: str, idx: int) -> np.ndarray:
+        if axis == "transverse":
+            return vol_3d[min(max(0, idx), vol_3d.shape[0] - 1)]
+        if axis == "coronal":
+            return vol_3d[:, min(max(0, idx), vol_3d.shape[1] - 1), :]
+        # sagittal
+        return vol_3d[:, :, min(max(0, idx), vol_3d.shape[2] - 1)]
+
+    def _get_slice_2d(
+        self, series_key: str, axis: str, z: int, t: int
+    ) -> np.ndarray | None:
+        vol = self._volumes.get(series_key)
+        if vol is None:
+            return None
+        is_temporal = self._is_temporal.get(series_key, False)
+        if vol.ndim == 4:                               # (T, Z, H, W)
+            return self._extract_slice(vol[min(t, vol.shape[0] - 1)], axis, z)
+        if vol.ndim == 3 and is_temporal:              # (T, H, W)
+            return vol[min(t, vol.shape[0] - 1)]
+        if vol.ndim == 3:                              # (Z, H, W)
+            return self._extract_slice(vol, axis, z)
+        return None
+
+    def _get_overlay(
+        self, series_key: str, axis: str, z: int, t: int
+    ) -> np.ndarray | None:
+        seg = self._segmentations.get(series_key)
+        if seg is None:
+            return None
+        try:
+            is_temporal = self._is_temporal.get(series_key, False)
+            if seg.ndim == 4:                          # (T, Z, H, W)
+                seg_2d = self._extract_slice(seg[min(t, seg.shape[0] - 1)], axis, z)
+            elif seg.ndim == 3 and is_temporal:        # (T, H, W)
+                seg_2d = seg[min(t, seg.shape[0] - 1)]
+            elif seg.ndim == 3:                        # (Z, H, W)
+                seg_2d = self._extract_slice(seg, axis, z)
+            elif seg.ndim == 2:
+                seg_2d = seg
+            else:
+                return None
+            return _build_seg_overlay(seg_2d)
+        except Exception as e:
+            logging.error("Overlay error for %s: %s", series_key, e)
+            return None
+
+    # ── Panel rendering ───────────────────────────────────────────────────
+
+    def _update_panel(self, panel_idx: int):
+        key = self._panel_series_key[panel_idx]
+        if key is None:
+            return
+        p = self._panels[panel_idx]
+        axis = self._panel_axis[panel_idx]
+        z = self._panel_slice_idx[panel_idx]
+        t = self.current_time_index
+
+        slice_2d = self._get_slice_2d(key, axis, z, t)
+        if slice_2d is None:
+            return
+
+        p.viewer.overlay_data = self._get_overlay(key, axis, z, t)
+        p.viewer.update_slice_view(slice_2d)
+
+        n = self._n_slices(key, axis)
+        p.slice_label.setText(f"Slice: {z + 1}/{n}" if n > 1 else "")
+
+    def update_all_panels(self):
+        for i in range(self.n_panels):
+            self._update_panel(i)
+
+    # ── World-coordinate crosshair sync ──────────────────────────────────
+
+    def _on_panel_coordinates_changed(self, panel_idx: int, sig_x: int, sig_y: int):
+        # Signal emits (col, row) as (x, y)
+        col, row = sig_x, sig_y
+        key = self._panel_series_key[panel_idx]
+        if key is None:
+            return
+        geom = self._geometries.get(key)
+        if geom is not None:
+            z = self._panel_slice_idx[panel_idx]
+            self._world_crosshair = geom.pixel_to_world(row, col, z)
+            self._broadcast_world_crosshair()
+        else:
+            self._panels[panel_idx].viewer.set_crosshair_from_volume_indices(row, col)
+
+    def _on_panel_slider_changed(self, panel_idx: int, value: int):
+        key = self._panel_series_key[panel_idx]
+        if key is None:
+            return
+        n = self._n_slices(key, self._panel_axis[panel_idx])
+        new_z = min(max(0, value), max(0, n - 1))
+        self._panel_slice_idx[panel_idx] = new_z
+
+        geom = self._geometries.get(key)
+        if geom is not None:
+            # Keep the existing in-plane crosshair position; move to the new slice
+            if self._world_crosshair is not None:
+                result = geom.world_to_pixel(self._world_crosshair)
+                row = result[0] if result is not None else geom.n_rows / 2.0
+                col = result[1] if result is not None else geom.n_cols / 2.0
+            else:
+                row, col = geom.n_rows / 2.0, geom.n_cols / 2.0
+            self._world_crosshair = geom.pixel_to_world(row, col, new_z)
+            self._broadcast_world_crosshair()
+        else:
+            self._update_panel(panel_idx)
+
+    def _broadcast_world_crosshair(self):
+        """Project _world_crosshair into every panel, updating slice index and crosshair."""
+        for i in range(self.n_panels):
+            key = self._panel_series_key[i]
+            if key is None:
+                continue
+            geom = self._geometries.get(key)
+            if geom is None:
+                self._update_panel(i)
+                continue
+            result = geom.world_to_pixel(self._world_crosshair)
+            if result is None:
+                self._update_panel(i)
+                continue
+            r, c, new_z = result
+            row = max(0, min(int(round(r)), geom.n_rows - 1))
+            col = max(0, min(int(round(c)), geom.n_cols - 1))
+            n = self._n_slices(key, self._panel_axis[i])
+            if n > 0:
+                new_z = max(0, min(int(round(new_z)), n - 1))
+                self._panel_slice_idx[i] = new_z
+                sl = self._panels[i].slider
+                sl.blockSignals(True)
+                sl.setValue(new_z)
+                sl.blockSignals(False)
+            # _update_panel calls update_slice_view first (which preserves crosshair_pos),
+            # then we overwrite with the projected position.
+            self._update_panel(i)
+            self._panels[i].viewer.set_crosshair_from_volume_indices(row, col)
+
+    # ── Contour editing stubs (to be implemented properly later) ─────────
+
+    def set_contour_edit_mode(self, enabled: bool):
+        for p in self._panels:
+            p.viewer.set_edit_mode(enabled)
+
+    def set_contour_edit_tool(self, tool: str):
+        for p in self._panels:
+            p.viewer.set_edit_tool(tool)
+
+
+# ── Module-level helpers ──────────────────────────────────────────────────
+
+def _make_divider(horizontal: bool) -> QLabel:
+    div = QLabel()
+    if horizontal:
+        div.setFixedHeight(3)
+    else:
+        div.setFixedWidth(3)
+    div.setProperty("role", "divider")
+    return div
+
+
+def _build_seg_overlay(seg_2d: np.ndarray) -> np.ndarray | None:
+    h, w = seg_2d.shape
+    overlay = np.zeros((h, w, 4), dtype=np.uint8)
+    class_colors = {1: (213, 160, 122), 2: (90, 111, 141), 3: (137, 167, 207)}
+    for class_id, (r, g, b) in class_colors.items():
+        mask = seg_2d == class_id
+        if mask.any():
+            overlay[mask] = [r, g, b, 160]
+    return overlay if overlay.any() else None

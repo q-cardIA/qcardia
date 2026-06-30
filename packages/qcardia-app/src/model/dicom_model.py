@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 
@@ -6,6 +8,8 @@ import torch
 import yaml
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 from qcardia_models.models import UNet2d
+
+from view.volume_geometry import VolumeGeometry
 
 
 class DICOMModel:
@@ -266,6 +270,27 @@ class DICOMModel:
                 self.temporal_segmentations = []
 
         return self.temporal_segmentations
+
+    def get_cine_geometry(self) -> VolumeGeometry | None:
+        return self._build_geometry("CINE_SAX")
+
+    def get_lge_geometry(self) -> VolumeGeometry | None:
+        return self._build_geometry("LGE_SAX")
+
+    def _build_geometry(self, series_key: str) -> VolumeGeometry | None:
+        series = self.series.get(series_key)
+        if series is None:
+            return None
+        try:
+            slice_entries = []
+            for idx, key in enumerate(sorted(series.slice_data.keys())):
+                meta = series.slice_data[key]["meta_data"][0]
+                position = self._extract_slice_position(meta, idx)
+                slice_entries.append((position, meta))
+            slice_entries.sort(key=lambda x: x[0])
+            return VolumeGeometry.from_dicom_slices([m for _, m in slice_entries])
+        except Exception:
+            return None
 
     def save_segmentation(self, output_path=None):
         cine = self.series.get("CINE_SAX")
