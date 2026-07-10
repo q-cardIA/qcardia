@@ -10,9 +10,19 @@ from natsort import natsorted
 from scipy.interpolate import RegularGridInterpolator
 from skimage.measure import find_contours
 from skimage.transform import warp
+import yaml
+
+import torch
+import torch.nn as nn
+import wandb
 
 import utils
 from qcardia.series import CineSeries
+
+from qcardia_models.models.networks.encoder_mlp import EncoderMLP2d
+from qcardia_models.utils import seed_everything
+
+seed_everything(42)
 
 MOTION_WANDB_RUN_PATH = Path.cwd() / "wandb" / "motion-model"
 WANDB_RUN_PATH = Path.cwd() / "wandb" / "cine-seg"
@@ -22,16 +32,60 @@ patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
 warp_layer = Warp()
 
+
+class CardisortClassifier(nn.Module):
+    """Shared encoder backbone with separate sequence and plane classification heads."""
+
+    def __init__(self, config: dict) -> None:
+        super().__init__()
+        self.backbone = EncoderMLP2d(
+            nr_input_channels=config["model"]["nr_input_channels"],
+            encoder_channels_list=config["model"]["encoder_channels"],
+            mlp_channels_list=config["model"]["mlp_channels"],
+        )
+        feature_size = config["model"]["mlp_channels"][-1]
+        self.seq_head = nn.Linear(feature_size, config["model"]["n_sequence_classes"])
+        self.plane_head = nn.Linear(feature_size, config["model"]["n_plane_classes"])
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        features = self.backbone(x)
+        return self.seq_head(features), self.plane_head(features)
+    
+
+def get_sequence_dirs(patient: Path) -> list[Path]:
+    """All raw-sequence subdirectories for a patient, excluding derived
+    outputs (e.g. "*_segmentation") and hidden files (e.g. ".DS_Store")."""
+    return natsorted(
+        [
+            f
+            for f in patient.iterdir()
+            if f.is_dir()
+            and not f.name.startswith(".")
+            and not f.name.endswith("_segmentation")
+        ]
+    )
+
+
+config_path = Path("wandb") / "cardisort" / "files" / "config.yaml"
+raw_config = yaml.load(config_path.open(), Loader=yaml.FullLoader)
+config = {k: v["value"] for k, v in raw_config.items() if isinstance(v, dict) and "value" in v}
+
+cardisort_model = CardisortClassifier(config)
+model_weights = Path("wandb") / "cardisort" / "files" / "best_model.pt"
+cardisort_model.load_state_dict(model_weights)
+
+
+
 for patient in patient_list[:1]:
     try:
         print(patient)
-        cine_dir = Path(list(patient.glob("*[sS][aA]*[sS][tT][aA][cC]*"))[0])
-        # cine_dir = Path(list(patient.glob("*[cC][iI][nN][eE]*"))[0])
-        cine_seq = CineSeries(cine_dir, batch_size=200)
-        cine_segmentation = cine_seq.predict_segmentation(WANDB_RUN_PATH)
-        cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
-        lv_vol_curve = cine_seq.compute_volume_curve()
-        ef = cine_seq.compute_ejection_fraction(lv_vol_curve)
+
+        sequence_dirs = get_sequence_dirs(patient)
+        print(sequence_dirs)
+        
+        # TODO: apply trained sequence classifier to each dir in sequence_dirs
+        # to determine which one is the cine stack (and any other sequence
+        # types needed) before running CineSeries on it.
     except:
         pass
         # motion = cine_seq.motion_track(MOTION_WANDB_RUN_PATH)
@@ -52,28 +106,28 @@ for patient in patient_list[:1]:
         #     cine_seq.get_rv_insertion_points(),
         #     num_spokes=10,
         # )
-from scipy.ndimage import binary_fill_holes
+        # from scipy.ndimage import binary_fill_holes
 
-from src.qcardia.series import LGESeries
+        # from src.qcardia.series import LGESeries
 
-WANDB_RUN_PATH_CENTER = Path.cwd() / "wandb" / "lge-center"
-WANDB_RUN_PATH_SEG = Path.cwd() / "wandb" / "lge-seg"
+        # WANDB_RUN_PATH_CENTER = Path.cwd() / "wandb" / "lge-center"
+        # WANDB_RUN_PATH_SEG = Path.cwd() / "wandb" / "lge-seg"
 
-PATH_TO_DATASET = Path.cwd() / "data"
-# PATH_TO_DATASET = Path.cwd() / "vida-data-combined"
+        # PATH_TO_DATASET = Path.cwd() / "data"
+        # # PATH_TO_DATASET = Path.cwd() / "vida-data-combined"
 
-patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
+        # patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
-for patient in patient_list[:1]:
-    print(patient)
-    lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
-    # lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
-    lge_seq = LGESeries(lge_dir)
+        # for patient in patient_list[:1]:
+        #     print(patient)
+        #     lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
+        #     # lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
+        #     lge_seq = LGESeries(lge_dir)
 
-    lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)
-    lge_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH_SEG, lge_center[5])
+        #     lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)
+        #     lge_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH_SEG, lge_center[5])
 
-    lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
+        #     lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
 
         # fig = plt.figure()
         # ax = fig.add_subplot(111)
