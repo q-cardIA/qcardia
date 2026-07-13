@@ -22,4 +22,4 @@ dependencies = [
 [tool.uv.sources]
 qcardia-data = { git = "https://github.com/q-cardIA/qcardia-data.git" }
 qcardia-models = { git = "https://github.com/q-cardIA/qcardia-models.git" }
-qcardia = { git = "https://github.com/q-cardIA/qcardia.git", rev = "4de08bb" }
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git", rev = "62a8555" }

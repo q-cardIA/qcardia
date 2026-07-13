@@ -3122,11 +3122,12 @@ wheels = [
 [[package]]
 name = "qcardia"
 version = "0.0.1"
-source = { git = "https://github.com/q-cardIA/qcardia.git?rev=4de08bb#4de08bb0cf4ec8a7ec77f3bc7485403a88d33b72" }
+source = { git = "https://github.com/q-cardIA/qcardia.git?rev=62a8555#62a8555847e5e1e257ce2f8f8fdc1eb5703fd16a" }
 dependencies = [
     { name = "opencv-python" },
     { name = "qcardia-data" },
     { name = "qcardia-models" },
+    { name = "requests" },
     { name = "scikit-image" },
     { name = "scipy" },
 ]
@@ -3153,7 +3154,7 @@ requires-dist = [
     { name = "pydicom", specifier = ">=2.4.4" },
     { name = "pyside6", specifier = ">=6.6.2" },
     { name = "pyyaml", specifier = ">=6.0.1" },
-    { name = "qcardia", git = "https://github.com/q-cardIA/qcardia.git?rev=4de08bb" },
+    { name = "qcardia", git = "https://github.com/q-cardIA/qcardia.git?rev=62a8555" },
     { name = "qcardia-data", git = "https://github.com/q-cardIA/qcardia-data.git" },
     { name = "qcardia-models", git = "https://github.com/q-cardIA/qcardia-models.git" },
     { name = "scipy", specifier = ">=1.11.4" },

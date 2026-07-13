@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import torch
 import yaml
-from qcardia.cardisort import classify_sequence_dir, get_sequence_dirs, load_cardisort_model
+from qcardia.cardisort import (
+    classify_sequence_dir,
+    get_sequence_dirs,
+    load_cardisort_model,
+    load_series_datasets,
+)
+from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 from qcardia_models.models import UNet2d
 
@@ -325,7 +332,7 @@ class DICOMModel:
         model, config = self._get_cardisort_model()
         sequence_dirs = get_sequence_dirs(Path(folder_path))
 
-        candidates: dict[str, tuple[Path, int]] = {}
+        dirs_by_key: dict[str, list[Path]] = defaultdict(list)
         for seq_dir in sequence_dirs:
             prediction = classify_sequence_dir(
                 seq_dir,
@@ -344,11 +351,31 @@ class DICOMModel:
                 continue
 
             key = f"{prefix}_{plane_name}"
-            n_files = sum(1 for f in seq_dir.rglob("*") if f.is_file())
-            if key not in candidates or n_files > candidates[key][1]:
-                candidates[key] = (seq_dir, n_files)
+            dirs_by_key[key].append(seq_dir)
 
-        return {key: seq_dir for key, (seq_dir, _n_files) in candidates.items()}
+        classified: dict[str, Path] = {}
+        for key, dirs in dirs_by_key.items():
+            classified[key] = self._resolve_primary_dir(key, dirs)
+
+        return classified
+
+    def _resolve_primary_dir(self, key: str, dirs: list[Path]) -> Path:
+        if len(dirs) == 1:
+            return dirs[0]
+
+        prefix, _, plane_name = key.partition("_")
+        try:
+            candidates = [
+                summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
+            ]
+            result = disambiguate_duplicates((prefix, plane_name), candidates)
+            return next(d for d in dirs if d.name == result["primary_series"])
+        except Exception as e:
+            logging.warning(
+                f"Disambiguation failed for {key} ({[d.name for d in dirs]}): {e}; "
+                "falling back to largest series"
+            )
+            return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
 
     def load_patient(self, folder_path) -> dict[str, dict]:
         classified = self.classify_patient_folder(folder_path)
