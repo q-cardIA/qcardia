@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import pydicom
 from matplotlib import pyplot as plt
 from matplotlib import rc
 from matplotlib.animation import FuncAnimation, PillowWriter
@@ -14,9 +17,11 @@ import yaml
 
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 import wandb
 
 import utils
+import qcardia.utils as qcardia_utils
 from qcardia.series import CineSeries
 
 from qcardia_models.models.networks.encoder_mlp import EncoderMLP2d
@@ -31,6 +36,22 @@ PATH_TO_DATASET = Path.cwd() / "data"
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
 warp_layer = Warp()
+
+SEQUENCE_NAMES = {
+    0: "MOLLI+", 1: "MOLLI-", 2: "SHMOLLI-", 3: "SHMOLLI+", 4: "CINE",
+    5: "HASTE", 6: "PC", 7: "T2MAPPING", 8: "T2starMAPPING", 9: "EGE",
+    10: "TIscout", 11: "DBLGE", 12: "WBLGE", 13: "B0map", 14: "TestPERF",
+    15: "PERF", 16: "Scouts", 17: "T1TSE", 18: "MRA", 19: "SFFPMRA",
+    20: "SSFPMRA", 21: "BOLUSTRACK", 22: "NoGroup",
+    -1: "unlabelled",
+}
+
+PLANE_NAMES = {
+    0: "SAX", 1: "2CH", 2: "3CH", 3: "4CH", 4: "LVOT2", 5: "RVOT",
+    6: "RVOT2", 7: "AV", 8: "AX", 9: "ARCH", 10: "AORTA", 11: "MPA",
+    12: "DA", 13: "PULV", 14: "MV", 15: "MP", 16: "SAG", 17: "COR",
+    -1: "unlabelled",
+}
 
 
 class CardisortClassifier(nn.Module):
@@ -66,209 +87,149 @@ def get_sequence_dirs(patient: Path) -> list[Path]:
     )
 
 
+def load_series_datasets(sequence_dir: Path) -> list[pydicom.Dataset]:
+    """All DICOM datasets in a sequence directory, ordered by InstanceNumber."""
+    files = [
+        f
+        for f in sequence_dir.rglob("*")
+        if f.is_file() and not f.name.startswith(".")
+    ]
+    datasets = []
+    for f in files:
+        try:
+            datasets.append(pydicom.dcmread(f))
+        except Exception:
+            continue
+    datasets.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0)))
+    return datasets
+
+
+def build_cardisort_input(
+    datasets: list[pydicom.Dataset],
+    n_channels: int,
+    target_pixdim: tuple[float, float],
+    target_size: tuple[int, int],
+    grid_sample_mode: str,
+) -> torch.Tensor:
+    """Picks n_channels representative frames evenly spaced across the series,
+    resamples them (pixel-spacing aware, like RandResample2Dd) to target_size at
+    target_pixdim, and min-max normalizes the stack to [0, 1] (like
+    NormalizeIntensityd), matching the CardisortClassifier's training-time
+    preprocessing."""
+    frame_idxs = np.linspace(0, len(datasets) - 1, n_channels).round().astype(int)
+    channels = np.stack(
+        [datasets[idx].pixel_array.astype(np.float32) for idx in frame_idxs], axis=0
+    )
+    # (n_channels, 1, H, W): grid_sample batches over channels via the batch dim
+    channels_tensor = torch.tensor(channels).unsqueeze(1)
+
+    pixel_spacing = datasets[frame_idxs[0]].PixelSpacing
+    source_size = torch.tensor(channels_tensor.shape[-2:], dtype=torch.float32)
+    real_source_size = (
+        torch.tensor([float(pixel_spacing[0]), float(pixel_spacing[1])]) * source_size
+    )
+    real_target_size = torch.tensor(target_pixdim, dtype=torch.float32) * torch.tensor(
+        target_size, dtype=torch.float32
+    )
+    dimension_scale_factor = real_target_size / real_source_size
+
+    scale_t = qcardia_utils.t_2d_scale(dimension_scale_factor)
+    grid = F.affine_grid(
+        theta=torch.repeat_interleave(scale_t[:-1, :].unsqueeze(0), n_channels, dim=0),
+        size=(n_channels, 1, target_size[0], target_size[1]),
+        align_corners=False,
+    )
+    resampled = F.grid_sample(
+        channels_tensor,
+        grid,
+        align_corners=False,
+        mode=grid_sample_mode,
+        padding_mode="zeros",
+    ).squeeze(1)  # (n_channels, target_h, target_w)
+
+    resampled = (resampled - resampled.min()) / (resampled.max() - resampled.min() + 1e-6)
+    return resampled.unsqueeze(0)  # (1, n_channels, target_h, target_w)
+
+
+def print_class_probs(head_name: str, probs: torch.Tensor, class_names: dict) -> None:
+    """Prints every class's predicted probability for a classification head,
+    sorted highest first."""
+    ranked_idxs = torch.argsort(probs, descending=True).tolist()
+    print(f"  {head_name} probabilities:")
+    for idx in ranked_idxs:
+        name = class_names.get(idx, f"class_{idx}")
+        print(f"    {name:>16}: {probs[idx]:.4f}")
+
+
+def classify_sequence_dir(
+    sequence_dir: Path,
+    model: nn.Module,
+    n_channels: int,
+    target_pixdim: tuple[float, float],
+    target_size: tuple[int, int],
+    grid_sample_mode: str,
+    verbose: bool = False,
+) -> tuple[str, str] | None:
+    """Predicts the (sequence, plane) label pair for a sequence directory."""
+    datasets = load_series_datasets(sequence_dir)
+    if not datasets:
+        return None
+
+    input_tensor = build_cardisort_input(
+        datasets, n_channels, target_pixdim, target_size, grid_sample_mode
+    )
+    model.eval()
+    with torch.no_grad():
+        seq_logits, plane_logits = model(input_tensor)
+
+    seq_probs = torch.softmax(seq_logits, dim=1).squeeze(0)
+    plane_probs = torch.softmax(plane_logits, dim=1).squeeze(0)
+
+    if verbose:
+        print_class_probs("sequence", seq_probs, SEQUENCE_NAMES)
+        print_class_probs("plane", plane_probs, PLANE_NAMES)
+
+    seq_idx = int(torch.argmax(seq_probs))
+    plane_idx = int(torch.argmax(plane_probs))
+    return (
+        SEQUENCE_NAMES.get(seq_idx, f"seq_class_{seq_idx}"),
+        PLANE_NAMES.get(plane_idx, f"plane_class_{plane_idx}"),
+    )
+
+
 config_path = Path("wandb") / "cardisort" / "files" / "config.yaml"
 raw_config = yaml.load(config_path.open(), Loader=yaml.FullLoader)
 config = {k: v["value"] for k, v in raw_config.items() if isinstance(v, dict) and "value" in v}
 
 cardisort_model = CardisortClassifier(config)
-model_weights = Path("wandb") / "cardisort" / "files" / "best_model.pt"
-cardisort_model.load_state_dict(model_weights)
+model_weights_path = Path("wandb") / "cardisort" / "files" / "best_model.pt"
+cardisort_model.load_state_dict(torch.load(model_weights_path, map_location="cpu"))
 
 
 
-for patient in patient_list[:1]:
-    try:
-        print(patient)
+for patient in patient_list[:]:
+    sequence_dirs = get_sequence_dirs(patient)
 
-        sequence_dirs = get_sequence_dirs(patient)
-        print(sequence_dirs)
-        
-        # TODO: apply trained sequence classifier to each dir in sequence_dirs
-        # to determine which one is the cine stack (and any other sequence
-        # types needed) before running CineSeries on it.
-    except:
-        pass
-        # motion = cine_seq.motion_track(MOTION_WANDB_RUN_PATH)
-        # motion = motion.reshape(
-        #     3,
-        #     cine_seq.number_of_temporal_positions - 1,
-        #     2,
-        #     *motion.shape[-2:],
-        # )
+    sequence_classifications = {}
+    for sequence_dir in sequence_dirs:
+        prediction = classify_sequence_dir(
+            sequence_dir,
+            cardisort_model,
+            config["model"]["nr_input_channels"],
+            tuple(config["data"]["target_pixdim"]),
+            tuple(config["data"]["target_size"]),
+            config["data"]["image_grid_sample_mode"],
+            verbose=False,
+        )
+        if prediction is None:
+            continue
+        sequence_classifications[sequence_dir] = prediction
 
-        # motion = motion[1, ...]
-        # input_images = np.asarray(cine_seq.slice_data["slice06"]["pixel_array"])
-        # myo = cine_segmentation[cine_seq.mid_slice_num - 1, :] == 2
-
-        # the_pts = utils.get_polar_points(
-        #     myo[0, ...].astype(float),
-        #     cine_seq.get_lv_center_points()[1][0],
-        #     cine_seq.get_rv_insertion_points(),
-        #     num_spokes=10,
-        # )
-        # from scipy.ndimage import binary_fill_holes
-
-        # from src.qcardia.series import LGESeries
-
-        # WANDB_RUN_PATH_CENTER = Path.cwd() / "wandb" / "lge-center"
-        # WANDB_RUN_PATH_SEG = Path.cwd() / "wandb" / "lge-seg"
-
-        # PATH_TO_DATASET = Path.cwd() / "data"
-        # # PATH_TO_DATASET = Path.cwd() / "vida-data-combined"
-
-        # patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
-
-        # for patient in patient_list[:1]:
-        #     print(patient)
-        #     lge_dir = Path(list(patient.glob("*[dD][bB]*[sS][cC][aA][rR]*[sS][aA]"))[0])
-        #     # lge_dir = Path(list(patient.glob("*[lL][gG][eE]*"))[0])
-        #     lge_seq = LGESeries(lge_dir)
-
-        #     lge_center = lge_seq.predict_segmentation(WANDB_RUN_PATH_CENTER)
-        #     lge_segmentation = lge_seq.predict_segmentation(WANDB_RUN_PATH_SEG, lge_center[5])
-
-        #     lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
-
-        # fig = plt.figure()
-        # ax = fig.add_subplot(111)
-        # colors = utils.get_colors(10)
-
-        # def animate(i):
-
-        #     if i == 0:
-        #         im = ax.imshow(input_images[0, ...], cmap="gray")
-        #         for idx, pt in enumerate(the_pts):
-        #             ax.plot(
-        #                 pt[0][0], pt[0][1], "o", color=matplotlib.colors.to_hex(colors[idx])
-        #             )
-        #         ax.set_axis_off()
-        #         return [im]
-
-        #     else:
-        #         the_motion = np.transpose(motion[i, ...], (1, 2, 0))
-        #         nx, ny = the_motion.shape[1], the_motion.shape[0]
-        #         X = np.arange(nx)
-        #         Y = np.arange(ny)
-        #         the_motion_x = RegularGridInterpolator((X, Y), the_motion[..., 0])
-        #         the_motion_y = RegularGridInterpolator((X, Y), the_motion[..., 1])
-
-        #         ax.clear()
-        #         im = ax.imshow(input_images[i + 1, ...], cmap="gray")
-        #         for idx, pt in enumerate(the_pts):
-
-        #             deformed_pt_y = pt[0][0] - the_motion_y((pt[0][1], pt[0][0]))
-        #             deformed_pt_x = pt[0][1] - the_motion_x((pt[0][1], pt[0][0]))
-        #             ax.plot(
-        #                 deformed_pt_y,
-        #                 deformed_pt_x,
-        #                 "o",
-        #                 color=matplotlib.colors.to_hex(colors[idx]),
-        #             )
-
-        #         ax.set_axis_off()
-        #         return [im]
-
-        #     # fig.canvas.draw()
-        #     # plt.pause(0.2)
-
-        # fig.tight_layout()
-        # anim = FuncAnimation(
-        #     fig,
-        #     animate,
-        #     frames=input_images.shape[0] - 1,
-        #     interval=50,
-        #     blit=True,
-        # )
-        # # Save as GIF
-        # writer = PillowWriter(fps=30)
-        # anim.save(f"{patient.name}.gif", writer=writer)
-
-        # # Close the figure to free memory
-        # plt.close()
-# if __name__ == "__main__":
-see_num = 7
-# # number of slices is first?
-
-# # cine_rvs = cine_seq.get_rv_insertion_points()
-
-# # lge_dir = Path(list(patient.glob("*[sS][cC][aA][rR]*"))[0])
-# # lge_seq = BaseSequence(lge_dir)
-# # quick check
-from matplotlib import pyplot as plt
-from skimage import measure
-
-# # contour_epi = measure.find_contours(test_myo1)[0]
-# # contour_endo = measure.find_contours(test_myo1)[1]
-# # # contour_scar = measure.find_contours(test_scar2)[0]
-# plt.imshow(cine_segmentation[5], cmap="gray")
-# plt.show()
-
-myo = (lge_segmentation[see_num] == 2) + (lge_segmentation[see_num] == 1)
+    cine_dirs = [
+        sequence_dir
+        for sequence_dir, (sequence_name, _) in sequence_classifications.items()
+        if sequence_name == "CINE"
+    ]
+    print(cine_dirs)
 
 
-lv = binary_fill_holes(myo) * 1 - myo
-
-from skimage.measure import label
-
-
-def getLargestCC(segmentation):
-    labels = label(segmentation)
-    largestCC = labels == np.argmax(np.bincount(labels.flat, weights=segmentation.flat))
-    return largestCC
-
-
-lv = getLargestCC(lv)
-
-contour_lv = measure.find_contours(lv == 1)[0]
-contour_myo = measure.find_contours(myo == 1)[0]
-contour_scar = measure.find_contours(lge_segmentation[see_num] == 2)[0]
-# contour_rv = measure.find_contours(cine_segmentation[5] == 3)[0]
-
-
-# # import imgaug.augmenters as iaa
-
-
-# # def get_offset(seg, RV):
-# #     RVinsertionx = RV[0]
-# #     RVinsertiony = RV[1]
-# #     [xs, ys] = np.where(seg > 0)
-# #     centx = np.mean(xs)
-# #     centy = np.mean(ys)
-
-# #     spoke1m = (centy - RVinsertiony) / (centx - RVinsertionx)
-
-# #     return np.arctan(spoke1m)
-
-
-# # def rotate_to_rv(image, rv, interp_order=3):
-# #     angle = np.pi - get_offset(image > 0, rv)
-# #     rotate_im = iaa.Affine(rotate=np.rad2deg(angle), order=interp_order)
-# #     rotated_image = rotate_im.augment_image(image)
-
-# #     return rotated_image
-
-
-# # plt.subplot(1, 2, 1)
-# # plt.imshow(lge_seq.slice_data["slice06"]["pixel_array"][1] / 300, cmap="gray")
-# # plt.subplot(1, 2, 2)
-# # plt.imshow(
-# #     rotate_to_rv(lge_seq.slice_data["slice06"]["pixel_array"][1] / 300, [210, 130]),
-# #     cmap="gray",
-# # )
-# # plt.show()
-
-# # print(lge_seq.slice_data["slice06"]["pixel_array"][1].shape)
-
-# # Display the image and plot all contours found
-fig, ax = plt.subplots()
-ax.imshow(lge_seq.slice_data[f"slice0{see_num+1}"]["psir_array"] / 300, cmap="gray")
-# # ax.imshow(lge_seq.slice_data["slice06"]["pixel_array"][1] / 300, cmap="gray")
-
-ax.plot(contour_lv[:, 1], contour_lv[:, 0], linewidth=2.5, color="tab:blue")
-ax.plot(contour_myo[:, 1], contour_myo[:, 0], linewidth=2.5, color="tab:green")
-ax.plot(contour_scar[:, 1], contour_scar[:, 0], linewidth=2.5, color="tab:orange")
-# # ax.plot(contour_epi[:, 1], contour_epi[:, 0], linewidth=2.5, color="tab:orange")
-# # ax.plot(contour_endo[:, 1], contour_endo[:, 0], linewidth=2.5, color="tab:orange")
-# # ax.plot(contour_scar[:, 1], contour_scar[:, 0], linewidth=2.5, color="tab:red")
-plt.axis("off")
-plt.show()
