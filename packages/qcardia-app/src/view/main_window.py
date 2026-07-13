@@ -18,12 +18,12 @@ from view.welcome_widget import WelcomeWidget
 
 class MainWindow(QMainWindow):
 
-    load_button_signal = Signal(str)
-    load_lge_button_signal = Signal(str)
+    load_patient_button_signal = Signal(str)
     seg_button_signal = Signal()
     lge_seg_button_signal = Signal()
     save_button_signal = Signal()
     time_frame_changed_signal = Signal(int)
+    preset_requested_signal = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -35,11 +35,11 @@ class MainWindow(QMainWindow):
 
     def build_analysis_interface(self):
         self.sidebar = SidebarWidget(self)
-        self.sidebar.load_requested.connect(self.on_load_button_clicked)
-        self.sidebar.load_image_requested.connect(self.on_load_image_clicked)
+        self.sidebar.load_patient_requested.connect(self.on_load_patient_clicked)
         self.sidebar.predict_requested.connect(self.emit_segmentation_signal)
         self.sidebar.predict_lge_requested.connect(self.emit_lge_segmentation_signal)
         self.sidebar.save_requested.connect(self.emit_save_signal)
+        self.sidebar.preset_requested.connect(self.preset_requested_signal.emit)
 
         self.display_area_widget = CentralDisplayAreaWidget(self)
 
@@ -112,23 +112,15 @@ class MainWindow(QMainWindow):
         )  # use Qt dialog to avoid macOS NSOpenPanel crash
         return options
 
-    def on_load_button_clicked(self):
+    def on_load_patient_clicked(self):
         folder_path = QFileDialog.getExistingDirectory(
-            self, "Select Folder", "", self._directory_dialog_options()
+            self, "Select Patient Folder", "", self._directory_dialog_options()
         )
         if not folder_path:
             return
         self.folder_selected = True
         self.sidebar.enable_post_load()
-        self.load_button_signal.emit(folder_path)
-
-    def on_load_image_clicked(self):
-        folder_path = QFileDialog.getExistingDirectory(
-            self, "Select DICOM Folder", "", self._directory_dialog_options()
-        )
-        if not folder_path:
-            return
-        self.load_lge_button_signal.emit(folder_path)
+        self.load_patient_button_signal.emit(folder_path)
 
     def _on_toggle_sidebar(self, checked):
         if checked:

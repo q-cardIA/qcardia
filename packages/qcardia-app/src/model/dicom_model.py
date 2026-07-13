@@ -6,10 +6,14 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
+from qcardia.cardisort import classify_sequence_dir, get_sequence_dirs, load_cardisort_model
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 from qcardia_models.models import UNet2d
 
 from view.volume_geometry import VolumeGeometry
+
+CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
+CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
 
 
 class DICOMModel:
@@ -20,6 +24,8 @@ class DICOMModel:
         self.temporal_segmentations = []
         self.num_time_frames = 0
         self.slice_positions = []
+        self._cardisort_model = None
+        self._cardisort_config = None
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -39,17 +45,18 @@ class DICOMModel:
         model_weights = torch.load(wandb_path / "files" / "last_model.pt")
         self.seg_model.load_state_dict(model_weights)
 
-    def load_cine_series(self, folder_path):
-        self.folder_path = Path(folder_path)
-        self.series["CINE_SAX"] = CineSeries(Path(folder_path), batch_size=200)
-        return self._process_temporal_volumes()
+    def load_cine_series(self, folder_path, series_key: str):
+        self.series[series_key] = CineSeries(Path(folder_path), batch_size=200)
+        if series_key == "CINE_SAX":
+            self.folder_path = Path(folder_path)
+        return self._process_temporal_volumes(series_key)
 
-    def load_lge_series(self, folder_path):
-        self.series["LGE_SAX"] = LGESeries(Path(folder_path))
-        return self._build_lge_volume()
+    def load_lge_series(self, folder_path, series_key: str):
+        self.series[series_key] = LGESeries(Path(folder_path))
+        return self._build_lge_volume(series_key)
 
-    def _build_lge_volume(self):
-        lge = self.series.get("LGE_SAX")
+    def _build_lge_volume(self, series_key: str):
+        lge = self.series.get(series_key)
         if lge is None:
             raise ValueError("No LGE data loaded")
 
@@ -131,8 +138,8 @@ class DICOMModel:
         windowed = ((windowed - min_val) / (max_val - min_val) * 255).astype(np.uint8)
         return windowed
 
-    def _process_temporal_volumes(self):
-        cine = self.series.get("CINE_SAX")
+    def _process_temporal_volumes(self, series_key: str):
+        cine = self.series.get(series_key)
         if cine is None:
             raise ValueError("No DICOM data loaded")
 
@@ -140,7 +147,7 @@ class DICOMModel:
         width = float(cine.slice_data["slice01"]["meta_data"][0].WindowWidth)
 
         first_key = sorted(cine.slice_data.keys())[0]
-        self.num_time_frames = len(cine.slice_data[first_key]["pixel_array"])
+        num_time_frames = len(cine.slice_data[first_key]["pixel_array"])
 
         slice_entries = []
         for idx, key in enumerate(sorted(cine.slice_data.keys())):
@@ -149,15 +156,21 @@ class DICOMModel:
             slice_entries.append((position, cine.slice_data[key]["pixel_array"]))
 
         slice_entries.sort(key=lambda item: item[0])
-        self.slice_positions = [float(entry[0]) for entry in slice_entries]
+        slice_positions = [float(entry[0]) for entry in slice_entries]
 
-        self.temporal_volumes = []
-        for time_idx in range(self.num_time_frames):
+        temporal_volumes = []
+        for time_idx in range(num_time_frames):
             slices = [entry[1][time_idx] for entry in slice_entries]
             image_stack = np.stack(slices, axis=0)
-            self.temporal_volumes.append(self.apply_window(image_stack, center, width))
+            temporal_volumes.append(self.apply_window(image_stack, center, width))
 
-        return self.temporal_volumes, self.num_time_frames
+        if series_key == "CINE_SAX":
+            self.num_time_frames = num_time_frames
+            self.slice_positions = slice_positions
+            self.temporal_volumes = temporal_volumes
+
+        volume_4d = np.stack(temporal_volumes, axis=0)
+        return volume_4d, num_time_frames
 
     @staticmethod
     def _extract_slice_position(meta, fallback_index):
@@ -271,13 +284,7 @@ class DICOMModel:
 
         return self.temporal_segmentations
 
-    def get_cine_geometry(self) -> VolumeGeometry | None:
-        return self._build_geometry("CINE_SAX")
-
-    def get_lge_geometry(self) -> VolumeGeometry | None:
-        return self._build_geometry("LGE_SAX")
-
-    def _build_geometry(self, series_key: str) -> VolumeGeometry | None:
+    def get_geometry(self, series_key: str) -> VolumeGeometry | None:
         series = self.series.get(series_key)
         if series is None:
             return None
@@ -305,3 +312,58 @@ class DICOMModel:
 
         cine.save_predictions(Path(output_path))
         return output_path
+
+    def _get_cardisort_model(self):
+        if self._cardisort_model is None:
+            cardisort_wandb_path = Path.cwd() / "wandb" / "cardisort"
+            self._cardisort_model, self._cardisort_config = load_cardisort_model(
+                cardisort_wandb_path
+            )
+        return self._cardisort_model, self._cardisort_config
+
+    def classify_patient_folder(self, folder_path) -> dict[str, Path]:
+        model, config = self._get_cardisort_model()
+        sequence_dirs = get_sequence_dirs(Path(folder_path))
+
+        candidates: dict[str, tuple[Path, int]] = {}
+        for seq_dir in sequence_dirs:
+            prediction = classify_sequence_dir(
+                seq_dir,
+                model,
+                config["model"]["nr_input_channels"],
+                tuple(config["data"]["target_pixdim"]),
+                tuple(config["data"]["target_size"]),
+                config["data"]["image_grid_sample_mode"],
+            )
+            if prediction is None:
+                continue
+
+            sequence_name, plane_name = prediction
+            prefix = CARDISORT_SEQUENCE_TO_PREFIX.get(sequence_name)
+            if prefix is None or plane_name not in CARDISORT_SUPPORTED_PLANES:
+                continue
+
+            key = f"{prefix}_{plane_name}"
+            n_files = sum(1 for f in seq_dir.rglob("*") if f.is_file())
+            if key not in candidates or n_files > candidates[key][1]:
+                candidates[key] = (seq_dir, n_files)
+
+        return {key: seq_dir for key, (seq_dir, _n_files) in candidates.items()}
+
+    def load_patient(self, folder_path) -> dict[str, dict]:
+        classified = self.classify_patient_folder(folder_path)
+
+        loaded: dict[str, dict] = {}
+        for key, seq_dir in classified.items():
+            try:
+                if key.startswith("CINE_"):
+                    volume, num_frames = self.load_cine_series(seq_dir, key)
+                    loaded[key] = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
+                else:
+                    volume, _slice_positions = self.load_lge_series(seq_dir, key)
+                    loaded[key] = {"volume": volume, "is_temporal": False, "num_frames": None}
+                loaded[key]["geometry"] = self.get_geometry(key)
+            except Exception as e:
+                logging.warning(f"Failed to load {key} from {seq_dir}: {e}")
+
+        return loaded

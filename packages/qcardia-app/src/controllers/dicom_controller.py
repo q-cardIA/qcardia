@@ -1,5 +1,7 @@
 import logging
 
+from utils.hanging_protocols import PRESETS, build_perfusion_preset
+
 
 class DICOMController:
     def __init__(self, view, model):
@@ -7,41 +9,43 @@ class DICOMController:
         self.model = model
         self.current_time_index = 0
 
-        self.view.load_button_signal.connect(self.load_cine_series)
-        self.view.load_lge_button_signal.connect(self.load_lge_series)
+        self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
         self.view.lge_seg_button_signal.connect(self.run_lge_segmentation)
         self.view.save_button_signal.connect(self.save_segmentation)
         self.view.time_frame_changed_signal.connect(self.set_time_frame)
+        self.view.preset_requested_signal.connect(self.apply_preset)
 
     @property
     def _widget(self):
         return self.view.display_area_widget
 
-    def load_cine_series(self, folder_path):
+    def load_patient(self, folder_path):
         try:
-            temporal_volumes, num_frames = self.model.load_cine_series(folder_path)
-            geom = self.model.get_cine_geometry()
-            volume_4d = temporal_volumes  # list[np.ndarray (Z,H,W)] → stack to (T,Z,H,W)
-            import numpy as np
-            volume_4d = np.stack(temporal_volumes, axis=0)
-            self._widget.register_series("CINE_SAX", volume_4d, is_temporal=True, geometry=geom)
-            self._widget.set_panel_series(0, "CINE_SAX", axis="transverse")
-            self.current_time_index = 0
-            self.view.update_time_slider_range(num_frames)
+            loaded = self.model.load_patient(folder_path)
         except Exception as e:
-            logging.error(f"Failed to load cine series: {e}")
-            self.view.show_error("Load Error", f"Failed to load cine series:\n{str(e)}")
+            logging.error(f"Failed to load patient: {e}")
+            self.view.show_error("Load Error", f"Failed to load patient folder:\n{str(e)}")
+            return
 
-    def load_lge_series(self, folder_path):
-        try:
-            volume, _slice_positions = self.model.load_lge_series(folder_path)
-            geom = self.model.get_lge_geometry()
-            self._widget.register_series("LGE_SAX", volume, is_temporal=False, geometry=geom)
-            self._widget.set_panel_series(1, "LGE_SAX", axis="transverse")
-        except Exception as e:
-            logging.error(f"Failed to load LGE series: {e}")
-            self.view.show_error("LGE Load Error", f"Failed to load LGE series:\n{str(e)}")
+        if not loaded:
+            self.view.show_warning(
+                "No Series Found",
+                "Cardisort did not recognize any loadable series in this folder.",
+            )
+            return
+
+        max_frames = 0
+        for key, info in loaded.items():
+            self._widget.register_series(
+                key, info["volume"], is_temporal=info["is_temporal"], geometry=info["geometry"]
+            )
+            if info["is_temporal"]:
+                max_frames = max(max_frames, info["num_frames"])
+
+        if max_frames:
+            self.current_time_index = 0
+            self.view.update_time_slider_range(max_frames)
 
     def run_segmentation(self):
         try:
@@ -63,6 +67,28 @@ class DICOMController:
         except Exception as e:
             logging.error(f"LGE segmentation failed: {e}")
             self.view.show_error("LGE Segmentation Error", f"Failed to run LGE segmentation:\n{str(e)}")
+
+    def apply_preset(self, name: str):
+        if name == "perfusion":
+            avail = set(self.model.series.keys())
+            preset = build_perfusion_preset(
+                has_stress="PERF_STRESS_SAX" in avail,
+                has_rest="PERF_REST_SAX" in avail,
+            )
+        else:
+            preset = PRESETS.get(name)
+
+        if preset is None:
+            logging.warning(f"apply_preset: unknown preset {name!r}")
+            return
+
+        rows, cols = preset.grid
+        self._widget.set_grid_size(rows, cols)
+        for panel in preset.panels:
+            if self._widget.is_series_registered(panel.key):
+                self._widget.set_panel_series(panel.idx, panel.key, axis=panel.axis)
+            else:
+                self._widget.set_panel_empty(panel.idx)
 
     def set_time_frame(self, time_index):
         self.current_time_index = time_index

@@ -194,6 +194,9 @@ class CentralDisplayAreaWidget(QWidget):
     def set_geometry(self, series_key: str, geom: VolumeGeometry):
         self._geometries[series_key] = geom
 
+    def is_series_registered(self, series_key: str) -> bool:
+        return series_key in self._volumes
+
     def set_panel_series(
         self, panel_idx: int, series_key: str, axis: str = "transverse"
     ):

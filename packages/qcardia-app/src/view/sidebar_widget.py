@@ -1,13 +1,15 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
+from utils.hanging_protocols import PRESET_BUTTON_ORDER, PRESETS
+
 
 class SidebarWidget(QFrame):
-    load_requested = Signal()
-    load_image_requested = Signal()
+    load_patient_requested = Signal()
     predict_requested = Signal()
     predict_lge_requested = Signal()
     save_requested = Signal()
+    preset_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,22 +26,15 @@ class SidebarWidget(QFrame):
         self.title_label.setProperty("role", "sidebarSectionTitle")
         self.layout.addWidget(self.title_label)
 
-        # Load patient button (Cine SAX)
-        self.btn_load = QPushButton("Cine SAX")
-        self.btn_load.setProperty("role", "sidebarButton")
-        self.btn_load.clicked.connect(self._on_load_patient_clicked)
-        self.layout.addWidget(self.btn_load)
+        # Load patient button - cardisort classifies and loads every recognized series
+        self.btn_load_patient = QPushButton("Load Patient")
+        self.btn_load_patient.setProperty("role", "sidebarButton")
+        self.btn_load_patient.clicked.connect(self.load_patient_requested.emit)
+        self.layout.addWidget(self.btn_load_patient)
 
         # These buttons will be created and shown after patient loading
         self.btn_predict = None
         self.btn_save = None
-        self.submenu_visible = False
-
-        # Load Image button - always visible (LGE)
-        self.btn_load_image = QPushButton("LGE")
-        self.btn_load_image.setProperty("role", "sidebarButton")
-        self.btn_load_image.clicked.connect(self.load_image_requested.emit)
-        self.layout.addWidget(self.btn_load_image)
 
         # Predict segmentation for currently loaded LGE stack
         self.btn_predict_lge = QPushButton("  Predict LGE")
@@ -47,47 +42,38 @@ class SidebarWidget(QFrame):
         self.btn_predict_lge.clicked.connect(self.predict_lge_requested.emit)
         self.layout.addWidget(self.btn_predict_lge)
 
+        presets_label = QLabel("LAYOUTS")
+        presets_label.setProperty("role", "sidebarSectionTitle")
+        self.layout.addWidget(presets_label)
+
+        for preset_name in PRESET_BUTTON_ORDER:
+            label = PRESETS[preset_name].label if preset_name in PRESETS else preset_name.title()
+            btn = QPushButton(label)
+            btn.setProperty("role", "sidebarButton")
+            btn.clicked.connect(lambda _, name=preset_name: self.preset_requested.emit(name))
+            self.layout.addWidget(btn)
+
         self.layout.addStretch(1)
-
-    def _on_load_patient_clicked(self):
-        """Handle Load patient button click - load or toggle submenu."""
-        # If submenu exists, just toggle it without loading
-        if self.btn_predict is not None:
-            self._toggle_submenu()
-        else:
-            # First time - emit signal to load patient
-            self.load_requested.emit()
-
-    def _toggle_submenu(self):
-        """Toggle visibility of predict and save sub-buttons."""
-        self.submenu_visible = not self.submenu_visible
-        if self.btn_predict is not None:
-            self.btn_predict.setVisible(self.submenu_visible)
-        if self.btn_save is not None:
-            self.btn_save.setVisible(self.submenu_visible)
 
     def enable_post_load(self):
         """Show sub-buttons after patient data is loaded."""
         if self.btn_predict is not None:
             return  # Already created
 
-        # Find position to insert (after Load patient, before Load Image)
-        load_image_index = self.layout.indexOf(self.btn_load_image)
+        # Find position to insert (before Predict LGE)
+        predict_lge_index = self.layout.indexOf(self.btn_predict_lge)
 
         # Create and insert Predict labels button (sub-button style)
         self.btn_predict = QPushButton("  Predict labels")
         self.btn_predict.setProperty("role", "sidebarSubButton")
         self.btn_predict.clicked.connect(self.predict_requested.emit)
-        self.layout.insertWidget(load_image_index, self.btn_predict)
+        self.layout.insertWidget(predict_lge_index, self.btn_predict)
 
         # Create and insert Save button (sub-button style)
         self.btn_save = QPushButton("  Save new labels")
         self.btn_save.setProperty("role", "sidebarSubButton")
         self.btn_save.clicked.connect(self.save_requested.emit)
-        self.layout.insertWidget(load_image_index + 1, self.btn_save)
-
-        # Make them visible and track state
-        self.submenu_visible = True
+        self.layout.insertWidget(predict_lge_index + 1, self.btn_save)
 
     def _style(self):
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
