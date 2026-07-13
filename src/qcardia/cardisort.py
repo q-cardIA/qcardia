@@ -89,6 +89,12 @@ def get_sequence_dirs(patient: Path) -> list[Path]:
     )
 
 
+# SOP Class UIDs for Secondary Capture Image Storage and its multi-frame
+# variants: scanner-generated workspace screenshots, not acquired images.
+# They carry no PixelSpacing and aren't a real sequence to classify.
+SECONDARY_CAPTURE_SOP_CLASS_PREFIX = "1.2.840.10008.5.1.4.1.1.7"
+
+
 def load_series_datasets(sequence_dir: Path) -> list[pydicom.Dataset]:
     """All DICOM datasets in a sequence directory, ordered by InstanceNumber."""
     files = [
@@ -99,9 +105,12 @@ def load_series_datasets(sequence_dir: Path) -> list[pydicom.Dataset]:
     datasets = []
     for f in files:
         try:
-            datasets.append(pydicom.dcmread(f))
+            ds = pydicom.dcmread(f)
         except Exception:
             continue
+        if str(getattr(ds, "SOPClassUID", "")).startswith(SECONDARY_CAPTURE_SOP_CLASS_PREFIX):
+            continue
+        datasets.append(ds)
     datasets.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0)))
     return datasets
 

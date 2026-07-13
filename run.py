@@ -1,8 +1,15 @@
+from collections import defaultdict
 from pathlib import Path
 
 from natsort import natsorted
 
-from qcardia.cardisort import classify_sequence_dir, get_sequence_dirs, load_cardisort_model
+from qcardia.cardisort import (
+    classify_sequence_dir,
+    get_sequence_dirs,
+    load_cardisort_model,
+    load_series_datasets,
+)
+from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cardisort"
 PATH_TO_DATASET = Path.cwd() / "data"
@@ -10,6 +17,7 @@ PATH_TO_DATASET = Path.cwd() / "data"
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
 cardisort_model, cardisort_config = load_cardisort_model(CARDISORT_WANDB_RUN_PATH)
+print(patient_list)
 
 for patient in patient_list[:]:
     sequence_dirs = get_sequence_dirs(patient)
@@ -29,9 +37,38 @@ for patient in patient_list[:]:
             continue
         sequence_classifications[sequence_dir] = prediction
 
+    # Multiple directories can land on the same (sequence, plane) class (e.g. a
+    # low-res planning cine alongside the real diagnostic SAX stack). For each
+    # such group, ask a local LLM to pick the primary series from DICOM
+    # metadata; the rest are dropped from downstream processing.
+    dirs_by_class = defaultdict(list)
+    for sequence_dir, class_label in sequence_classifications.items():
+        dirs_by_class[class_label].append(sequence_dir)
+
+    primary_dirs = {}
+    for class_label, dirs in dirs_by_class.items():
+        if len(dirs) == 1:
+            primary_dirs[dirs[0]] = class_label
+            continue
+
+        candidates = [
+            summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
+        ]
+        result = disambiguate_duplicates(class_label, candidates)
+        for assessment in result["assessments"]:
+            print(
+                f"  {class_label}: {assessment['series']} -> "
+                f"{assessment['role']} ({assessment['reasoning']})"
+            )
+        primary_dir = next(d for d in dirs if d.name == result["primary_series"])
+        primary_dirs[primary_dir] = class_label
+
     cine_dirs = [
         sequence_dir
-        for sequence_dir, (sequence_name, _) in sequence_classifications.items()
+        for sequence_dir, (sequence_name, _) in primary_dirs.items()
         if sequence_name == "CINE"
     ]
 
+    for sequence_dir, (sequence_name, plane_name) in sequence_classifications.items():
+        print(f"{sequence_dir}: {sequence_name}, {plane_name}")
+    print(cine_dirs)
