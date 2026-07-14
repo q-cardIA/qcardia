@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pydicom
 import torch
 import yaml
 from qcardia.cardisort import (
@@ -21,6 +23,67 @@ from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
 CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
+
+
+@dataclass
+class SequenceDescriptor:
+    path: Path
+    sequence_name: str | None
+    plane_name: str | None
+    key: str | None
+    is_primary: bool = False
+
+
+@dataclass
+class PatientLoadResult:
+    loaded: dict[str, dict]
+    entries: list[SequenceDescriptor]
+
+
+def read_disk_thumbnail(seq_dir: Path, prefer_first_file: bool) -> np.ndarray | None:
+    """Representative 2D uint8 slice read directly from disk, for series never loaded as a volume."""
+    dcm_files = sorted(
+        f for f in seq_dir.rglob("*") if f.is_file() and not f.name.startswith(".")
+    )
+    if not dcm_files:
+        return None
+    pick = dcm_files[0] if prefer_first_file else dcm_files[len(dcm_files) // 2]
+    try:
+        ds = pydicom.dcmread(str(pick))
+        arr = ds.pixel_array.astype(np.float32)
+    except Exception:
+        return None
+
+    if arr.ndim == 3:  # multi-frame DICOM: take the middle frame
+        arr = arr[arr.shape[0] // 2]
+
+    slope = float(getattr(ds, "RescaleSlope", 1) or 1)
+    intercept = float(getattr(ds, "RescaleIntercept", 0) or 0)
+    arr = arr * slope + intercept  # window tags reference rescaled values, so this must come first
+
+    if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
+        arr = arr.max() - arr  # MONOCHROME1: stored values are inverted
+
+    try:
+        wc_raw, ww_raw = getattr(ds, "WindowCenter", None), getattr(ds, "WindowWidth", None)
+        if wc_raw is None or ww_raw is None:
+            raise ValueError
+        wc = float(wc_raw[0]) if hasattr(wc_raw, "__len__") else float(wc_raw)
+        ww = float(ww_raw[0]) if hasattr(ww_raw, "__len__") else float(ww_raw)
+        if ww <= 0:
+            raise ValueError
+        lo = wc - ww / 2.0
+        arr = np.clip(arr, lo, lo + ww)
+        arr = (arr - lo) / ww * 255.0
+    except Exception:
+        p_lo, p_hi = np.percentile(arr, 2), np.percentile(arr, 98)
+        if p_hi > p_lo:
+            arr = np.clip(arr, p_lo, p_hi)
+            arr = (arr - p_lo) / (p_hi - p_lo) * 255.0
+        else:
+            arr = np.zeros_like(arr)
+
+    return arr.astype(np.uint8)
 
 
 class DICOMModel:
@@ -53,7 +116,7 @@ class DICOMModel:
         self.seg_model.load_state_dict(model_weights)
 
     def load_cine_series(self, folder_path, series_key: str):
-        self.series[series_key] = CineSeries(Path(folder_path), batch_size=200)
+        self.series[series_key] = CineSeries(Path(folder_path), batch_size=50)
         if series_key == "CINE_SAX":
             self.folder_path = Path(folder_path)
         return self._process_temporal_volumes(series_key)
@@ -328,11 +391,11 @@ class DICOMModel:
             )
         return self._cardisort_model, self._cardisort_config
 
-    def classify_patient_folder(self, folder_path) -> dict[str, Path]:
+    def _describe_patient_folder(self, folder_path) -> list[SequenceDescriptor]:
         model, config = self._get_cardisort_model()
         sequence_dirs = get_sequence_dirs(Path(folder_path))
 
-        dirs_by_key: dict[str, list[Path]] = defaultdict(list)
+        descriptors = []
         for seq_dir in sequence_dirs:
             prediction = classify_sequence_dir(
                 seq_dir,
@@ -343,21 +406,37 @@ class DICOMModel:
                 config["data"]["image_grid_sample_mode"],
             )
             if prediction is None:
+                descriptors.append(SequenceDescriptor(seq_dir, None, None, None))
                 continue
 
             sequence_name, plane_name = prediction
             prefix = CARDISORT_SEQUENCE_TO_PREFIX.get(sequence_name)
-            if prefix is None or plane_name not in CARDISORT_SUPPORTED_PLANES:
-                continue
+            key = (
+                f"{prefix}_{plane_name}"
+                if prefix is not None and plane_name in CARDISORT_SUPPORTED_PLANES
+                else None
+            )
+            descriptors.append(SequenceDescriptor(seq_dir, sequence_name, plane_name, key))
 
-            key = f"{prefix}_{plane_name}"
-            dirs_by_key[key].append(seq_dir)
+        return descriptors
+
+    def _group_and_resolve(self, descriptors: list[SequenceDescriptor]) -> dict[str, Path]:
+        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
+        for d in descriptors:
+            if d.key is not None:
+                dirs_by_key[d.key].append(d)
 
         classified: dict[str, Path] = {}
-        for key, dirs in dirs_by_key.items():
-            classified[key] = self._resolve_primary_dir(key, dirs)
+        for key, group in dirs_by_key.items():
+            primary = self._resolve_primary_dir(key, [d.path for d in group])
+            classified[key] = primary
+            for d in group:
+                d.is_primary = d.path == primary
 
         return classified
+
+    def classify_patient_folder(self, folder_path) -> dict[str, Path]:
+        return self._group_and_resolve(self._describe_patient_folder(folder_path))
 
     def _resolve_primary_dir(self, key: str, dirs: list[Path]) -> Path:
         if len(dirs) == 1:
@@ -377,8 +456,9 @@ class DICOMModel:
             )
             return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
 
-    def load_patient(self, folder_path) -> dict[str, dict]:
-        classified = self.classify_patient_folder(folder_path)
+    def load_patient(self, folder_path) -> PatientLoadResult:
+        descriptors = self._describe_patient_folder(folder_path)
+        classified = self._group_and_resolve(descriptors)
 
         loaded: dict[str, dict] = {}
         for key, seq_dir in classified.items():
@@ -393,4 +473,4 @@ class DICOMModel:
             except Exception as e:
                 logging.warning(f"Failed to load {key} from {seq_dir}: {e}")
 
-        return loaded
+        return PatientLoadResult(loaded=loaded, entries=descriptors)

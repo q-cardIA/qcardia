@@ -1,6 +1,8 @@
 import logging
 
+from model.dicom_model import read_disk_thumbnail
 from utils.hanging_protocols import PRESETS, build_perfusion_preset
+from view.series_browser_widget import SeriesCardInfo
 
 
 class DICOMController:
@@ -22,30 +24,71 @@ class DICOMController:
 
     def load_patient(self, folder_path):
         try:
-            loaded = self.model.load_patient(folder_path)
+            result = self.model.load_patient(folder_path)
         except Exception as e:
             logging.error(f"Failed to load patient: {e}")
             self.view.show_error("Load Error", f"Failed to load patient folder:\n{str(e)}")
             return
 
-        if not loaded:
+        if not result.entries:
             self.view.show_warning(
-                "No Series Found",
-                "Cardisort did not recognize any loadable series in this folder.",
+                "No Series Found", "No sequence directories found in this folder."
             )
             return
 
         max_frames = 0
-        for key, info in loaded.items():
+        for key, info in result.loaded.items():
             self._widget.register_series(
                 key, info["volume"], is_temporal=info["is_temporal"], geometry=info["geometry"]
             )
             if info["is_temporal"]:
                 max_frames = max(max_frames, info["num_frames"])
 
+        self.view.series_browser_widget.populate(self._build_browser_cards(result))
+
         if max_frames:
             self.current_time_index = 0
             self.view.update_time_slider_range(max_frames)
+
+        if not result.loaded:
+            self.view.show_warning(
+                "No Loadable Series",
+                "Cardisort did not recognize any loadable series in this folder; "
+                "showing all detected sequences in the browser.",
+            )
+
+    def _build_browser_cards(self, result) -> list[SeriesCardInfo]:
+        cards = []
+        for entry in result.entries:
+            is_lge_like = entry.sequence_name in {"DBLGE", "WBLGE"}
+            loaded_here = entry.key is not None and entry.is_primary and entry.key in result.loaded
+
+            thumbnail = (
+                self._widget.get_thumbnail(entry.key)
+                if loaded_here
+                else read_disk_thumbnail(entry.path, is_lge_like)
+            )
+
+            if entry.key is not None:
+                group = entry.key.split("_", 1)[0]
+                label = entry.key if entry.is_primary else entry.path.name
+            elif entry.sequence_name is not None:
+                group = entry.sequence_name
+                label = f"{entry.sequence_name}_{entry.plane_name}"
+            else:
+                group = "Unclassified"
+                label = entry.path.name
+
+            cards.append(
+                SeriesCardInfo(
+                    label=label,
+                    group=group,
+                    thumbnail=thumbnail,
+                    draggable=loaded_here,
+                    series_key=entry.key if loaded_here else None,
+                )
+            )
+        return cards
 
     def run_segmentation(self):
         try:

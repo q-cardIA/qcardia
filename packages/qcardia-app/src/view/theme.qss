@@ -363,6 +363,39 @@ QPushButton[role="sidebarSubButton"]:pressed {
 	color: rgb(255, 255, 255);
 }
 
+/* ---- Series browser ----------------------------------------- */
+QFrame[role="seriesBrowserPanel"] {
+	background-color: rgb(33, 37, 43);
+	border-left: 1px solid rgb(44, 49, 58);
+}
+
+QFrame[role="seriesCard"] {
+	background-color: rgb(40, 44, 52);
+	border: 1px solid rgb(44, 49, 58);
+	border-radius: 3px;
+}
+QFrame[role="seriesCard"]:hover {
+	border: 1px solid rgb(91, 101, 124);
+}
+
+QLabel[role="seriesCardLabel"] {
+	color: rgb(200, 200, 210);
+	font-size: 10px;
+	background-color: transparent;
+}
+
+QFrame[role="seriesCardMuted"] {
+	background-color: rgb(36, 39, 46);
+	border: 1px solid rgb(40, 44, 52);
+	border-radius: 3px;
+}
+
+QLabel[role="seriesCardLabelMuted"] {
+	color: rgb(120, 128, 140);
+	font-size: 10px;
+	background-color: transparent;
+}
+
 /* ---- Central display area --------------------------------- */
 QWidget#centralDisplayArea {
 	background-color: rgb(27, 29, 35);

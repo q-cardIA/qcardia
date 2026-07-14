@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from view.custom_graphics_view import CustomQGraphicsView
+from view.series_browser_widget import SERIES_KEY_MIME_TYPE
 from view.volume_geometry import VolumeGeometry
 
 
@@ -25,6 +26,30 @@ class _Panel:
     slider: QSlider
     title_label: QLabel
     slice_label: QLabel
+
+
+class _PanelDropContainer(QWidget):
+    """Grid-cell container that accepts a dragged series card and re-emits its key."""
+
+    series_dropped = Signal(int, str)
+
+    def __init__(self, panel_idx: int, parent=None):
+        super().__init__(parent)
+        self._panel_idx = panel_idx
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(SERIES_KEY_MIME_TYPE):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat(SERIES_KEY_MIME_TYPE):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        key = bytes(event.mimeData().data(SERIES_KEY_MIME_TYPE)).decode("utf-8")
+        self.series_dropped.emit(self._panel_idx, key)
+        event.acceptProposedAction()
 
 
 class CentralDisplayAreaWidget(QWidget):
@@ -130,7 +155,8 @@ class CentralDisplayAreaWidget(QWidget):
                 self._update_panel(i)
 
     def _make_panel(self, idx: int) -> _Panel:
-        container = QWidget()
+        container = _PanelDropContainer(idx)
+        container.series_dropped.connect(self._on_panel_series_dropped)
         container.setProperty("role", "viewerCard")
         vbox = QVBoxLayout(container)
         vbox.setContentsMargins(2, 2, 2, 2)
@@ -231,6 +257,18 @@ class CentralDisplayAreaWidget(QWidget):
         p.slider.setEnabled(False)
         p.slider.setVisible(False)
         p.viewer.clear_display()
+
+    def get_thumbnail(self, series_key: str) -> np.ndarray | None:
+        """Representative 2D uint8 slice (center transverse slice, t=0) for a browser card."""
+        if series_key not in self._volumes:
+            return None
+        n = self._n_slices(series_key, "transverse")
+        mid = n // 2 if n > 0 else 0
+        return self._get_slice_2d(series_key, "transverse", mid, t=0)
+
+    def _on_panel_series_dropped(self, panel_idx: int, series_key: str):
+        if self.is_series_registered(series_key):
+            self.set_panel_series(panel_idx, series_key)
 
     def set_segmentation(self, series_key: str, seg_volume: np.ndarray):
         self._segmentations[series_key] = seg_volume

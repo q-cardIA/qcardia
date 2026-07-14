@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from view.central_display_area_widget import CentralDisplayAreaWidget
+from view.series_browser_widget import SeriesBrowserWidget
 from view.sidebar_widget import SidebarWidget
 from view.welcome_widget import WelcomeWidget
 
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
         self.sidebar.preset_requested.connect(self.preset_requested_signal.emit)
 
         self.display_area_widget = CentralDisplayAreaWidget(self)
+        self.series_browser_widget = SeriesBrowserWidget(self)
 
         time_controls_container = QWidget()
         time_layout = QHBoxLayout(time_controls_container)
@@ -67,6 +69,10 @@ class MainWindow(QMainWindow):
         self.toggle_sidebar_btn.setCheckable(True)
         self.toggle_sidebar_btn.setProperty("role", "sidebarToggle")
         self.toggle_sidebar_btn.toggled.connect(self._on_toggle_sidebar)
+        self.toggle_series_browser_btn = QPushButton("Hide Series Panel")
+        self.toggle_series_browser_btn.setCheckable(True)
+        self.toggle_series_browser_btn.setProperty("role", "sidebarToggle")
+        self.toggle_series_browser_btn.toggled.connect(self._on_toggle_series_browser)
         self.contour_edit_btn = QPushButton("Edit Contours")
         self.contour_edit_btn.setCheckable(True)
         self.contour_edit_btn.setProperty("role", "contourToggle")
@@ -84,6 +90,7 @@ class MainWindow(QMainWindow):
         self.app_title = QLabel("q-cardIA v0.0.1")
         self.app_title.setProperty("role", "appTitle")
         top_layout.addWidget(self.toggle_sidebar_btn)
+        top_layout.addWidget(self.toggle_series_browser_btn)
         top_layout.addWidget(self.contour_edit_btn)
         top_layout.addWidget(self.add_point_btn)
         top_layout.addWidget(self.remove_point_btn)
@@ -100,6 +107,7 @@ class MainWindow(QMainWindow):
         content_row.setSpacing(0)
         content_row.addWidget(self.sidebar)
         content_row.addWidget(self.display_area_widget, 1)
+        content_row.addWidget(self.series_browser_widget)
         main_v.addLayout(content_row)
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)
@@ -129,6 +137,14 @@ class MainWindow(QMainWindow):
         else:
             self.sidebar.show()
             self.toggle_sidebar_btn.setText("Hide Menu")
+
+    def _on_toggle_series_browser(self, checked):
+        if checked:
+            self.series_browser_widget.hide()
+            self.toggle_series_browser_btn.setText("Show Series Panel")
+        else:
+            self.series_browser_widget.show()
+            self.toggle_series_browser_btn.setText("Hide Series Panel")
 
     def _on_contour_edit_toggled(self, checked):
         self.display_area_widget.set_contour_edit_mode(checked)
