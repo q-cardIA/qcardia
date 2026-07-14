@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pydicom
-import torch
 import yaml
 from qcardia.cardisort import (
     classify_sequence_dir,
@@ -17,7 +16,6 @@ from qcardia.cardisort import (
 )
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import BaseSeries, CineSeries, LGESeries
-from qcardia_models.models import UNet2d
 
 from view.volume_geometry import VolumeGeometry
 
@@ -100,20 +98,11 @@ class DICOMModel:
 
     def _load_segmentation_model(self):
         wandb_path = Path.cwd() / "wandb"
-        config_path = wandb_path / "files" / "config-copy.yaml"
+        self.cine_wandb_run_path = wandb_path / "cine-seg"
+        self.lge_wandb_run_path = wandb_path / "lge-seg"
 
+        config_path = self.cine_wandb_run_path / "files" / "config-copy.yaml"
         self.config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
-        self.wandb_run_path = wandb_path
-
-        self.seg_model = UNet2d(
-            nr_input_channels=self.config["unet"]["nr_image_channels"],
-            channels_list=self.config["unet"]["channels_list"],
-            nr_output_classes=self.config["unet"]["nr_output_classes"],
-            nr_output_scales=self.config["unet"]["nr_output_scales"],
-        ).to("cpu")
-
-        model_weights = torch.load(wandb_path / "files" / "last_model.pt")
-        self.seg_model.load_state_dict(model_weights)
 
     def load_cine_series(self, folder_path, series_key: str):
         self.series[series_key] = CineSeries(Path(folder_path), batch_size=50)
@@ -185,7 +174,7 @@ class DICOMModel:
         if "LGE_SAX" not in self.series:
             raise ValueError("No LGE data loaded")
 
-        segmentation = self.series["LGE_SAX"].predict_segmentation(self.wandb_run_path)
+        segmentation = self.series["LGE_SAX"].predict_segmentation(self.lge_wandb_run_path)
         seg_arr = np.asarray(segmentation)
 
         if seg_arr.ndim == 4:
@@ -271,7 +260,7 @@ class DICOMModel:
         if cine is None:
             raise ValueError("No DICOM data loaded")
 
-        cine_segmentation = cine.predict_segmentation(self.wandb_run_path)
+        cine_segmentation = cine.predict_segmentation(self.cine_wandb_run_path)
         arr = np.asarray(cine_segmentation)
         dims = arr.shape
 
