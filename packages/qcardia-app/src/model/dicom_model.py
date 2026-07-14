@@ -456,6 +456,16 @@ class DICOMModel:
             )
             return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
 
+    def load_series_for_key(self, seq_dir: Path, key: str) -> dict:
+        if key.startswith("CINE_"):
+            volume, num_frames = self.load_cine_series(seq_dir, key)
+            info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
+        else:
+            volume, _slice_positions = self.load_lge_series(seq_dir, key)
+            info = {"volume": volume, "is_temporal": False, "num_frames": None}
+        info["geometry"] = self.get_geometry(key)
+        return info
+
     def load_patient(self, folder_path) -> PatientLoadResult:
         descriptors = self._describe_patient_folder(folder_path)
         classified = self._group_and_resolve(descriptors)
@@ -463,13 +473,7 @@ class DICOMModel:
         loaded: dict[str, dict] = {}
         for key, seq_dir in classified.items():
             try:
-                if key.startswith("CINE_"):
-                    volume, num_frames = self.load_cine_series(seq_dir, key)
-                    loaded[key] = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
-                else:
-                    volume, _slice_positions = self.load_lge_series(seq_dir, key)
-                    loaded[key] = {"volume": volume, "is_temporal": False, "num_frames": None}
-                loaded[key]["geometry"] = self.get_geometry(key)
+                loaded[key] = self.load_series_for_key(seq_dir, key)
             except Exception as e:
                 logging.warning(f"Failed to load {key} from {seq_dir}: {e}")
 

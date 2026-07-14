@@ -25,6 +25,7 @@ class MainWindow(QMainWindow):
     save_button_signal = Signal()
     time_frame_changed_signal = Signal(int)
     preset_requested_signal = Signal(str)
+    reclassify_requested_signal = Signal(object, str)
 
     def __init__(self):
         super().__init__()
@@ -44,6 +45,9 @@ class MainWindow(QMainWindow):
 
         self.display_area_widget = CentralDisplayAreaWidget(self)
         self.series_browser_widget = SeriesBrowserWidget(self)
+        self.series_browser_widget.reclassify_requested.connect(
+            self.reclassify_requested_signal.emit
+        )
 
         time_controls_container = QWidget()
         time_layout = QHBoxLayout(time_controls_container)

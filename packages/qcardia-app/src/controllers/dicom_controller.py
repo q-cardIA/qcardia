@@ -10,6 +10,7 @@ class DICOMController:
         self.view = view
         self.model = model
         self.current_time_index = 0
+        self._last_result = None
 
         self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
@@ -17,6 +18,7 @@ class DICOMController:
         self.view.save_button_signal.connect(self.save_segmentation)
         self.view.time_frame_changed_signal.connect(self.set_time_frame)
         self.view.preset_requested_signal.connect(self.apply_preset)
+        self.view.reclassify_requested_signal.connect(self.reassign_series)
 
     @property
     def _widget(self):
@@ -44,6 +46,7 @@ class DICOMController:
             if info["is_temporal"]:
                 max_frames = max(max_frames, info["num_frames"])
 
+        self._last_result = result
         self.view.series_browser_widget.populate(self._build_browser_cards(result))
 
         if max_frames:
@@ -56,6 +59,32 @@ class DICOMController:
                 "Cardisort did not recognize any loadable series in this folder; "
                 "showing all detected sequences in the browser.",
             )
+
+    def reassign_series(self, card_info: SeriesCardInfo, new_key: str):
+        if self._last_result is None:
+            return
+        try:
+            info = self.model.load_series_for_key(card_info.path, new_key)
+        except Exception as e:
+            logging.error(f"Reassign failed: {e}")
+            self.view.show_error(
+                "Reassign Failed", f"Could not load this series as {new_key}:\n{e}"
+            )
+            return
+
+        self._widget.register_series(
+            new_key, info["volume"], is_temporal=info["is_temporal"], geometry=info["geometry"]
+        )
+        self._widget.refresh_series(new_key)
+
+        for entry in self._last_result.entries:
+            if entry.path == card_info.path:
+                entry.key, entry.is_primary = new_key, True
+            elif entry.key == new_key:
+                entry.is_primary = False
+
+        self._last_result.loaded[new_key] = info
+        self.view.series_browser_widget.populate(self._build_browser_cards(self._last_result))
 
     def _build_browser_cards(self, result) -> list[SeriesCardInfo]:
         cards = []
@@ -85,6 +114,7 @@ class DICOMController:
                     group=group,
                     thumbnail=thumbnail,
                     draggable=loaded_here,
+                    path=entry.path,
                     series_key=entry.key if loaded_here else None,
                 )
             )

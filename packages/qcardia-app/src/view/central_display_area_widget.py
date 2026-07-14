@@ -270,6 +270,12 @@ class CentralDisplayAreaWidget(QWidget):
         if self.is_series_registered(series_key):
             self.set_panel_series(panel_idx, series_key)
 
+    def refresh_series(self, series_key: str):
+        """Re-render any panel currently showing series_key against its (possibly new) volume."""
+        for i in range(self.n_panels):
+            if self._panel_series_key[i] == series_key:
+                self.set_panel_series(i, series_key, axis=self._panel_axis[i])
+
     def set_segmentation(self, series_key: str, seg_volume: np.ndarray):
         self._segmentations[series_key] = seg_volume
         for i in range(self.n_panels):
