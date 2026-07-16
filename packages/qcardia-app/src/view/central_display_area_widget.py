@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
@@ -330,9 +331,9 @@ class CentralDisplayAreaWidget(QWidget):
             return self._extract_slice(vol, axis, z)
         return None
 
-    def _get_overlay(
+    def _get_contours(
         self, series_key: str, axis: str, z: int, t: int
-    ) -> np.ndarray | None:
+    ) -> list[dict] | None:
         seg = self._segmentations.get(series_key)
         if seg is None:
             return None
@@ -348,9 +349,9 @@ class CentralDisplayAreaWidget(QWidget):
                 seg_2d = seg
             else:
                 return None
-            return _build_seg_overlay(seg_2d)
+            return _extract_segmentation_contours(seg_2d)
         except Exception as e:
-            logging.error("Overlay error for %s: %s", series_key, e)
+            logging.error("Contour error for %s: %s", series_key, e)
             return None
 
     # ── Panel rendering ───────────────────────────────────────────────────
@@ -368,7 +369,10 @@ class CentralDisplayAreaWidget(QWidget):
         if slice_2d is None:
             return
 
-        p.viewer.overlay_data = self._get_overlay(key, axis, z, t)
+        geom = self._geometries.get(key)
+        p.viewer.set_pixel_spacing(geom.pixel_spacing if geom is not None else (1.0, 1.0))
+        p.viewer.set_contour_line_mm(2.5 if key.startswith("LGE") else 2.0)
+        p.viewer.update_contour_paths(self._get_contours(key, axis, z, t))
         p.viewer.update_slice_view(slice_2d)
 
         n = self._n_slices(key, axis)
@@ -469,12 +473,22 @@ def _make_divider(horizontal: bool) -> QLabel:
     return div
 
 
-def _build_seg_overlay(seg_2d: np.ndarray) -> np.ndarray | None:
-    h, w = seg_2d.shape
-    overlay = np.zeros((h, w, 4), dtype=np.uint8)
-    class_colors = {1: (213, 160, 122), 2: (90, 111, 141), 3: (137, 167, 207)}
-    for class_id, (r, g, b) in class_colors.items():
-        mask = seg_2d == class_id
-        if mask.any():
-            overlay[mask] = [r, g, b, 160]
-    return overlay if overlay.any() else None
+def _extract_segmentation_contours(seg_2d: np.ndarray) -> list[dict]:
+    contours = []
+    class_ids = [c for c in np.unique(seg_2d) if c != 0]
+    for class_id in class_ids:
+        mask = (seg_2d == class_id).astype(np.uint8)
+        if not mask.any():
+            continue
+        found, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for contour in found:
+            if len(contour) < 3:
+                continue
+            epsilon = 0.005 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            points = [(float(point[0][1]), float(point[0][0])) for point in approx]
+            if len(points) >= 3:
+                contours.append({"class_id": int(class_id), "points": points})
+    return contours

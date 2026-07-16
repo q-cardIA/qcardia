@@ -54,6 +54,9 @@ class CustomQGraphicsView(QGraphicsView):
         self.right_button_on_hold = False
         self.left_button_on_hold = False
         self.zoom_ratio = 1.0  # Zoom ratio in the range [0.5, 4.0]
+        self._actual_scale = 1.0  # screen pixels per native image pixel, set in update_slice_view
+        self._pixel_spacing_mm = (1.0, 1.0)
+        self._contour_line_mm = 2.0
         self.clicked_right_pos = None
         self.slice = None
         self.display_2d = None
@@ -457,6 +460,7 @@ class CustomQGraphicsView(QGraphicsView):
         fit_scale = max(fit_scale, 1e-6)
         self.zoom_ratio = max(0.5, min(self.zoom_ratio, 4.0))
         actual_scale = fit_scale * self.zoom_ratio
+        self._actual_scale = actual_scale
         scaled_width = max(1, int(round(w * actual_scale)))
         scaled_height = max(1, int(round(h * actual_scale)))
 
@@ -492,6 +496,14 @@ class CustomQGraphicsView(QGraphicsView):
         if self.display_2d is None:
             return
         self.update_slice_view(self.display_2d)
+
+    def set_pixel_spacing(self, spacing):
+        dr, dc = spacing
+        if dr > 0 and dc > 0:
+            self._pixel_spacing_mm = (float(dr), float(dc))
+
+    def set_contour_line_mm(self, mm: float):
+        self._contour_line_mm = float(mm)
 
     def set_edit_mode(self, enabled):
         self.edit_mode = bool(enabled)
@@ -930,7 +942,7 @@ class CustomQGraphicsView(QGraphicsView):
             pen = QPen(
                 self._class_colors.get(contour["class_id"], QColor(255, 255, 255))
             )
-            pen.setWidth(2)
+            pen.setWidthF(self.__contour_pen_width())
             pen.setJoinStyle(Qt.RoundJoin)
             pen.setCapStyle(Qt.RoundCap)
             path_item.setPen(pen)
@@ -956,14 +968,27 @@ class CustomQGraphicsView(QGraphicsView):
         path = self.__build_path(contour)
         self._contour_items[contour_idx]["path"].setPath(path)
 
+    def __contour_pen_width(self) -> float:
+        dr, dc = self._pixel_spacing_mm
+        mm_per_native_pixel = (dr + dc) / 2.0
+        if mm_per_native_pixel <= 0:
+            return 2.0
+        width = self._contour_line_mm * self._actual_scale / mm_per_native_pixel
+        return max(1.0, min(width, 6.0))
+
     def __refresh_contour_geometry(self):
         if not self._contour_items:
             return
+        pen_width = self.__contour_pen_width()
         for idx, contour in enumerate(self._contour_definitions):
             if idx >= len(self._contour_items):
                 continue
             path = self.__build_path(contour)
-            self._contour_items[idx]["path"].setPath(path)
+            item = self._contour_items[idx]["path"]
+            item.setPath(path)
+            pen = item.pen()
+            pen.setWidthF(pen_width)
+            item.setPen(pen)
             for handle in self._contour_items[idx]["handles"]:
                 row, col = contour["points"][handle["point_idx"]]
                 scene_point = self.__image_point_to_scene(col, row)

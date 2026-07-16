@@ -315,11 +315,16 @@ class DICOMModel:
                     x = np.transpose(x, axes)
 
             if x.ndim == 3:
-                return x
+                result = x
             elif x.ndim == 2:
-                return x[np.newaxis, :, :]
+                result = x[np.newaxis, :, :]
             else:
-                return x.reshape(nslices, -1, x.shape[-1])
+                result = x.reshape(nslices, -1, x.shape[-1])
+
+            # qcardia sorts slices descending by position; _process_temporal_volumes
+            # sorts ascending, so reverse here to align segmentation indexing with
+            # the display volume (see predict_lge_segmentation for the same fix).
+            return result[::-1]
 
         self.temporal_segmentations = []
         if tframes and tframes > 1:
