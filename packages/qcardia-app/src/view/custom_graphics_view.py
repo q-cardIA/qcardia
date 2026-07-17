@@ -1051,6 +1051,18 @@ class CustomQGraphicsView(QGraphicsView):
                 + __safe_div(point3.y() - point2.y(), t3 - t2)
             )
 
+            seg_len = __distance(point1, point2)
+
+            def __clamp_tangent(mx, my, seg_len=seg_len):
+                mag = (mx * mx + my * my) ** 0.5
+                if mag > seg_len and mag > 1e-6:
+                    scale = seg_len / mag
+                    return mx * scale, my * scale
+                return mx, my
+
+            m1x, m1y = __clamp_tangent(m1x, m1y)
+            m2x, m2y = __clamp_tangent(m2x, m2y)
+
             control1 = QPointF(point1.x() + (m1x / 3.0), point1.y() + (m1y / 3.0))
             control2 = QPointF(point2.x() - (m2x / 3.0), point2.y() - (m2y / 3.0))
             painter_path.cubicTo(control1, control2, point2)

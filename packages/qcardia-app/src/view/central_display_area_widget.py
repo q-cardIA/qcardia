@@ -109,6 +109,7 @@ class CentralDisplayAreaWidget(QWidget):
         old_keys = list(self._panel_series_key)
         old_axes = list(self._panel_axis)
         old_slices = list(self._panel_slice_idx)
+        old_rows, old_cols = self._grid_rows, self._grid_cols
 
         # Tear down existing layout and panels
         while self._layout.count():
@@ -144,6 +145,14 @@ class CentralDisplayAreaWidget(QWidget):
         for c in range(cols - 1):
             div = _make_divider(horizontal=False)
             self._layout.addWidget(div, 0, 2 * c + 1, 2 * rows - 1, 1)
+
+        # Clear stretch factors left over from the previous grid size, otherwise a
+        # shrink (e.g. viability 2x4 -> functional 2x2) leaves unused rows/cols
+        # from the larger grid still reserving space.
+        for r in range(2 * max(rows, old_rows)):
+            self._layout.setRowStretch(r, 0)
+        for c in range(2 * max(cols, old_cols)):
+            self._layout.setColumnStretch(c, 0)
 
         for r in range(2 * rows):
             self._layout.setRowStretch(r, 1 if r % 2 == 0 else 0)
