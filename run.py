@@ -10,14 +10,15 @@ from qcardia.cardisort import (
     load_series_datasets,
 )
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
+from qcardia.series import LGESeries
 
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cardisort"
-PATH_TO_DATASET = Path.cwd() / "data"
+LGE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-seg"
+PATH_TO_DATASET = Path.cwd() / "data copy"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
 cardisort_model, cardisort_config = load_cardisort_model(CARDISORT_WANDB_RUN_PATH)
-print(patient_list)
 
 for patient in patient_list[:]:
     sequence_dirs = get_sequence_dirs(patient)
@@ -55,11 +56,11 @@ for patient in patient_list[:]:
             summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
         ]
         result = disambiguate_duplicates(class_label, candidates)
-        for assessment in result["assessments"]:
-            print(
-                f"  {class_label}: {assessment['series']} -> "
-                f"{assessment['role']} ({assessment['reasoning']})"
-            )
+        # for assessment in result["assessments"]:
+        #     print(
+        #         f"  {class_label}: {assessment['series']} -> "
+        #         f"{assessment['role']} ({assessment['reasoning']})"
+        #     )
         primary_dir = next(d for d in dirs if d.name == result["primary_series"])
         primary_dirs[primary_dir] = class_label
 
@@ -69,6 +70,17 @@ for patient in patient_list[:]:
         if sequence_name == "CINE"
     ]
 
-    for sequence_dir, (sequence_name, plane_name) in sequence_classifications.items():
-        print(f"{sequence_dir}: {sequence_name}, {plane_name}")
-    print(cine_dirs)
+    db_lge_sax_dirs = [
+        sequence_dir
+        for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
+        if sequence_name == "DBLGE" and plane_name == "SAX"
+    ]
+    for lge_dir in db_lge_sax_dirs:
+        lge_seq = LGESeries(lge_dir)
+        lge_segmentation = lge_seq.predict_segmentation(
+            LGE_SEG_WANDB_RUN_PATH
+        )
+        lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
+        print(f"  {lge_dir} -> {lge_segmentation.shape}")
+
+
