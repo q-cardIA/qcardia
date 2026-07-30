@@ -358,7 +358,11 @@ class CentralDisplayAreaWidget(QWidget):
                 seg_2d = seg
             else:
                 return None
-            return _extract_segmentation_contours(seg_2d)
+            # LGE class 1 = myocardium, class 2 = scar; scar tissue is still
+            # myocardium anatomically, so its contour should include scar pixels
+            # rather than leaving a gap where the wall is scarred.
+            mask_unions = {1: {2}} if series_key.startswith("LGE") else None
+            return _extract_segmentation_contours(seg_2d, mask_unions)
         except Exception as e:
             logging.error("Contour error for %s: %s", series_key, e)
             return None
@@ -482,15 +486,22 @@ def _make_divider(horizontal: bool) -> QLabel:
     return div
 
 
-def _extract_segmentation_contours(seg_2d: np.ndarray) -> list[dict]:
+def _extract_segmentation_contours(
+    seg_2d: np.ndarray, mask_unions: dict[int, set[int]] | None = None
+) -> list[dict]:
     contours = []
+    mask_unions = mask_unions or {}
     class_ids = [c for c in np.unique(seg_2d) if c != 0]
     for class_id in class_ids:
-        mask = (seg_2d == class_id).astype(np.uint8)
+        include_ids = {int(class_id)} | mask_unions.get(int(class_id), set())
+        mask = np.isin(seg_2d, list(include_ids)).astype(np.uint8)
         if not mask.any():
             continue
+        # RETR_CCOMP keeps hole boundaries too, so a ring-shaped mask (e.g. the
+        # myocardium wall around the blood pool) renders both its outer
+        # (epicardial) and inner (endocardial) contour, not just the outer one.
         found, _ = cv2.findContours(
-            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
         )
         for contour in found:
             if len(contour) < 3:
