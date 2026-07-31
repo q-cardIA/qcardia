@@ -4,55 +4,51 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSlider,
     QVBoxLayout,
     QWidget,
 )
 
-from view.CentralDisplayAreaWidget import CentralDisplayAreaWidget
-from view.QuickViewPanelWidget import QuickViewPanelWidget
-from view.SidebarWidget import SidebarWidget
+from view.central_display_area_widget import CentralDisplayAreaWidget
+from view.series_browser_widget import SeriesBrowserWidget
+from view.sidebar_widget import SidebarWidget
 from view.welcome_widget import WelcomeWidget
 
 
 class MainWindow(QMainWindow):
 
-    load_button_signal = Signal(str)
-    load_lge_button_signal = Signal(str)
+    load_patient_button_signal = Signal(str)
     seg_button_signal = Signal()
     lge_seg_button_signal = Signal()
     save_button_signal = Signal()
     time_frame_changed_signal = Signal(int)
+    preset_requested_signal = Signal(str)
+    reclassify_requested_signal = Signal(object, str)
 
     def __init__(self):
         super().__init__()
         self.folder_selected = False
-        # Theme is applied at app startup; build welcome screen first.
         self.welcome_widget = WelcomeWidget(self)
         self.setCentralWidget(self.welcome_widget)
-        # Welcome transitions to analysis UI (data loaded later from left panel)
         self.welcome_widget.transition_signal.connect(self.build_analysis_interface)
-        # Default to full-screen so the welcome layout fills the display
         self.setWindowState(Qt.WindowMaximized)
 
     def build_analysis_interface(self):
-        """Construct analysis UI without loading data."""
-        # Sidebar
         self.sidebar = SidebarWidget(self)
-        self.sidebar.load_requested.connect(self.on_load_button_clicked)
-        self.sidebar.load_image_requested.connect(self.on_load_image_clicked)
+        self.sidebar.load_patient_requested.connect(self.on_load_patient_clicked)
         self.sidebar.predict_requested.connect(self.emit_segmentation_signal)
         self.sidebar.predict_lge_requested.connect(self.emit_lge_segmentation_signal)
         self.sidebar.save_requested.connect(self.emit_save_signal)
+        self.sidebar.preset_requested.connect(self.preset_requested_signal.emit)
 
-        # Central display (3 orthogonal viewers + empty cell)
         self.display_area_widget = CentralDisplayAreaWidget(self)
+        self.series_browser_widget = SeriesBrowserWidget(self)
+        self.series_browser_widget.reclassify_requested.connect(
+            self.reclassify_requested_signal.emit
+        )
 
-        # Quick view results panel (right)
-        self.quick_view_panel = QuickViewPanelWidget(self)
-
-        # Time controls below central area (keep existing semantics)
         time_controls_container = QWidget()
         time_layout = QHBoxLayout(time_controls_container)
         time_layout.setContentsMargins(6, 4, 6, 4)
@@ -68,7 +64,6 @@ class MainWindow(QMainWindow):
         time_layout.addWidget(self.time_label)
         time_layout.addWidget(self.time_slider)
 
-        # Top bar
         self.top_bar = QWidget()
         self.top_bar.setProperty("role", "topBar")
         top_layout = QHBoxLayout(self.top_bar)
@@ -78,6 +73,10 @@ class MainWindow(QMainWindow):
         self.toggle_sidebar_btn.setCheckable(True)
         self.toggle_sidebar_btn.setProperty("role", "sidebarToggle")
         self.toggle_sidebar_btn.toggled.connect(self._on_toggle_sidebar)
+        self.toggle_series_browser_btn = QPushButton("Hide Series Panel")
+        self.toggle_series_browser_btn.setCheckable(True)
+        self.toggle_series_browser_btn.setProperty("role", "sidebarToggle")
+        self.toggle_series_browser_btn.toggled.connect(self._on_toggle_series_browser)
         self.contour_edit_btn = QPushButton("Edit Contours")
         self.contour_edit_btn.setCheckable(True)
         self.contour_edit_btn.setProperty("role", "contourToggle")
@@ -95,13 +94,13 @@ class MainWindow(QMainWindow):
         self.app_title = QLabel("q-cardIA v0.0.1")
         self.app_title.setProperty("role", "appTitle")
         top_layout.addWidget(self.toggle_sidebar_btn)
+        top_layout.addWidget(self.toggle_series_browser_btn)
         top_layout.addWidget(self.contour_edit_btn)
         top_layout.addWidget(self.add_point_btn)
         top_layout.addWidget(self.remove_point_btn)
         top_layout.addWidget(self.app_title)
         top_layout.addStretch(1)
 
-        # Assemble main layout
         central = QWidget()
         main_v = QVBoxLayout(central)
         main_v.setContentsMargins(0, 0, 0, 0)
@@ -112,7 +111,7 @@ class MainWindow(QMainWindow):
         content_row.setSpacing(0)
         content_row.addWidget(self.sidebar)
         content_row.addWidget(self.display_area_widget, 1)
-        content_row.addWidget(self.quick_view_panel)
+        content_row.addWidget(self.series_browser_widget)
         main_v.addLayout(content_row)
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)
@@ -125,25 +124,15 @@ class MainWindow(QMainWindow):
         )  # use Qt dialog to avoid macOS NSOpenPanel crash
         return options
 
-    def on_load_button_clicked(self):
+    def on_load_patient_clicked(self):
         folder_path = QFileDialog.getExistingDirectory(
-            self, "Select Folder", "", self._directory_dialog_options()
+            self, "Select Patient Folder", "", self._directory_dialog_options()
         )
         if not folder_path:
             return
         self.folder_selected = True
         self.sidebar.enable_post_load()
-        self.load_button_signal.emit(folder_path)
-
-    def on_load_image_clicked(self):
-        """Prompt for an LGE folder and emit the selection to controllers."""
-        folder_path = QFileDialog.getExistingDirectory(
-            self, "Select DICOM Folder", "", self._directory_dialog_options()
-        )
-        if not folder_path:
-            return
-
-        self.load_lge_button_signal.emit(folder_path)
+        self.load_patient_button_signal.emit(folder_path)
 
     def _on_toggle_sidebar(self, checked):
         if checked:
@@ -153,9 +142,15 @@ class MainWindow(QMainWindow):
             self.sidebar.show()
             self.toggle_sidebar_btn.setText("Hide Menu")
 
+    def _on_toggle_series_browser(self, checked):
+        if checked:
+            self.series_browser_widget.hide()
+            self.toggle_series_browser_btn.setText("Show Series Panel")
+        else:
+            self.series_browser_widget.show()
+            self.toggle_series_browser_btn.setText("Hide Series Panel")
+
     def _on_contour_edit_toggled(self, checked):
-        if not hasattr(self, "display_area_widget"):
-            return
         self.display_area_widget.set_contour_edit_mode(checked)
         self.contour_edit_btn.setText(
             "Editing Contours" if checked else "Edit Contours"
@@ -168,8 +163,6 @@ class MainWindow(QMainWindow):
             self.display_area_widget.set_contour_edit_tool("move")
 
     def _on_add_point_toggled(self, checked):
-        if not hasattr(self, "display_area_widget"):
-            return
         if checked:
             self.remove_point_btn.setChecked(False)
             self.display_area_widget.set_contour_edit_tool("add")
@@ -177,70 +170,11 @@ class MainWindow(QMainWindow):
             self.display_area_widget.set_contour_edit_tool("move")
 
     def _on_remove_point_toggled(self, checked):
-        if not hasattr(self, "display_area_widget"):
-            return
         if checked:
             self.add_point_btn.setChecked(False)
             self.display_area_widget.set_contour_edit_tool("remove")
         elif not self.add_point_btn.isChecked():
             self.display_area_widget.set_contour_edit_tool("move")
-
-    def update_display(self, image_stack, slice_positions=None):
-        """Update display with new image stack, centering the view."""
-        if hasattr(self, "display_area_widget"):
-            self.display_area_widget.displayed_image = image_stack
-            self.display_area_widget.displayed_image_uid = None
-            center_indices = [
-                image_stack.shape[0] // 2,
-                image_stack.shape[1] // 2,
-                image_stack.shape[2] // 2,
-            ]
-            self.display_area_widget.point_clicker_position = center_indices
-            if (
-                slice_positions is not None
-                and len(slice_positions) == image_stack.shape[0]
-            ):
-                self.display_area_widget.primary_slice_positions = [
-                    float(val) for val in slice_positions
-                ]
-            else:
-                self.display_area_widget.primary_slice_positions = None
-            self.display_area_widget.update_viewers_image()
-
-    def update_display_with_position(
-        self, image_stack, preserve_position=False, slice_positions=None
-    ):
-        """Update display, optionally preserving crosshair position."""
-        if hasattr(self, "display_area_widget"):
-            da = self.display_area_widget
-
-            if preserve_position:
-                # Get current position and clamp to new volume bounds
-                pos = getattr(da, "point_clicker_position", [0, 0, 0])
-                x = min(max(0, pos[0]), image_stack.shape[0] - 1)
-                y = min(max(0, pos[1]), image_stack.shape[1] - 1)
-                z = min(max(0, pos[2]), image_stack.shape[2] - 1)
-                da.displayed_image = image_stack
-                da.point_clicker_position = [x, y, z]
-            else:
-                # Center the view
-                center_indices = [
-                    image_stack.shape[0] // 2,
-                    image_stack.shape[1] // 2,
-                    image_stack.shape[2] // 2,
-                ]
-                da.displayed_image = image_stack
-                da.point_clicker_position = center_indices
-
-            da.displayed_image_uid = None
-            if (
-                slice_positions is not None
-                and len(slice_positions) == image_stack.shape[0]
-            ):
-                da.primary_slice_positions = [float(val) for val in slice_positions]
-            else:
-                da.primary_slice_positions = None
-            da.update_viewers_image()
 
     def has_folder_been_selected(self):
         return self.folder_selected
@@ -257,18 +191,33 @@ class MainWindow(QMainWindow):
             self.save_button_signal.emit()
 
     def update_time_slider_range(self, num_frames):
-        """Update the time slider to reflect the number of temporal frames."""
-        if hasattr(self, "time_slider"):
-            self.time_slider.setMaximum(num_frames - 1)
-            self.time_slider.setValue(0)
-            self.time_slider.setEnabled(num_frames > 1)
-            self.time_label.setText(f"Time Frame: 1 / {num_frames}")
+        self.time_slider.setMaximum(num_frames - 1)
+        self.time_slider.setValue(0)
+        self.time_slider.setEnabled(num_frames > 1)
+        self.time_label.setText(f"Time Frame: 1 / {num_frames}")
 
     def on_time_slider_changed(self, value):
-        """Handle time slider changes and update the display."""
-        if hasattr(self, "time_slider") and hasattr(self, "time_label"):
-            max_val = self.time_slider.maximum()
-            self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}")
-            # Emit signal to controller to update the displayed volume
-            if hasattr(self, "time_frame_changed_signal"):
-                self.time_frame_changed_signal.emit(value)
+        max_val = self.time_slider.maximum()
+        self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}")
+        self.time_frame_changed_signal.emit(value)
+
+    def show_error(self, title, message):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()
+
+    def show_warning(self, title, message):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()
+
+    def show_info(self, title, message):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()

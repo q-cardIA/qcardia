@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
 
+
 def _rgb(r, g, b) -> QColor:
     return QColor(r, g, b)
 
@@ -36,8 +37,7 @@ def apply_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
     app.setPalette(_build_palette())
 
-    # Load any Inter TTF files found in assets/fonts/
-    assets = Path(__file__).parent.parent / "assets" / "fonts"
+    assets = Path(__file__).parent.parent.parent / "assets" / "fonts"
     family = None
     for ttf in sorted(assets.glob("Inter*.ttf")):
         fid = QFontDatabase.addApplicationFont(str(ttf))

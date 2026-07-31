@@ -17,10 +17,9 @@ dependencies = [
     "qcardia-data",
     "qcardia-models",
     "qcardia",
-    "opencv-python>=4.11.0.86",
 ]
 
 [tool.uv.sources]
 qcardia-data = { git = "https://github.com/q-cardIA/qcardia-data.git" }
 qcardia-models = { git = "https://github.com/q-cardIA/qcardia-models.git" }
-qcardia = { git = "https://github.com/q-cardIA/qcardia.git" }
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git", rev = "62a8555" }

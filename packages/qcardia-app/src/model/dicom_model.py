@@ -1,84 +1,128 @@
+from __future__ import annotations
+
 import logging
-import os
+from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pydicom
-import torch
 import yaml
-from qcardia.series import CineSeries, LGESeries
-from qcardia_models.models import UNet2d
-from scipy.ndimage import zoom
+from qcardia.cardisort import (
+    classify_sequence_dir,
+    get_sequence_dirs,
+    load_cardisort_model,
+    load_series_datasets,
+)
+from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
+from qcardia.series import BaseSeries, CineSeries, LGESeries
+
+from view.volume_geometry import VolumeGeometry
+
+CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
+CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
+
+
+@dataclass
+class SequenceDescriptor:
+    path: Path
+    sequence_name: str | None
+    plane_name: str | None
+    key: str | None
+    is_primary: bool = False
+
+
+@dataclass
+class PatientLoadResult:
+    loaded: dict[str, dict]
+    entries: list[SequenceDescriptor]
+
+
+def read_disk_thumbnail(seq_dir: Path, prefer_first_file: bool) -> np.ndarray | None:
+    """Representative 2D uint8 slice read directly from disk, for series never loaded as a volume."""
+    dcm_files = sorted(
+        f for f in seq_dir.rglob("*") if f.is_file() and not f.name.startswith(".")
+    )
+    if not dcm_files:
+        return None
+    pick = dcm_files[0] if prefer_first_file else dcm_files[len(dcm_files) // 2]
+    try:
+        ds = pydicom.dcmread(str(pick))
+        arr = ds.pixel_array.astype(np.float32)
+    except Exception:
+        return None
+
+    if arr.ndim == 3:  # multi-frame DICOM: take the middle frame
+        arr = arr[arr.shape[0] // 2]
+
+    slope = float(getattr(ds, "RescaleSlope", 1) or 1)
+    intercept = float(getattr(ds, "RescaleIntercept", 0) or 0)
+    arr = arr * slope + intercept  # window tags reference rescaled values, so this must come first
+
+    if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
+        arr = arr.max() - arr  # MONOCHROME1: stored values are inverted
+
+    try:
+        wc_raw, ww_raw = getattr(ds, "WindowCenter", None), getattr(ds, "WindowWidth", None)
+        if wc_raw is None or ww_raw is None:
+            raise ValueError
+        wc = float(wc_raw[0]) if hasattr(wc_raw, "__len__") else float(wc_raw)
+        ww = float(ww_raw[0]) if hasattr(ww_raw, "__len__") else float(ww_raw)
+        if ww <= 0:
+            raise ValueError
+        lo = wc - ww / 2.0
+        arr = np.clip(arr, lo, lo + ww)
+        arr = (arr - lo) / ww * 255.0
+    except Exception:
+        p_lo, p_hi = np.percentile(arr, 2), np.percentile(arr, 98)
+        if p_hi > p_lo:
+            arr = np.clip(arr, p_lo, p_hi)
+            arr = (arr - p_lo) / (p_hi - p_lo) * 255.0
+        else:
+            arr = np.zeros_like(arr)
+
+    return arr.astype(np.uint8)
 
 
 class DICOMModel:
     def __init__(self):
-        self.dicom_files = []
-        self.cine_seq = None
-        self.lge_seq = None
+        self.series: dict[str, BaseSeries] = {}
         self.folder_path = None
         self.temporal_volumes = []
         self.temporal_segmentations = []
         self.num_time_frames = 0
         self.slice_positions = []
-        self.lge_slice_positions = []
-        self.lge_segmentation_volume = None
-
-        # Load segmentation model
+        self._cardisort_model = None
+        self._cardisort_config = None
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
-        """Load the UNet2d segmentation model."""
         wandb_path = Path.cwd() / "wandb"
-        config_path = wandb_path / "files" / "config-copy.yaml"
+        self.cine_wandb_run_path = wandb_path / "cine-seg"
+        self.lge_wandb_run_path = wandb_path / "lge-seg"
 
+        config_path = self.cine_wandb_run_path / "files" / "config-copy.yaml"
         self.config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
-        self.wandb_run_path = wandb_path
 
-        self.seg_model = UNet2d(
-            nr_input_channels=self.config["unet"]["nr_image_channels"],
-            channels_list=self.config["unet"]["channels_list"],
-            nr_output_classes=self.config["unet"]["nr_output_classes"],
-            nr_output_scales=self.config["unet"]["nr_output_scales"],
-        ).to("cpu")
+    def load_cine_series(self, folder_path, series_key: str):
+        self.series[series_key] = CineSeries(Path(folder_path), batch_size=50)
+        if series_key == "CINE_SAX":
+            self.folder_path = Path(folder_path)
+        return self._process_temporal_volumes(series_key)
 
-        model_weights = torch.load(wandb_path / "files" / "last_model.pt")
-        self.seg_model.load_state_dict(model_weights)
+    def load_lge_series(self, folder_path, series_key: str):
+        self.series[series_key] = LGESeries(Path(folder_path))
+        return self._build_lge_volume(series_key)
 
-    def load_dicom_files(self, folder_path):
-        """Load DICOM files and create CineSeries."""
-        self.folder_path = Path(folder_path)
-        self.dicom_files = []
-
-        for root, dirs, files in os.walk(folder_path):
-            for file in files:
-                if file.lower().endswith(".dcm"):
-                    file_path = os.path.join(root, file)
-                    try:
-                        dicom_data = pydicom.read_file(file_path)
-                        self.dicom_files.append(dicom_data)
-                    except Exception as e:
-                        print(f"Error reading DICOM file '{file_path}': {e}")
-
-        # Create CineSeries for processing
-        self.cine_seq = CineSeries(Path(folder_path), batch_size=200)
-
-    def load_lge_series(self, folder_path):
-        """Load an LGE stack via LGESeries and return a normalized volume."""
-        self.lge_seq = LGESeries(Path(folder_path))
-        volume, slice_positions = self._build_lge_volume()
-        self.lge_slice_positions = slice_positions
-        self.lge_segmentation_volume = None
-        return volume, slice_positions
-
-    def _build_lge_volume(self):
-        if self.lge_seq is None:
+    def _build_lge_volume(self, series_key: str):
+        lge = self.series.get(series_key)
+        if lge is None:
             raise ValueError("No LGE data loaded")
 
         slice_entries = []
-        for idx in range(self.lge_seq.number_of_slices):
+        for idx in range(lge.number_of_slices):
             key = f"slice{idx+1:02}"
-            slice_info = self.lge_seq.slice_data.get(key)
+            slice_info = lge.slice_data.get(key)
             if not slice_info:
                 continue
             try:
@@ -127,11 +171,10 @@ class DICOMModel:
         return (scaled * 255.0).astype(np.uint8)
 
     def predict_lge_segmentation(self):
-        """Run segmentation for the loaded LGE stack."""
-        if self.lge_seq is None:
+        if "LGE_SAX" not in self.series:
             raise ValueError("No LGE data loaded")
 
-        segmentation = self.lge_seq.predict_segmentation(self.wandb_run_path)
+        segmentation = self.series["LGE_SAX"].predict_segmentation(self.lge_wandb_run_path)
         seg_arr = np.asarray(segmentation)
 
         if seg_arr.ndim == 4:
@@ -145,60 +188,51 @@ class DICOMModel:
 
         # qcardia sorts slices descending by position; _build_lge_volume sorts ascending,
         # so reverse here to align segmentation indexing with the display volume.
-        self.lge_segmentation_volume = seg_arr[::-1].astype(np.uint8)
-        return self.lge_segmentation_volume
+        return seg_arr[::-1].astype(np.uint8)
 
     def apply_window(self, image, center, width):
-        """Apply window/level to image for display."""
         min_val = center - width / 2
         max_val = center + width / 2
         windowed = np.clip(image, min_val, max_val)
         windowed = ((windowed - min_val) / (max_val - min_val) * 255).astype(np.uint8)
         return windowed
 
-    def process_temporal_volumes(self):
-        """Load and process all temporal frames from the cine sequence."""
-        if self.cine_seq is None:
+    def _process_temporal_volumes(self, series_key: str):
+        cine = self.series.get(series_key)
+        if cine is None:
             raise ValueError("No DICOM data loaded")
 
-        # Get window settings from first slice
-        center = float(self.cine_seq.slice_data["slice01"]["meta_data"][0].WindowCenter)
-        width = float(self.cine_seq.slice_data["slice01"]["meta_data"][0].WindowWidth)
+        center = float(cine.slice_data["slice01"]["meta_data"][0].WindowCenter)
+        width = float(cine.slice_data["slice01"]["meta_data"][0].WindowWidth)
 
-        # Get number of temporal frames
-        first_key = sorted(self.cine_seq.slice_data.keys())[0]
-        self.num_time_frames = len(self.cine_seq.slice_data[first_key]["pixel_array"])
+        first_key = sorted(cine.slice_data.keys())[0]
+        num_time_frames = len(cine.slice_data[first_key]["pixel_array"])
 
-        # Sort slices by their physical position so scrolling respects anatomy
         slice_entries = []
-        for idx, key in enumerate(sorted(self.cine_seq.slice_data.keys())):
-            slice_meta = self.cine_seq.slice_data[key]["meta_data"][0]
+        for idx, key in enumerate(sorted(cine.slice_data.keys())):
+            slice_meta = cine.slice_data[key]["meta_data"][0]
             position = self._extract_slice_position(slice_meta, idx)
-            slice_entries.append(
-                (position, self.cine_seq.slice_data[key]["pixel_array"])
-            )
+            slice_entries.append((position, cine.slice_data[key]["pixel_array"]))
 
         slice_entries.sort(key=lambda item: item[0])
-        self.slice_positions = [float(entry[0]) for entry in slice_entries]
+        slice_positions = [float(entry[0]) for entry in slice_entries]
 
-        # Build temporal volumes
-        self.temporal_volumes = []
-        zoom_factors = [1.0, 1.0, 1.0]
-
-        for time_idx in range(self.num_time_frames):
+        temporal_volumes = []
+        for time_idx in range(num_time_frames):
             slices = [entry[1][time_idx] for entry in slice_entries]
             image_stack = np.stack(slices, axis=0)
-            stack_resampled = self.apply_window(
-                zoom(image_stack, zoom_factors, order=1), center, width
-            )
-            self.temporal_volumes.append(stack_resampled)
+            temporal_volumes.append(self.apply_window(image_stack, center, width))
 
-        return self.temporal_volumes, self.num_time_frames
+        if series_key == "CINE_SAX":
+            self.num_time_frames = num_time_frames
+            self.slice_positions = slice_positions
+            self.temporal_volumes = temporal_volumes
+
+        volume_4d = np.stack(temporal_volumes, axis=0)
+        return volume_4d, num_time_frames
 
     @staticmethod
     def _extract_slice_position(meta, fallback_index):
-        """Compute a scalar slice position along the slice normal."""
-
         try:
             ipp = np.array(meta.ImagePositionPatient, dtype=float)
             iop = np.array(meta.ImageOrientationPatient, dtype=float)
@@ -222,19 +256,17 @@ class DICOMModel:
         return float(fallback_index)
 
     def predict_segmentation(self):
-        """Run segmentation prediction and organize results by time frame."""
-        if self.cine_seq is None:
+        cine = self.series.get("CINE_SAX")
+        if cine is None:
             raise ValueError("No DICOM data loaded")
 
-        cine_segmentation = self.cine_seq.predict_segmentation(self.wandb_run_path)
+        cine_segmentation = cine.predict_segmentation(self.cine_wandb_run_path)
         arr = np.asarray(cine_segmentation)
         dims = arr.shape
 
-        # Identify axes
-        nslices = len(sorted(self.cine_seq.slice_data.keys()))
+        nslices = len(sorted(cine.slice_data.keys()))
         tframes = self.num_time_frames if self.num_time_frames else None
 
-        # Find optional scale axis
         scale_axis = None
         try:
             n_scales = int(self.config["unet"]["nr_output_scales"])
@@ -243,7 +275,6 @@ class DICOMModel:
         except Exception:
             scale_axis = None
 
-        # Helper to extract 3D volume for a time index
         def extract_ZHW_at_time(time_idx: int) -> np.ndarray:
             x = arr
             if scale_axis is not None and 0 <= scale_axis < x.ndim:
@@ -284,13 +315,17 @@ class DICOMModel:
                     x = np.transpose(x, axes)
 
             if x.ndim == 3:
-                return x
+                result = x
             elif x.ndim == 2:
-                return x[np.newaxis, :, :]
+                result = x[np.newaxis, :, :]
             else:
-                return x.reshape(nslices, -1, x.shape[-1])
+                result = x.reshape(nslices, -1, x.shape[-1])
 
-        # Extract per-time segmentations
+            # qcardia sorts slices descending by position; _process_temporal_volumes
+            # sorts ascending, so reverse here to align segmentation indexing with
+            # the display volume (see predict_lge_segmentation for the same fix).
+            return result[::-1]
+
         self.temporal_segmentations = []
         if tframes and tframes > 1:
             for t in range(tframes):
@@ -313,16 +348,127 @@ class DICOMModel:
 
         return self.temporal_segmentations
 
+    def get_geometry(self, series_key: str) -> VolumeGeometry | None:
+        series = self.series.get(series_key)
+        if series is None:
+            return None
+        try:
+            slice_entries = []
+            for idx, key in enumerate(sorted(series.slice_data.keys())):
+                meta = series.slice_data[key]["meta_data"][0]
+                position = self._extract_slice_position(meta, idx)
+                slice_entries.append((position, meta))
+            slice_entries.sort(key=lambda x: x[0])
+            return VolumeGeometry.from_dicom_slices([m for _, m in slice_entries])
+        except Exception:
+            return None
+
     def save_segmentation(self, output_path=None):
-        """Save segmentation predictions to disk."""
-        if self.cine_seq is None:
+        cine = self.series.get("CINE_SAX")
+        if cine is None:
             raise ValueError("No DICOM data loaded")
 
-        if not hasattr(self.cine_seq, "_segmentation_prediction"):
+        if not hasattr(cine, "_segmentation_prediction"):
             raise ValueError("No segmentation to save")
 
         if output_path is None:
             output_path = self.folder_path.parent / "results" / self.folder_path.name
 
-        self.cine_seq.save_predictions(Path(output_path))
+        cine.save_predictions(Path(output_path))
         return output_path
+
+    def _get_cardisort_model(self):
+        if self._cardisort_model is None:
+            cardisort_wandb_path = Path.cwd() / "wandb" / "cardisort"
+            self._cardisort_model, self._cardisort_config = load_cardisort_model(
+                cardisort_wandb_path
+            )
+        return self._cardisort_model, self._cardisort_config
+
+    def _describe_patient_folder(self, folder_path) -> list[SequenceDescriptor]:
+        model, config = self._get_cardisort_model()
+        sequence_dirs = get_sequence_dirs(Path(folder_path))
+
+        descriptors = []
+        for seq_dir in sequence_dirs:
+            prediction = classify_sequence_dir(
+                seq_dir,
+                model,
+                config["model"]["nr_input_channels"],
+                tuple(config["data"]["target_pixdim"]),
+                tuple(config["data"]["target_size"]),
+                config["data"]["image_grid_sample_mode"],
+            )
+            if prediction is None:
+                descriptors.append(SequenceDescriptor(seq_dir, None, None, None))
+                continue
+
+            sequence_name, plane_name = prediction
+            prefix = CARDISORT_SEQUENCE_TO_PREFIX.get(sequence_name)
+            key = (
+                f"{prefix}_{plane_name}"
+                if prefix is not None and plane_name in CARDISORT_SUPPORTED_PLANES
+                else None
+            )
+            descriptors.append(SequenceDescriptor(seq_dir, sequence_name, plane_name, key))
+
+        return descriptors
+
+    def _group_and_resolve(self, descriptors: list[SequenceDescriptor]) -> dict[str, Path]:
+        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
+        for d in descriptors:
+            if d.key is not None:
+                dirs_by_key[d.key].append(d)
+
+        classified: dict[str, Path] = {}
+        for key, group in dirs_by_key.items():
+            primary = self._resolve_primary_dir(key, [d.path for d in group])
+            classified[key] = primary
+            for d in group:
+                d.is_primary = d.path == primary
+
+        return classified
+
+    def classify_patient_folder(self, folder_path) -> dict[str, Path]:
+        return self._group_and_resolve(self._describe_patient_folder(folder_path))
+
+    def _resolve_primary_dir(self, key: str, dirs: list[Path]) -> Path:
+        if len(dirs) == 1:
+            return dirs[0]
+
+        prefix, _, plane_name = key.partition("_")
+        try:
+            candidates = [
+                summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
+            ]
+            result = disambiguate_duplicates((prefix, plane_name), candidates)
+            return next(d for d in dirs if d.name == result["primary_series"])
+        except Exception as e:
+            logging.warning(
+                f"Disambiguation failed for {key} ({[d.name for d in dirs]}): {e}; "
+                "falling back to largest series"
+            )
+            return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
+
+    def load_series_for_key(self, seq_dir: Path, key: str) -> dict:
+        if key.startswith("CINE_"):
+            volume, num_frames = self.load_cine_series(seq_dir, key)
+            info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
+        else:
+            volume, _slice_positions = self.load_lge_series(seq_dir, key)
+            info = {"volume": volume, "is_temporal": False, "num_frames": None}
+        info["geometry"] = self.get_geometry(key)
+        return info
+
+    def load_patient(self, folder_path) -> PatientLoadResult:
+        descriptors = self._describe_patient_folder(folder_path)
+        classified = self._group_and_resolve(descriptors)
+
+        loaded: dict[str, dict] = {}
+        for key, seq_dir in classified.items():
+            try:
+                loaded[key] = self.load_series_for_key(seq_dir, key)
+            except Exception as e:
+                logging.warning(f"Failed to load {key} from {seq_dir}: {e}")
+
+        return PatientLoadResult(loaded=loaded, entries=descriptors)
