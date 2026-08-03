@@ -101,6 +101,23 @@ class CentralDisplayAreaWidget(QWidget):
     def n_panels(self) -> int:
         return self._grid_rows * self._grid_cols
 
+    @property
+    def grid_size(self) -> tuple[int, int]:
+        return self._grid_rows, self._grid_cols
+
+    def panel_assignments(self) -> list[dict]:
+        """Per-panel state (series key, axis, whether a segmentation exists) —
+        used by the chat assistant to describe the current layout."""
+        return [
+            {
+                "idx": i,
+                "series_key": self._panel_series_key[i],
+                "axis": self._panel_axis[i],
+                "has_segmentation": self._panel_series_key[i] in self._segmentations,
+            }
+            for i in range(self.n_panels)
+        ]
+
     def set_grid_size(self, rows: int, cols: int):
         if rows == self._grid_rows and cols == self._grid_cols:
             return

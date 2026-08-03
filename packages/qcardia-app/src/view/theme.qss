@@ -343,6 +343,9 @@ QPushButton[role="sidebarButton"]:pressed {
 	background-color: rgb(189, 147, 249);
 	color: rgb(255, 255, 255);
 }
+QPushButton[role="sidebarButton"][busy="true"] {
+	color: rgb(27, 29, 35);
+}
 
 QPushButton[role="sidebarSubButton"] {
 	background-color: transparent;
@@ -404,6 +407,71 @@ QWidget#centralDisplayArea {
 QWidget[role="viewerCard"] {
 	background-color: rgb(33, 37, 43);
 	border: 1px solid rgb(44, 49, 58);
+}
+
+QWidget[role="loadingOverlay"] {
+	background-color: rgba(27, 29, 35, 210);
+}
+QLabel[role="loadingOverlayLabel"] {
+	color: rgb(221, 221, 221);
+	font-size: 12px;
+}
+
+/* ---- Chat bubbles ---------------------------------------------- */
+QFrame[role="chatBubbleUser"] {
+	background-color: rgb(189, 147, 249);
+	border-radius: 8px;
+}
+QFrame[role="chatBubbleUser"] QLabel {
+	color: rgb(27, 29, 35);
+	font-size: 11px;
+}
+QFrame[role="chatBubbleAssistant"] {
+	background-color: rgb(40, 44, 52);
+	border: 1px solid rgb(44, 49, 58);
+	border-radius: 8px;
+}
+QFrame[role="chatBubbleAssistant"] QLabel {
+	color: rgb(221, 221, 221);
+	font-size: 11px;
+}
+QFrame[role="chatBubbleSystem"] {
+	background-color: transparent;
+}
+QFrame[role="chatBubbleSystem"] QLabel {
+	color: rgb(120, 128, 140);
+	font-size: 10px;
+	font-style: italic;
+}
+QFrame[role="chatBubbleTool"] {
+	background-color: rgb(33, 37, 43);
+	border: 1px solid rgb(44, 49, 60);
+	border-radius: 8px;
+}
+QFrame[role="chatBubbleTool"][status="error"] {
+	border: 1px solid rgb(255, 121, 198);
+}
+QPushButton[role="toolCallHeader"] {
+	background-color: transparent;
+	border: none;
+	color: palette(highlight);
+	font-family: Consolas, "Courier New", monospace;
+	font-size: 11px;
+	text-align: left;
+	padding: 0px;
+}
+QPushButton[role="toolCallHeader"]:hover {
+	color: palette(bright-text);
+}
+QLabel[role="toolCallDetail"] {
+	color: rgb(120, 128, 140);
+	font-family: Consolas, "Courier New", monospace;
+	font-size: 10px;
+}
+QLabel[role="toolCallResult"] {
+	color: rgb(255, 121, 198);
+	font-size: 10px;
+	font-style: italic;
 }
 
 QLabel[role="viewerTitle"] {

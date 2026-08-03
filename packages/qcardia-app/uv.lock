@@ -3144,6 +3144,7 @@ dependencies = [
     { name = "qcardia" },
     { name = "qcardia-data" },
     { name = "qcardia-models" },
+    { name = "requests" },
     { name = "scipy" },
     { name = "torch" },
 ]
@@ -3157,6 +3158,7 @@ requires-dist = [
     { name = "qcardia", git = "https://github.com/q-cardIA/qcardia.git?rev=62a8555" },
     { name = "qcardia-data", git = "https://github.com/q-cardIA/qcardia-data.git" },
     { name = "qcardia-models", git = "https://github.com/q-cardIA/qcardia-models.git" },
+    { name = "requests", specifier = ">=2.31.0" },
     { name = "scipy", specifier = ">=1.11.4" },
     { name = "torch", specifier = ">=2.3.0" },
 ]
