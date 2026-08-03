@@ -1,4 +1,5 @@
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -7,11 +8,15 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
+from utils.app_config import CHAT_AVAILABLE, ICON_PATH
 from view.central_display_area_widget import CentralDisplayAreaWidget
+from view.chat_widget import ChatWidget
+from view.loading_overlay import LoadingOverlay
 from view.series_browser_widget import SeriesBrowserWidget
 from view.sidebar_widget import SidebarWidget
 from view.welcome_widget import WelcomeWidget
@@ -29,6 +34,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        if ICON_PATH.is_file():
+            self.setWindowIcon(QIcon(str(ICON_PATH)))
         self.folder_selected = False
         self.welcome_widget = WelcomeWidget(self)
         self.setCentralWidget(self.welcome_widget)
@@ -44,10 +51,14 @@ class MainWindow(QMainWindow):
         self.sidebar.preset_requested.connect(self.preset_requested_signal.emit)
 
         self.display_area_widget = CentralDisplayAreaWidget(self)
+        self.loading_overlay = LoadingOverlay(self.display_area_widget)
         self.series_browser_widget = SeriesBrowserWidget(self)
         self.series_browser_widget.reclassify_requested.connect(
             self.reclassify_requested_signal.emit
         )
+        self.chat_widget = ChatWidget(self)
+        screen_width = QGuiApplication.primaryScreen().availableGeometry().width()
+        self.chat_widget.setMaximumWidth(int(screen_width * 0.75))
 
         time_controls_container = QWidget()
         time_layout = QHBoxLayout(time_controls_container)
@@ -77,6 +88,10 @@ class MainWindow(QMainWindow):
         self.toggle_series_browser_btn.setCheckable(True)
         self.toggle_series_browser_btn.setProperty("role", "sidebarToggle")
         self.toggle_series_browser_btn.toggled.connect(self._on_toggle_series_browser)
+        self.toggle_chat_btn = QPushButton("Hide Assistant")
+        self.toggle_chat_btn.setCheckable(True)
+        self.toggle_chat_btn.setProperty("role", "sidebarToggle")
+        self.toggle_chat_btn.toggled.connect(self._on_toggle_chat)
         self.contour_edit_btn = QPushButton("Edit Contours")
         self.contour_edit_btn.setCheckable(True)
         self.contour_edit_btn.setProperty("role", "contourToggle")
@@ -95,6 +110,7 @@ class MainWindow(QMainWindow):
         self.app_title.setProperty("role", "appTitle")
         top_layout.addWidget(self.toggle_sidebar_btn)
         top_layout.addWidget(self.toggle_series_browser_btn)
+        top_layout.addWidget(self.toggle_chat_btn)
         top_layout.addWidget(self.contour_edit_btn)
         top_layout.addWidget(self.add_point_btn)
         top_layout.addWidget(self.remove_point_btn)
@@ -106,15 +122,39 @@ class MainWindow(QMainWindow):
         main_v.setContentsMargins(0, 0, 0, 0)
         main_v.setSpacing(0)
         main_v.addWidget(self.top_bar)
-        content_row = QHBoxLayout()
+        content_row = QSplitter(Qt.Horizontal)
         content_row.setContentsMargins(0, 0, 0, 0)
-        content_row.setSpacing(0)
+        content_row.setHandleWidth(4)
         content_row.addWidget(self.sidebar)
-        content_row.addWidget(self.display_area_widget, 1)
+        content_row.addWidget(self.display_area_widget)
         content_row.addWidget(self.series_browser_widget)
-        main_v.addLayout(content_row)
+        content_row.addWidget(self.chat_widget)
+        content_row.setStretchFactor(1, 1)  # display area absorbs extra space when resizing
+        for i in range(content_row.count()):
+            content_row.setCollapsible(i, False)
+
+        # Give the chat panel a real default width (not just its minimum) so
+        # user message bubbles — capped at a fraction of the panel's own
+        # width — actually have room to grow, rather than defaulting to
+        # sizeHint-thin. sidebar/series_browser are setFixedWidth() in their
+        # own classes (210/200) — use those exact values here too, otherwise
+        # any slack between what we ask for and their real fixed width shows
+        # up as dead, unassigned space in the splitter.
+        # minimumWidth() (not width()) — setFixedWidth() sets it immediately,
+        # while actual widget geometry isn't resolved until the first layout pass.
+        sidebar_width = self.sidebar.minimumWidth()
+        series_width = self.series_browser_widget.minimumWidth()
+        chat_default_width = min(int(screen_width * 0.3), self.chat_widget.maximumWidth())
+        display_width = max(400, screen_width - sidebar_width - series_width - chat_default_width)
+        content_row.setSizes([sidebar_width, display_width, series_width, chat_default_width])
+
+        main_v.addWidget(content_row, 1)
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)
+
+        if not CHAT_AVAILABLE:
+            self.chat_widget.hide()
+            self.toggle_chat_btn.hide()
 
     def _directory_dialog_options(self):
         options = QFileDialog.Options()
@@ -134,6 +174,14 @@ class MainWindow(QMainWindow):
         self.sidebar.enable_post_load()
         self.load_patient_button_signal.emit(folder_path)
 
+    def show_loading(self, text: str):
+        self.sidebar.btn_load_patient.setEnabled(False)
+        self.loading_overlay.show_message(text)
+
+    def hide_loading(self):
+        self.sidebar.btn_load_patient.setEnabled(True)
+        self.loading_overlay.hide_overlay()
+
     def _on_toggle_sidebar(self, checked):
         if checked:
             self.sidebar.hide()
@@ -149,6 +197,14 @@ class MainWindow(QMainWindow):
         else:
             self.series_browser_widget.show()
             self.toggle_series_browser_btn.setText("Hide Series Panel")
+
+    def _on_toggle_chat(self, checked):
+        if checked:
+            self.chat_widget.hide()
+            self.toggle_chat_btn.setText("Show Assistant")
+        else:
+            self.chat_widget.show()
+            self.toggle_chat_btn.setText("Hide Assistant")
 
     def _on_contour_edit_toggled(self, checked):
         self.display_area_widget.set_contour_edit_mode(checked)
