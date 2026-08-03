@@ -158,14 +158,14 @@ class DICOMController:
     def run_segmentation(self):
         if self._seg_worker is not None and self._seg_worker.isRunning():
             return
-        self.view.show_loading("Running segmentation…")
+        self._widget.show_segmentation_loading("CINE_SAX", "Segmenting…")
         self._seg_worker = CallableWorker(self.model.predict_segmentation)
         self._seg_worker.finished_ok.connect(self._on_segmentation_done)
         self._seg_worker.error.connect(self._on_segmentation_error)
         self._seg_worker.start()
 
     def _on_segmentation_done(self, temporal_segmentations):
-        self.view.hide_loading()
+        self._widget.hide_segmentation_loading("CINE_SAX")
         self._seg_worker = None
         if temporal_segmentations:
             seg_4d = np.stack(temporal_segmentations, axis=0)
@@ -182,7 +182,7 @@ class DICOMController:
             )
 
     def _on_segmentation_error(self, exc):
-        self.view.hide_loading()
+        self._widget.hide_segmentation_loading("CINE_SAX")
         self._seg_worker = None
         logging.error(f"Segmentation failed: {exc}")
         self.view.show_error("Segmentation Error", f"Failed to run segmentation:\n{exc}")
@@ -190,19 +190,19 @@ class DICOMController:
     def run_lge_segmentation(self):
         if self._lge_seg_worker is not None and self._lge_seg_worker.isRunning():
             return
-        self.view.show_loading("Running LGE segmentation…")
+        self._widget.show_segmentation_loading("LGE_SAX", "Segmenting…")
         self._lge_seg_worker = CallableWorker(self.model.predict_lge_segmentation)
         self._lge_seg_worker.finished_ok.connect(self._on_lge_segmentation_done)
         self._lge_seg_worker.error.connect(self._on_lge_segmentation_error)
         self._lge_seg_worker.start()
 
     def _on_lge_segmentation_done(self, seg_volume):
-        self.view.hide_loading()
+        self._widget.hide_segmentation_loading("LGE_SAX")
         self._lge_seg_worker = None
         self._widget.set_segmentation("LGE_SAX", seg_volume)
 
     def _on_lge_segmentation_error(self, exc):
-        self.view.hide_loading()
+        self._widget.hide_segmentation_loading("LGE_SAX")
         self._lge_seg_worker = None
         if isinstance(exc, ValueError):
             self.view.show_warning("No LGE Volume", str(exc))
