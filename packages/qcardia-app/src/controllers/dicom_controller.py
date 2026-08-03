@@ -5,7 +5,6 @@ import numpy as np
 
 from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
-from model.patient_load_worker import PatientLoadWorker
 from utils.hanging_protocols import PRESETS, build_perfusion_preset
 from view.series_browser_widget import SeriesCardInfo
 
@@ -39,21 +38,23 @@ class DICOMController:
         assistant to defer any tool calls that depend on this subject being
         loaded until it's actually ready."""
         if self._load_worker is not None and self._load_worker.isRunning():
+            if on_complete:
+                on_complete()
             return
 
         self.view.show_loading(f"Loading {Path(folder_path).name}…")
-        self._load_worker = PatientLoadWorker(self.model, folder_path)
+        self._load_worker = CallableWorker(self.model.load_patient, folder_path)
         self._load_worker.finished_ok.connect(
             lambda result: self._on_patient_loaded(result, on_complete)
         )
-        self._load_worker.error.connect(lambda msg: self._on_patient_load_error(msg, on_complete))
+        self._load_worker.error.connect(lambda exc: self._on_patient_load_error(exc, on_complete))
         self._load_worker.start()
 
-    def _on_patient_load_error(self, message, on_complete=None):
+    def _on_patient_load_error(self, exc, on_complete=None):
         self.view.hide_loading()
         self._load_worker = None
-        logging.error(f"Failed to load patient: {message}")
-        self.view.show_error("Load Error", f"Failed to load patient folder:\n{message}")
+        logging.error(f"Failed to load patient: {exc}")
+        self.view.show_error("Load Error", f"Failed to load patient folder:\n{exc}")
         if on_complete:
             on_complete()
 

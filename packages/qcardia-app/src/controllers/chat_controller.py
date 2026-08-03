@@ -296,12 +296,20 @@ class ChatController:
         self._history: list[dict] = []
         self._worker = None
         self._llm_model = OLLAMA_MODEL
+        self._available_subjects_cache: list[int] | None = None
 
         self.view.chat_widget.message_submitted.connect(self.send_message)
         self.view.chat_widget.model_changed.connect(self._on_model_changed)
 
     def _on_model_changed(self, model_name: str):
         self._llm_model = model_name
+
+    def _available_subjects(self) -> list[int]:
+        """Subject folders rarely change mid-session — cache the disk scan
+        instead of re-running it on every chat turn."""
+        if self._available_subjects_cache is None:
+            self._available_subjects_cache = discover_subject_numbers()
+        return self._available_subjects_cache
 
     def _context_snapshot(self) -> str:
         """Labelled, multi-line block (not a single comma-joined sentence) so
@@ -310,7 +318,7 @@ class ChatController:
         loaded = sorted(self.model.series.keys())
         subject = self.model.folder_path.name if self.model.folder_path else "none"
 
-        available_subjects = discover_subject_numbers()
+        available_subjects = self._available_subjects()
         available_label = _format_ranges(available_subjects) if available_subjects else "none found"
 
         if self.model.num_time_frames:
@@ -367,11 +375,21 @@ class ChatController:
             return  # one turn at a time for this bare version
 
         self._history.append({"role": "user", "content": user_text})
-        self._history = self._history[-(_MAX_HISTORY_TURNS * 2):]
+        self._trim_history()
 
         self.view.chat_widget.set_enabled(False)
         self.view.chat_widget.begin_assistant_message()
         self._start_worker(self._messages_for_request())
+
+    def _trim_history(self):
+        """Keep only the last _MAX_HISTORY_TURNS user turns, cutting only at
+        a user-message boundary. A raw entry-count slice can land between an
+        assistant tool_calls message and its paired tool-result message,
+        sending Ollama a malformed, orphaned half of that pair."""
+        user_indices = [i for i, m in enumerate(self._history) if m["role"] == "user"]
+        if len(user_indices) > _MAX_HISTORY_TURNS:
+            cutoff = user_indices[-_MAX_HISTORY_TURNS]
+            self._history = self._history[cutoff:]
 
     def _build_tools(self) -> list[dict]:
         """Only offer tools whose preconditions are currently met, so the model
