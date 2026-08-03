@@ -1,6 +1,11 @@
 import logging
+from pathlib import Path
 
+import numpy as np
+
+from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
+from model.patient_load_worker import PatientLoadWorker
 from utils.hanging_protocols import PRESETS, build_perfusion_preset
 from view.series_browser_widget import SeriesCardInfo
 
@@ -11,6 +16,9 @@ class DICOMController:
         self.model = model
         self.current_time_index = 0
         self._last_result = None
+        self._load_worker = None
+        self._seg_worker = None
+        self._lge_seg_worker = None
 
         self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
@@ -24,18 +32,41 @@ class DICOMController:
     def _widget(self):
         return self.view.display_area_widget
 
-    def load_patient(self, folder_path):
-        try:
-            result = self.model.load_patient(folder_path)
-        except Exception as e:
-            logging.error(f"Failed to load patient: {e}")
-            self.view.show_error("Load Error", f"Failed to load patient folder:\n{str(e)}")
+    def load_patient(self, folder_path, on_complete=None):
+        """Classify + load a patient folder in the background (cardisort +
+        series loading can take tens of seconds). `on_complete()` is called
+        once loading has finished (success or failure) — used by the chat
+        assistant to defer any tool calls that depend on this subject being
+        loaded until it's actually ready."""
+        if self._load_worker is not None and self._load_worker.isRunning():
             return
+
+        self.view.show_loading(f"Loading {Path(folder_path).name}…")
+        self._load_worker = PatientLoadWorker(self.model, folder_path)
+        self._load_worker.finished_ok.connect(
+            lambda result: self._on_patient_loaded(result, on_complete)
+        )
+        self._load_worker.error.connect(lambda msg: self._on_patient_load_error(msg, on_complete))
+        self._load_worker.start()
+
+    def _on_patient_load_error(self, message, on_complete=None):
+        self.view.hide_loading()
+        self._load_worker = None
+        logging.error(f"Failed to load patient: {message}")
+        self.view.show_error("Load Error", f"Failed to load patient folder:\n{message}")
+        if on_complete:
+            on_complete()
+
+    def _on_patient_loaded(self, result, on_complete=None):
+        self.view.hide_loading()
+        self._load_worker = None
 
         if not result.entries:
             self.view.show_warning(
                 "No Series Found", "No sequence directories found in this folder."
             )
+            if on_complete:
+                on_complete()
             return
 
         max_frames = 0
@@ -59,6 +90,9 @@ class DICOMController:
                 "Cardisort did not recognize any loadable series in this folder; "
                 "showing all detected sequences in the browser.",
             )
+
+        if on_complete:
+            on_complete()
 
     def reassign_series(self, card_info: SeriesCardInfo, new_key: str):
         if self._last_result is None:
