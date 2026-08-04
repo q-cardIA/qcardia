@@ -23,7 +23,7 @@ from qcardia_models.models import UNet2d
 try:
     from qcardia_models.models import ContextUNet2d
 except ImportError:
-    # Only available on qcardia-models-dev's unet-transformer branch. A
+    # Only available on qcardia-models-dev's context-unet branch. A
     # config that requests a context model raises a clear error at
     # model-build time instead; plain UNet2d models are unaffected.
     ContextUNet2d = None
@@ -202,7 +202,7 @@ def build_model(parsed: dict, weights_path: Path, device: str) -> torch.nn.Modul
                 f"Model config requests a context-integrating architecture "
                 f"({parsed['model_name']!r}) but ContextUNet2d is not "
                 f"available. Install qcardia-models-dev on the "
-                f"unet-transformer branch."
+                f"context-unet branch."
             )
         the_model = ContextUNet2d(
             **common_kwargs,
