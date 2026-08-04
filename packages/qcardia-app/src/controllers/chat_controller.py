@@ -175,7 +175,7 @@ _TOOLS = [
                             "Exact series_key of the stack to segment: CINE_SAX or "
                             "LGE_SAX."
                         ),
-                    }
+                    },
                 },
                 "required": ["modality"],
             },
@@ -401,7 +401,11 @@ class ChatController:
             name = tool["function"]["name"]
 
             if name == "run_segmentation":
-                modalities = [key for key in ("CINE_SAX", "LGE_SAX") if key in series]
+                modalities = [
+                    key
+                    for key in ("CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH", "LGE_SAX")
+                    if key in series
+                ]
                 if not modalities:
                     continue
                 tool = copy.deepcopy(tool)
@@ -506,13 +510,16 @@ class ChatController:
         try:
             if name == "run_segmentation":
                 modality = str(arguments.get("modality", "")).upper()
-                if modality == "CINE_SAX":
-                    self.dicom_controller.run_segmentation()
-                    return "Requested CINE_SAX segmentation (check the app for the result or any errors)."
+                if modality in ("CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH"):
+                    self.dicom_controller.run_segmentation(modality)
+                    return f"Requested {modality} segmentation (check the app for the result or any errors)."
                 if modality == "LGE_SAX":
                     self.dicom_controller.run_lge_segmentation()
                     return "Requested LGE_SAX segmentation (check the app for the result or any errors)."
-                return f"Unknown modality '{modality}' — expected 'CINE_SAX' or 'LGE_SAX'."
+                return (
+                    f"Unknown modality '{modality}' — expected 'CINE_SAX', "
+                    f"'CINE_2CH', 'CINE_3CH', 'CINE_4CH' or 'LGE_SAX'."
+                )
 
             if name == "apply_preset":
                 preset_name = str(arguments["preset"])

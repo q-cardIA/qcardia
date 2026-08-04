@@ -561,6 +561,18 @@ QLabel[role="welcomeDescription"] {
 	background-color: transparent;
 }
 
+QLabel[role="welcomeNotice"] {
+	color: rgb(255, 184, 108);
+	font-size: 11px;
+	background-color: transparent;
+}
+
+QCheckBox[role="welcomeToggle"] {
+	color: rgb(113, 126, 149);
+	font-size: 11px;
+	background-color: transparent;
+}
+
 QWidget[role="welcomeSidePanel"] {
 	background-color: rgb(33, 37, 43);
 	border: 1px solid rgb(44, 49, 58);

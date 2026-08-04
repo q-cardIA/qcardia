@@ -42,7 +42,11 @@ def main():
     if CHAT_AVAILABLE:
         # chat_widget only exists after build_analysis_interface() runs, which
         # itself only fires once the welcome screen's transition_signal fires.
+        # assistant_disabled reflects the welcome screen's opt-out toggle,
+        # read at that same point (its checked state isn't final until then).
         def _wire_chat():
+            if main_window.welcome_widget.assistant_disabled:
+                return
             main_window._chat_controller = ChatController(main_window, controller, model)
 
         main_window.welcome_widget.transition_signal.connect(_wire_chat)

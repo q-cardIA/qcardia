@@ -98,11 +98,25 @@ class DICOMModel:
 
     def _load_segmentation_model(self):
         wandb_path = Path.cwd() / "wandb"
-        self.cine_wandb_run_path = wandb_path / "cine-seg"
-        self.lge_wandb_run_path = wandb_path / "lge-seg"
+        # One model directory per series_key. CINE_SAX uses the context-aware
+        # model for now (swap to wandb_path / "CINE_SAX" for the plain one).
+        # CINE_4CH is reused as a stand-in for CINE_2CH/CINE_3CH until
+        # chamber-specific LAx models exist.
+        self._seg_wandb_paths = {
+            "CINE_SAX": wandb_path / "CINE_SAX_context",
+            "CINE_2CH": wandb_path / "CINE_4CH",
+            "CINE_3CH": wandb_path / "CINE_4CH",
+            "CINE_4CH": wandb_path / "CINE_4CH",
+        }
+        self.lge_wandb_run_path = wandb_path / "LGE_SAX"
 
-        config_path = self.cine_wandb_run_path / "files" / "config-copy.yaml"
-        self.config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+        try:
+            config_path = self._seg_wandb_paths["CINE_SAX"] / "files" / "config-copy.yaml"
+            self.config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+        except Exception:
+            # Only used for a best-effort output-shape heuristic in
+            # predict_segmentation (already tolerant of a missing key).
+            self.config = {}
 
     def load_cine_series(self, folder_path, series_key: str):
         self.series[series_key] = CineSeries(Path(folder_path), batch_size=50)
@@ -255,12 +269,13 @@ class DICOMModel:
 
         return float(fallback_index)
 
-    def predict_segmentation(self):
-        cine = self.series.get("CINE_SAX")
+    def predict_segmentation(self, series_key: str = "CINE_SAX"):
+        cine = self.series.get(series_key)
         if cine is None:
-            raise ValueError("No DICOM data loaded")
+            raise ValueError(f"No {series_key} DICOM data loaded")
 
-        cine_segmentation = cine.predict_segmentation(self.cine_wandb_run_path)
+        wandb_run_path = self._seg_wandb_paths[series_key]
+        cine_segmentation = cine.predict_segmentation(wandb_run_path)
         arr = np.asarray(cine_segmentation)
         dims = arr.shape
 

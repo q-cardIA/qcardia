@@ -155,37 +155,43 @@ class DICOMController:
             )
         return cards
 
-    def run_segmentation(self):
+    def run_segmentation(self, series_key: str = "CINE_SAX"):
         if self._seg_worker is not None and self._seg_worker.isRunning():
             return
-        self._widget.show_segmentation_loading("CINE_SAX", "Segmenting…")
-        self._seg_worker = CallableWorker(self.model.predict_segmentation)
-        self._seg_worker.finished_ok.connect(self._on_segmentation_done)
-        self._seg_worker.error.connect(self._on_segmentation_error)
+        self._widget.show_segmentation_loading(series_key, "Segmenting…")
+        self._seg_worker = CallableWorker(self.model.predict_segmentation, series_key)
+        self._seg_worker.finished_ok.connect(
+            lambda result: self._on_segmentation_done(series_key, result)
+        )
+        self._seg_worker.error.connect(
+            lambda exc: self._on_segmentation_error(series_key, exc)
+        )
         self._seg_worker.start()
 
-    def _on_segmentation_done(self, temporal_segmentations):
-        self._widget.hide_segmentation_loading("CINE_SAX")
+    def _on_segmentation_done(self, series_key: str, temporal_segmentations):
+        self._widget.hide_segmentation_loading(series_key)
         self._seg_worker = None
         if temporal_segmentations:
             seg_4d = np.stack(temporal_segmentations, axis=0)
-            self._widget.set_segmentation("CINE_SAX", seg_4d)
+            self._widget.set_segmentation(series_key, seg_4d)
         else:
             logging.error(
-                "CINE segmentation produced no usable output — see earlier "
+                f"{series_key} segmentation produced no usable output — see earlier "
                 "'Failed to extract segmentation for time N' warnings for the cause."
             )
             self.view.show_warning(
                 "Segmentation Empty",
-                "The CINE segmentation model ran but produced no usable output for "
-                "this subject. Check the terminal/log output for details.",
+                f"The {series_key} segmentation model ran but produced no usable "
+                f"output for this subject. Check the terminal/log output for details.",
             )
 
-    def _on_segmentation_error(self, exc):
-        self._widget.hide_segmentation_loading("CINE_SAX")
+    def _on_segmentation_error(self, series_key: str, exc):
+        self._widget.hide_segmentation_loading(series_key)
         self._seg_worker = None
-        logging.error(f"Segmentation failed: {exc}")
-        self.view.show_error("Segmentation Error", f"Failed to run segmentation:\n{exc}")
+        logging.error(f"{series_key} segmentation failed: {exc}")
+        self.view.show_error(
+            "Segmentation Error", f"Failed to run {series_key} segmentation:\n{exc}"
+        )
 
     def run_lge_segmentation(self):
         if self._lge_seg_worker is not None and self._lge_seg_worker.isRunning():

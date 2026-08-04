@@ -21,6 +21,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-qcardia-data = { git = "https://github.com/q-cardIA/qcardia-data.git" }
-qcardia-models = { git = "https://github.com/q-cardIA/qcardia-models.git" }
-qcardia = { git = "https://github.com/q-cardIA/qcardia.git", rev = "62a8555" }
+qcardia-data = { path = "../qcardia-data-dev", editable = true }
+qcardia-models = { path = "../qcardia-models-dev", editable = true }
+qcardia = { path = "../qcardia", editable = true }

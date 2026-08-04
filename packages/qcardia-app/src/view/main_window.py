@@ -152,7 +152,7 @@ class MainWindow(QMainWindow):
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)
 
-        if not CHAT_AVAILABLE:
+        if not CHAT_AVAILABLE or self.welcome_widget.assistant_disabled:
             self.chat_widget.hide()
             self.toggle_chat_btn.hide()
 

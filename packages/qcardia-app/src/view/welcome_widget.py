@@ -3,6 +3,7 @@ import os
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -10,6 +11,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from utils.app_config import CHAT_AVAILABLE
 
 class WelcomeWidget(QWidget):
 
@@ -23,6 +26,14 @@ class WelcomeWidget(QWidget):
         self._build()
         self._size()
         self._connect()
+
+    @property
+    def assistant_disabled(self) -> bool:
+        """True if the AI Assistant should stay off — either the user opted
+        out via the toggle, or Ollama isn't available so there's no toggle."""
+        if self.assistant_disabled_checkbox is None:
+            return True
+        return self.assistant_disabled_checkbox.isChecked()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -115,6 +126,22 @@ class WelcomeWidget(QWidget):
         card_row.addWidget(self.central_label, 4)
         card_row.addStretch(1)
         root.addLayout(card_row)
+
+        self.assistant_disabled_checkbox = None
+        root.addSpacing(16)
+        if not CHAT_AVAILABLE:
+            notice = QLabel("AI Assistant disabled — Ollama not detected.")
+            notice.setProperty("role", "welcomeNotice")
+            notice.setAlignment(Qt.AlignCenter)
+            root.addWidget(notice)
+        else:
+            self.assistant_disabled_checkbox = QCheckBox("Disable AI Assistant")
+            self.assistant_disabled_checkbox.setProperty("role", "welcomeToggle")
+            row = QHBoxLayout()
+            row.addStretch(1)
+            row.addWidget(self.assistant_disabled_checkbox)
+            row.addStretch(1)
+            root.addLayout(row)
 
         root.addStretch(3)
 
