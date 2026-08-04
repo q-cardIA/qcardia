@@ -15,12 +15,10 @@ dependencies = [
     "scipy>=1.11.4",
     "pyyaml>=6.0.1",
     "requests>=2.31.0",
-    "qcardia-data",
-    "qcardia-models",
     "qcardia",
 ]
 
+# qcardia-models/qcardia-data aren't imported here directly — they resolve
+# transitively through qcardia's own dependency spec, so nothing to override.
 [tool.uv.sources]
-qcardia-data = { path = "../qcardia-data-dev", editable = true }
-qcardia-models = { path = "../qcardia-models-dev", editable = true }
-qcardia = { path = "../qcardia", editable = true }
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "apply-cardisort" }
