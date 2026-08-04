@@ -155,9 +155,12 @@ class DICOMController:
             )
         return cards
 
-    def run_segmentation(self, series_key: str = "CINE_SAX"):
+    def run_segmentation(self, series_key: str = "CINE_SAX") -> bool:
+        """Starts segmentation for series_key. Returns False (no-op) if a
+        segmentation is already running — callers must check this instead of
+        assuming the request was actually started."""
         if self._seg_worker is not None and self._seg_worker.isRunning():
-            return
+            return False
         self._widget.show_segmentation_loading(series_key, "Segmenting…")
         self._seg_worker = CallableWorker(self.model.predict_segmentation, series_key)
         self._seg_worker.finished_ok.connect(
@@ -167,6 +170,7 @@ class DICOMController:
             lambda exc: self._on_segmentation_error(series_key, exc)
         )
         self._seg_worker.start()
+        return True
 
     def _on_segmentation_done(self, series_key: str, temporal_segmentations):
         self._widget.hide_segmentation_loading(series_key)
@@ -193,14 +197,16 @@ class DICOMController:
             "Segmentation Error", f"Failed to run {series_key} segmentation:\n{exc}"
         )
 
-    def run_lge_segmentation(self):
+    def run_lge_segmentation(self) -> bool:
+        """Starts LGE segmentation. Returns False (no-op) if one is already running."""
         if self._lge_seg_worker is not None and self._lge_seg_worker.isRunning():
-            return
+            return False
         self._widget.show_segmentation_loading("LGE_SAX", "Segmenting…")
         self._lge_seg_worker = CallableWorker(self.model.predict_lge_segmentation)
         self._lge_seg_worker.finished_ok.connect(self._on_lge_segmentation_done)
         self._lge_seg_worker.error.connect(self._on_lge_segmentation_error)
         self._lge_seg_worker.start()
+        return True
 
     def _on_lge_segmentation_done(self, seg_volume):
         self._widget.hide_segmentation_loading("LGE_SAX")

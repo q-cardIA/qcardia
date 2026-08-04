@@ -110,13 +110,25 @@ class DICOMModel:
         }
         self.lge_wandb_run_path = wandb_path / "LGE_SAX"
 
-        try:
-            config_path = self._seg_wandb_paths["CINE_SAX"] / "files" / "config-copy.yaml"
-            self.config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
-        except Exception:
-            # Only used for a best-effort output-shape heuristic in
-            # predict_segmentation (already tolerant of a missing key).
-            self.config = {}
+        # Only used for a best-effort output-shape heuristic in
+        # predict_segmentation (already tolerant of a missing/absent key) —
+        # falls back to {} if none of these layouts match.
+        self.config = {}
+        cine_sax_path = self._seg_wandb_paths["CINE_SAX"]
+        for config_path in (
+            cine_sax_path / "config-copy.yaml",
+            cine_sax_path / "config.yaml",
+            cine_sax_path / "files" / "config-copy.yaml",
+            cine_sax_path / "files" / "config.yaml",
+        ):
+            if config_path.exists():
+                try:
+                    self.config = yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+                except Exception:
+                    logging.warning(f"Failed to parse {config_path}")
+                break
+        else:
+            logging.warning(f"No config file found under {cine_sax_path}")
 
     def load_cine_series(self, folder_path, series_key: str):
         self.series[series_key] = CineSeries(Path(folder_path), batch_size=50)
