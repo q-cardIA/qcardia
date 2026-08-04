@@ -64,7 +64,8 @@ class CardisortClassifier(nn.Module):
 def load_cardisort_model(wandb_run_path: Path) -> tuple[CardisortClassifier, dict]:
     """Loads a trained CardisortClassifier and its config from a WandB run directory."""
     config_path = wandb_run_path / "files" / "config.yaml"
-    raw_config = yaml.load(config_path.open(), Loader=yaml.FullLoader)
+    with config_path.open() as f:
+        raw_config = yaml.safe_load(f) or {}
     config = {
         k: v["value"] for k, v in raw_config.items() if isinstance(v, dict) and "value" in v
     }
@@ -111,7 +112,14 @@ def load_series_datasets(sequence_dir: Path) -> list[pydicom.Dataset]:
         if str(getattr(ds, "SOPClassUID", "")).startswith(SECONDARY_CAPTURE_SOP_CLASS_PREFIX):
             continue
         datasets.append(ds)
-    datasets.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0)))
+
+    def instance_number(ds: pydicom.Dataset) -> int:
+        try:
+            return int(getattr(ds, "InstanceNumber", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    datasets.sort(key=instance_number)
     return datasets
 
 
@@ -121,7 +129,16 @@ def get_harmonized_pixel_arrays(datasets: list[pydicom.Dataset]) -> list[np.ndar
     qcardia_data fork, which reconciles minor matrix-size differences between
     reconstruction types (e.g. magnitude vs. PSIR, or an interleaved scout)
     within a single series before frame selection."""
-    pixel_arrays = [ds.pixel_array for ds in datasets]
+    pixel_arrays = []
+    for ds in datasets:
+        try:
+            pixel_arrays.append(ds.pixel_array)
+        except Exception:
+            # Corrupt file or unsupported transfer syntax — skip, don't fail the series.
+            continue
+    if not pixel_arrays:
+        raise ValueError("No readable pixel data in series")
+
     dominant_shape = Counter(a.shape for a in pixel_arrays).most_common(1)[0][0]
     return [
         a
@@ -200,17 +217,24 @@ def classify_sequence_dir(
     grid_sample_mode: str,
     verbose: bool = False,
 ) -> tuple[str, str] | None:
-    """Predicts the (sequence, plane) label pair for a sequence directory."""
-    datasets = load_series_datasets(sequence_dir)
-    if not datasets:
-        return None
+    """Predicts the (sequence, plane) label pair for a sequence directory.
+    Returns None (instead of raising) if the series can't be classified, so
+    one malformed series doesn't abort a batch run over many patients."""
+    try:
+        datasets = load_series_datasets(sequence_dir)
+        if not datasets:
+            return None
 
-    input_tensor = build_cardisort_input(
-        datasets, n_channels, target_pixdim, target_size, grid_sample_mode
-    )
-    model.eval()
-    with torch.no_grad():
-        seq_logits, plane_logits = model(input_tensor)
+        input_tensor = build_cardisort_input(
+            datasets, n_channels, target_pixdim, target_size, grid_sample_mode
+        )
+        model.eval()
+        with torch.no_grad():
+            seq_logits, plane_logits = model(input_tensor)
+    except Exception as e:
+        if verbose:
+            print(f"  Skipping {sequence_dir.name}: {e}")
+        return None
 
     seq_probs = torch.softmax(seq_logits, dim=1).squeeze(0)
     plane_probs = torch.softmax(plane_logits, dim=1).squeeze(0)
