@@ -3122,7 +3122,7 @@ wheels = [
 [[package]]
 name = "qcardia"
 version = "0.0.1"
-source = { git = "https://github.com/q-cardIA/qcardia.git?branch=apply-cardisort#d264a998606d34d6a9199728af32ef6cc98fed09" }
+source = { git = "https://github.com/q-cardIA/qcardia.git?branch=apply-cardisort#79650cc120ba9fc138dfcafc938b9537d1d5932b" }
 dependencies = [
     { name = "opencv-python" },
     { name = "qcardia-data" },
