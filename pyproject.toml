@@ -6,9 +6,13 @@ dependencies = [
     "scikit-image==0.22.0",
     "opencv-python==4.10.0.84",
     "requests>=2.31.0",
-    "qcardia-models@git+https://github.com/q-cardIA/qcardia-models",
-    "qcardia-data@git+https://github.com/q-cardIA/qcardia-data"
+    "qcardia-models",
+    "qcardia-data",
 ]
+
+[tool.uv.sources]
+qcardia-models = { path = "../qcardia-models-dev", editable = true }
+qcardia-data = { path = "../qcardia-data-dev", editable = true }
 
 [build-system]
 requires = ["setuptools==69.5.1", "wheel"]

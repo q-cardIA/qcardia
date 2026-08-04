@@ -10,9 +10,10 @@ Classes:
     BaseSeries: A base class for handling sequences of DICOM images.
 """
 
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import cv2
 import nibabel as nib
@@ -65,17 +66,31 @@ class BaseSeries:
         self.rv_insertion_points = [[0, 0], [self.rows, 0]]
         self.lv_center_point = [[self.rows // 2, self.columns // 2]]
 
-    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+    def predict_segmentation(
+        self,
+        wandb_run_path: Path,
+        lax_dicom_dir: Optional[Path] = None,
+        lax_model_path: Optional[Path] = None,
+    ) -> np.ndarray:
         """
         Predict the segmentation for the DICOM data using the specified model.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            lax_dicom_dir (Path, optional): DICOM folder of a 4CH view, used
+                for LA-vector conditioning. Only used if the model config
+                requests it (`model.la_vector_integration`); ignored otherwise.
+            lax_model_path (Path, optional): Model directory for the plain
+                UNet2d used to segment the 4CH view before sampling LA
+                vectors from it. Required alongside `lax_dicom_dir` for
+                LA-conditioned models.
 
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path)
+        self._run_model(
+            wandb_run_path, lax_dicom_dir=lax_dicom_dir, lax_model_path=lax_model_path
+        )
         return self._segmentation_prediction
 
     def save_predictions(self, output_path: Path) -> None:
@@ -98,48 +113,36 @@ class BaseSeries:
             seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
             nib.save(seg_nib, output_path / "segmentation.nii")
 
-    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
+    def _run_model(
+        self,
+        wandb_run_path: Path,
+        image_type: str = "pixel",
+        lax_dicom_dir: Optional[Path] = None,
+        lax_model_path: Optional[Path] = None,
+    ) -> None:
         """
         Runs the model inference on preprocessed slices.
 
+        Model dispatch (plain UNet2d vs. context-integrating ContextUNet2d,
+        chosen from the model config) lives in context_inference.py.
+
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            image_type (str): Type of image array to use ('pixel' or other).
+            lax_dicom_dir (Path, optional): DICOM folder of a 4CH view, for
+                LA-vector conditioning (only used if the config requests it).
+            lax_model_path (Path, optional): Model directory for the plain
+                UNet2d used to segment the 4CH view for LA-vector sampling.
         """
-        preprocessed_slices = self._preproccess_slices(
-            self._get_array(image_type=image_type)
+        from qcardia.context_inference import run_model
+
+        self._segmentation_prediction = run_model(
+            self,
+            wandb_run_path,
+            image_type=image_type,
+            lax_dicom_dir=lax_dicom_dir,
+            lax_model_path=lax_model_path,
         )
-        config = self._get_config(wandb_run_path)
-
-        self.inference_dict["target_pixdim"] = torch.tensor(
-            config["data"]["target_pixdim"]
-        )
-        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
-
-        self.inference_dict["grid_sample_modes"] = [
-            config["data"]["image_grid_sample_mode"]
-        ]
-        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
-        the_model = UNet2d(
-            nr_input_channels=config["unet"]["nr_image_channels"],
-            channels_list=config["unet"]["channels_list"],
-            nr_output_classes=config["unet"]["nr_output_classes"],
-            nr_output_scales=config["unet"]["nr_output_scales"],
-        ).to("cpu")
-        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
-        the_model.load_state_dict(model_weights)
-
-        self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
-            self._rescale_tensor(preprocessed_slices)
-        )
-        standardised_tensor = utils.standardise(rescaled_tensor)
-        model_output = self._forward_model(the_model, standardised_tensor)
-
-        rescale_model_output = self._invert_rescale_tensor(model_output)
-        model_prediction = torch.argmax(
-            rescale_model_output, dim=1, keepdim=True
-        ).float()
-
-        self._segmentation_prediction = self._postprocess_output(model_prediction)
 
     def _load_data(self):
         """
@@ -179,15 +182,55 @@ class BaseSeries:
         temporal_positions = []
 
         # Read DICOM files and extract relevant information
-        for file in files:
-            the_ds = pydicom.read_file(file)
+        for file_idx, file in enumerate(files):
+            the_ds = pydicom.dcmread(file)
+
+            # Skip metadata-only files (no image data) — some LAx exports
+            # include non-image DICOMs alongside the image series.
+            if "PixelData" not in the_ds:
+                continue
+
             all_dicom_data.append(the_ds)
-            slice_position.append(the_ds.ImagePositionPatient)
-            slice_orientation.append(the_ds.ImageOrientationPatient)
-            if int(the_ds.NumberOfTemporalPositions) == 1:
-                temporal_positions.append(int(the_ds.InstanceNumber))
+
+            # Spatial position/orientation — LAx exports don't always carry
+            # the full DICOM plane geometry that SAx stacks do.
+            if hasattr(the_ds, "ImagePositionPatient") and hasattr(
+                the_ds, "ImageOrientationPatient"
+            ):
+                slice_position.append(the_ds.ImagePositionPatient)
+                slice_orientation.append(the_ds.ImageOrientationPatient)
+            elif hasattr(the_ds, "SliceLocation"):
+                slice_position.append([0.0, 0.0, float(the_ds.SliceLocation)])
+                slice_orientation.append([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
             else:
+                # Last resort: use file order as a proxy for slice position
+                slice_position.append([0.0, 0.0, float(file_idx)])
+                slice_orientation.append([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+
+            # Temporal position — fall back to InstanceNumber
+            n_temporal = int(getattr(the_ds, "NumberOfTemporalPositions", 0))
+            if n_temporal == 1:
+                temporal_positions.append(int(the_ds.InstanceNumber))
+            elif hasattr(the_ds, "TemporalPositionIdentifier"):
                 temporal_positions.append(int(the_ds.TemporalPositionIdentifier))
+            else:
+                temporal_positions.append(int(the_ds.InstanceNumber))
+
+        # Filter to the dominant image size — folders sometimes contain
+        # scout/localizer images or mixed acquisitions with different H x W.
+        if all_dicom_data:
+            all_shapes = [(ds.Rows, ds.Columns) for ds in all_dicom_data]
+            if len(set(all_shapes)) > 1:
+                dominant_shape = Counter(all_shapes).most_common(1)[0][0]
+                keep = [s == dominant_shape for s in all_shapes]
+                all_dicom_data = [d for d, k in zip(all_dicom_data, keep) if k]
+                slice_position = [p for p, k in zip(slice_position, keep) if k]
+                slice_orientation = [
+                    o for o, k in zip(slice_orientation, keep) if k
+                ]
+                temporal_positions = [
+                    t for t, k in zip(temporal_positions, keep) if k
+                ]
 
         # Gets unique positions from given positions and orientations.
         # assigns a slice index to each image based on its position.
@@ -314,12 +357,17 @@ class BaseSeries:
             ndarray: The pixel array for all slices/times.
         """
 
-        return np.asarray(
-            [
-                self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
-                for i in range(self.number_of_slices)
-            ]
-        )
+        arrays = [
+            self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
+            for i in range(self.number_of_slices)
+        ]
+        # Trim to the most common temporal length if slices have inconsistent
+        # frame counts (can happen with irregularly exported LAx series).
+        frame_counts = [len(a) for a in arrays]
+        if len(set(frame_counts)) > 1:
+            dominant_n = Counter(frame_counts).most_common(1)[0][0]
+            arrays = [a[:dominant_n] for a in arrays if len(a) >= dominant_n]
+        return np.asarray(arrays)
 
     def _reshape_array(self, pa: np.ndarray):
         """
@@ -373,8 +421,67 @@ class BaseSeries:
             dict: The configuration loaded from the specified path.
         """
 
-        config_path = wandb_run_path / "files" / "config-copy.yaml"
-        return yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+        # Accept both a flat model directory and a WandB run directory
+        # (files/ subdir), and both config-copy.yaml and config.yaml.
+        candidates = [
+            wandb_run_path / "config-copy.yaml",
+            wandb_run_path / "config.yaml",
+            wandb_run_path / "files" / "config-copy.yaml",
+            wandb_run_path / "files" / "config.yaml",
+        ]
+        for config_path in candidates:
+            if config_path.exists():
+                raw_config = yaml.load(config_path.open(), Loader=yaml.FullLoader)
+                return self._unwrap_wandb_config(raw_config)
+        raise FileNotFoundError(
+            f"No config file found in {wandb_run_path}. "
+            f"Expected config-copy.yaml or config.yaml, flat or under files/."
+        )
+
+    def _unwrap_wandb_config(self, config: dict) -> dict:
+        """
+        Unwrap a WandB-exported config, where every top-level key is nested
+        as `{"value": ...}`. Configs saved directly (not through WandB) are
+        returned unchanged.
+        """
+        if not isinstance(config, dict):
+            return config
+        is_wandb_format = any(
+            isinstance(v, dict) and "value" in v
+            for v in list(config.values())[:5]
+        )
+        if not is_wandb_format:
+            return config
+        return {
+            key: (value["value"] if isinstance(value, dict) and "value" in value else value)
+            for key, value in config.items()
+        }
+
+    def _resolve_weights_path(self, wandb_run_path: Path) -> Path:
+        """
+        Locate the model weights file, accepting a flat model directory or a
+        WandB run directory (files/ subdir), and either weights filename.
+
+        Args:
+            wandb_run_path (Path): The path to the model/WandB run directory.
+
+        Returns:
+            Path: The resolved weights file path.
+        """
+        candidates = [
+            wandb_run_path / "last_model.pt",
+            wandb_run_path / "best_model.pt",
+            wandb_run_path / "files" / "last_model.pt",
+            wandb_run_path / "files" / "best_model.pt",
+        ]
+        for weights_path in candidates:
+            if weights_path.exists():
+                return weights_path
+        raise FileNotFoundError(
+            f"No model weights found in {wandb_run_path} or "
+            f"{wandb_run_path / 'files'}. Expected 'last_model.pt' or "
+            f"'best_model.pt'."
+        )
 
     def _get_pixel_spacing(self):
         """
@@ -446,6 +553,7 @@ class BaseSeries:
         Returns:
             torch.Tensor: The output of the model.
         """
+        device = next(model.parameters()).device
         model_output = torch.zeros(
             self.inference_dict["number_of_slices"],
             self.inference_dict["nr_output_classes"],
@@ -458,9 +566,11 @@ class BaseSeries:
             for i in range(
                 0, self.inference_dict["number_of_slices"] // self.batch_size + 1
             ):
-                model_output[i * self.batch_size : (i + 1) * self.batch_size] = model(
-                    tensor[i * self.batch_size : (i + 1) * self.batch_size]
-                )[0]
+                start, end = i * self.batch_size, (i + 1) * self.batch_size
+                batch = tensor[start:end].to(device)
+                if batch.shape[0] == 0:
+                    continue
+                model_output[start:end] = model(batch)[0].cpu()
 
         return model_output
 
@@ -556,17 +666,29 @@ class CineSeries(BaseSeries):
     def __init__(self, folder: Path, batch_size: int = 50):
         super().__init__(folder, batch_size)
 
-    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+    def predict_segmentation(
+        self,
+        wandb_run_path: Path,
+        lax_dicom_dir: Optional[Path] = None,
+        lax_model_path: Optional[Path] = None,
+    ) -> np.ndarray:
         """
         Predict the segmentation for the DICOM data using the specified model.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            lax_dicom_dir (Path, optional): DICOM folder of a 4CH view, for
+                LA-vector conditioning. Only used if the model config
+                requests it; ignored (with a warning) otherwise.
+            lax_model_path (Path, optional): Model directory for the plain
+                UNet2d used to segment the 4CH view for LA-vector sampling.
 
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path)
+        self._run_model(
+            wandb_run_path, lax_dicom_dir=lax_dicom_dir, lax_model_path=lax_model_path
+        )
         self._lv = 1.0 * (self._segmentation_prediction == 1)
         self._myo = 1.0 * (self._segmentation_prediction == 2)
         self._rv = 1.0 * (self._segmentation_prediction == 3)
@@ -660,7 +782,11 @@ class CineSeries(BaseSeries):
             nr_output_classes=config["unet"]["nr_output_classes"],
             nr_output_scales=config["unet"]["nr_output_scales"],
         ).to("cpu")
-        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
+        model_weights = torch.load(
+            self._resolve_weights_path(wandb_run_path),
+            map_location="cpu",
+            weights_only=False,
+        )
         the_model.load_state_dict(model_weights)
 
         self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
@@ -936,7 +1062,11 @@ class LGESeries(BaseSeries):
             nr_output_classes=config["unet"]["nr_output_classes"],
             nr_output_scales=config["unet"]["nr_output_scales"],
         ).to("cpu")
-        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
+        model_weights = torch.load(
+            self._resolve_weights_path(wandb_run_path),
+            map_location="cpu",
+            weights_only=False,
+        )
         the_model.load_state_dict(model_weights)
 
         self.inference_dict["target_size"] = torch.tensor([480, 480]).to(torch.int32)
