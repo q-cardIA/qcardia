@@ -180,7 +180,7 @@ class BaseSeries:
 
         # Read DICOM files and extract relevant information
         for file in files:
-            the_ds = pydicom.dcmread(file)
+            the_ds = pydicom.read_file(file)
             all_dicom_data.append(the_ds)
             slice_position.append(the_ds.ImagePositionPatient)
             slice_orientation.append(the_ds.ImageOrientationPatient)
