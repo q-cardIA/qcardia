@@ -98,21 +98,16 @@ class DICOMModel:
 
     def _load_segmentation_model(self):
         wandb_path = Path.cwd() / "wandb"
-        # One model directory per series_key. CINE_SAX uses the context-aware
-        # model for now (swap to wandb_path / "CINE_SAX" for the plain one).
-        # CINE_4CH is reused as a stand-in for CINE_2CH/CINE_3CH until
-        # chamber-specific LAx models exist.
+        # CINE_4CH doubles as the LAx model for CINE_2CH/CINE_3CH until chamber-specific models exist.
         self._seg_wandb_paths = {
-            "CINE_SAX": wandb_path / "CINE_SAX_context",
+            "CINE_SAX": wandb_path / "CINE_SAX",
             "CINE_2CH": wandb_path / "CINE_4CH",
             "CINE_3CH": wandb_path / "CINE_4CH",
             "CINE_4CH": wandb_path / "CINE_4CH",
         }
         self.lge_wandb_run_path = wandb_path / "LGE_SAX"
 
-        # Only used for a best-effort output-shape heuristic in
-        # predict_segmentation (already tolerant of a missing/absent key) —
-        # falls back to {} if none of these layouts match.
+        # Only feeds a best-effort shape heuristic in predict_segmentation; falls back to {}.
         self.config = {}
         cine_sax_path = self._seg_wandb_paths["CINE_SAX"]
         for config_path in (
