@@ -1,0 +1,706 @@
+{
+  "corrections": {
+    "QLGE01_||series9000-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9001-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9002-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9003-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9004-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9005-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9006-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9007-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series9008-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0301-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0401-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0501-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0601-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0701-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1501-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1201-unknown": {
+      "corrected_seq": "EGE",
+      "corrected_plane": "2CH",
+      "comment": ""
+    },
+    "QLGE01_||series1301-unknown": {
+      "corrected_seq": "EGE",
+      "corrected_plane": "3CH",
+      "comment": ""
+    },
+    "QLGE01_||series1401-unknown": {
+      "corrected_seq": "EGE",
+      "corrected_plane": "4CH",
+      "comment": ""
+    },
+    "QLGE01_||series2001-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "2CH",
+      "comment": ""
+    },
+    "QLGE01_||series2101-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "3CH",
+      "comment": ""
+    },
+    "QLGE01_||series2201-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "4CH",
+      "comment": ""
+    },
+    "QLGE01_||series2301-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series2501-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "AX",
+      "comment": ""
+    },
+    "QLGE01_||series2601-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "2CH",
+      "comment": ""
+    },
+    "QLGE01_||series2701-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "3CH",
+      "comment": ""
+    },
+    "QLGE01_||series2801-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "4CH",
+      "comment": ""
+    },
+    "QLGE01_||series2901-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "AX",
+      "comment": ""
+    },
+    "QLGE01_||series0201-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0801-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1601-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series3101-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1001-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1101-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1701-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0101-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series0901-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1801-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series1901-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series2401-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE01_||series3001-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1602-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series2802-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series2803-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series2902-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series2903-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series0301-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series0401-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "SAX",
+      "comment": ""
+    },
+    "QLGE02_||series0501-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series0601-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series0701-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1601-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1301-unknown": {
+      "corrected_seq": "EGE",
+      "corrected_plane": "2CH",
+      "comment": ""
+    },
+    "QLGE02_||series1401-unknown": {
+      "corrected_seq": "EGE",
+      "corrected_plane": "3CH",
+      "comment": ""
+    },
+    "QLGE02_||series1501-unknown": {
+      "corrected_seq": "EGE",
+      "corrected_plane": "4CH",
+      "comment": ""
+    },
+    "QLGE02_||series2101-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "2CH",
+      "comment": ""
+    },
+    "QLGE02_||series2201-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "3CH",
+      "comment": ""
+    },
+    "QLGE02_||series2301-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "4CH",
+      "comment": ""
+    },
+    "QLGE02_||series2401-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series2601-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "2CH",
+      "comment": ""
+    },
+    "QLGE02_||series2701-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "3CH",
+      "comment": ""
+    },
+    "QLGE02_||series2801-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "4CH",
+      "comment": ""
+    },
+    "QLGE02_||series2901-unknown": {
+      "corrected_seq": "WBLGE",
+      "corrected_plane": "SAX",
+      "comment": ""
+    },
+    "QLGE02_||series0201-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series0801-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1801-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1101-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1201-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1701-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series0101-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series0901-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1001-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series1901-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series2001-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    },
+    "QLGE02_||series2501-unknown": {
+      "corrected_seq": "",
+      "corrected_plane": "",
+      "comment": ""
+    }
+  },
+  "runs": {
+    "baseline": {
+      "classify_comments": {
+        "QLGE01_||series0101-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0201-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0301-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0401-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0501-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0601-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0701-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0801-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series0901-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1001-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1101-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1201-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1301-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1401-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1501-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1601-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1701-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1801-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series1901-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2001-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2101-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2201-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2301-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2401-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2501-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2601-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2701-unknown": {
+          "comment": "Reasoning of 3 chamber being a SAX plane is incorrect, they are both planes. Correct here is WBLGE/3CH"
+        },
+        "QLGE01_||series2801-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series2901-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series3001-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||series3101-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0101-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0201-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0301-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0401-unknown": {
+          "comment": "indeed unclear scan, but CINE SAX would have been correct (not the fault of the LLM but cardisort)"
+        },
+        "QLGE02_||series0501-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0601-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0701-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0801-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series0901-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1001-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1101-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1201-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1301-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1401-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1501-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1601-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1701-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1801-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series1901-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2001-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2101-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2201-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2301-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2401-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2501-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2601-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2701-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2801-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||series2901-unknown": {
+          "comment": ""
+        }
+      },
+      "disambig_comments": {
+        "QLGE01_||CINE_2CH||series0301-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||CINE_2CH||series0601-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||CINE_SAX||series0401-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||CINE_SAX||series1501-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||MOLLI+_SAX||series0801-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||MOLLI+_SAX||series1601-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||MOLLI+_SAX||series3101-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||PERF_SAX||series1001-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||PERF_SAX||series1101-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||PERF_SAX||series1701-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||DBLGE_SAX||series1201-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE01_||DBLGE_SAX||series1301-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE01_||DBLGE_SAX||series1401-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE01_||DBLGE_SAX||series2001-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE01_||DBLGE_SAX||series2101-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE01_||DBLGE_SAX||series2201-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE01_||DBLGE_SAX||series2301-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||DBLGE_SAX||series2501-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE01_||DBLGE_SAX||series2601-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||DBLGE_SAX||series2701-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||DBLGE_SAX||series2801-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||DBLGE_SAX||series2901-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||TIscout_SAX||series1801-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||TIscout_SAX||series1901-unknown": {
+          "comment": ""
+        },
+        "QLGE01_||TIscout_SAX||series2401-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||CINE_2CH||series0301-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||CINE_2CH||series0601-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||CINE_4CH||series0401-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||CINE_4CH||series0501-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||TestPERF_SAX||series0901-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||TestPERF_SAX||series1001-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||PERF_SAX||series1101-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||PERF_SAX||series1201-unknown": {
+          "comment": "this is the stess perfusion"
+        },
+        "QLGE02_||PERF_SAX||series1701-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||DBLGE_SAX||series1301-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE02_||DBLGE_SAX||series1401-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE02_||DBLGE_SAX||series1501-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE02_||DBLGE_SAX||series2101-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||DBLGE_SAX||series2201-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||DBLGE_SAX||series2301-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||DBLGE_SAX||series2401-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||DBLGE_SAX||series2601-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE02_||DBLGE_SAX||series2701-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE02_||DBLGE_SAX||series2801-unknown": {
+          "comment": "wrong because of cardisort"
+        },
+        "QLGE02_||DBLGE_SAX||series2901-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||TIscout_SAX||series1901-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||TIscout_SAX||series2001-unknown": {
+          "comment": ""
+        },
+        "QLGE02_||TIscout_SAX||series2501-unknown": {
+          "comment": ""
+        }
+      }
+    }
+  }
+}

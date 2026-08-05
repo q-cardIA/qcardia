@@ -1,0 +1,2766 @@
+{
+  "meta": {
+    "created": "2026-08-05T11:01:32",
+    "weights": "C:\\Users\\20203531\\Documents\\models\\weights\\cardisort",
+    "data_root": "C:\\Users\\20203531\\Documents\\data\\new_data",
+    "n_subjects": 2
+  },
+  "subjects": {
+    "QLGE01_": [
+      {
+        "series_dir": "series0101-unknown",
+        "pred_seq": "Scouts",
+        "pred_plane": "MP",
+        "seq_top3": [
+          [
+            "Scouts",
+            0.826722264289856
+          ],
+          [
+            "HASTE",
+            0.1726464182138443
+          ],
+          [
+            "TestPERF",
+            0.0005009517190046608
+          ]
+        ],
+        "plane_top3": [
+          [
+            "MP",
+            0.846237301826477
+          ],
+          [
+            "AX",
+            0.1530344933271408
+          ],
+          [
+            "SAX",
+            0.0007209436735138297
+          ]
+        ],
+        "summary": {
+          "series": "series0101-unknown",
+          "series_description": "SurveySSh fb non gated new",
+          "series_number": 101,
+          "n_instances": 60,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "102541.39"
+        }
+      },
+      {
+        "series_dir": "series0201-unknown",
+        "pred_seq": "HASTE",
+        "pred_plane": "AX",
+        "seq_top3": [
+          [
+            "HASTE",
+            1.0
+          ],
+          [
+            "PERF",
+            3.92484134081883e-09
+          ],
+          [
+            "TestPERF",
+            2.3733438825335185e-11
+          ]
+        ],
+        "plane_top3": [
+          [
+            "AX",
+            0.9999977350234985
+          ],
+          [
+            "SAX",
+            2.2179294774105074e-06
+          ],
+          [
+            "MP",
+            8.944645718544919e-11
+          ]
+        ],
+        "summary": {
+          "series": "series0201-unknown",
+          "series_description": "BB_anatomy REST",
+          "series_number": 201,
+          "n_instances": 30,
+          "rows": 528,
+          "columns": 528,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "102851.18"
+        }
+      },
+      {
+        "series_dir": "series0301-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "2CH",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9496607780456543
+          ],
+          [
+            "EGE",
+            0.04627804458141327
+          ],
+          [
+            "MOLLI+",
+            0.0028354511596262455
+          ]
+        ],
+        "plane_top3": [
+          [
+            "2CH",
+            0.9587027430534363
+          ],
+          [
+            "SAX",
+            0.030716439709067345
+          ],
+          [
+            "3CH",
+            0.008723706938326359
+          ]
+        ],
+        "summary": {
+          "series": "series0301-unknown",
+          "series_description": "p2CH single shot BH",
+          "series_number": 301,
+          "n_instances": 1,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "103209.19"
+        }
+      },
+      {
+        "series_dir": "series0401-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9999573230743408
+          ],
+          [
+            "TestPERF",
+            4.2457344534341246e-05
+          ],
+          [
+            "PERF",
+            2.3029080864489515e-07
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999998807907104
+          ],
+          [
+            "LVOT2",
+            1.7844280364442966e-07
+          ],
+          [
+            "MP",
+            1.753916301083791e-08
+          ]
+        ],
+        "summary": {
+          "series": "series0401-unknown",
+          "series_description": "pSAX low-res cine",
+          "series_number": 401,
+          "n_instances": 90,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "103340.99"
+        }
+      },
+      {
+        "series_dir": "series0501-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "4CH",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9998377561569214
+          ],
+          [
+            "WBLGE",
+            0.00015717298083472997
+          ],
+          [
+            "NoGroup",
+            3.0068144951655995e-06
+          ]
+        ],
+        "plane_top3": [
+          [
+            "4CH",
+            0.8382991552352905
+          ],
+          [
+            "3CH",
+            0.16166183352470398
+          ],
+          [
+            "2CH",
+            3.7195393815636635e-05
+          ]
+        ],
+        "summary": {
+          "series": "series0501-unknown",
+          "series_description": "4CH",
+          "series_number": 501,
+          "n_instances": 30,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "103501.58"
+        }
+      },
+      {
+        "series_dir": "series0601-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "2CH",
+        "seq_top3": [
+          [
+            "CINE",
+            1.0
+          ],
+          [
+            "WBLGE",
+            4.005617781910331e-10
+          ],
+          [
+            "EGE",
+            1.987627562538563e-10
+          ]
+        ],
+        "plane_top3": [
+          [
+            "2CH",
+            0.998156726360321
+          ],
+          [
+            "LVOT2",
+            0.0017743610078468919
+          ],
+          [
+            "RVOT",
+            5.412055179476738e-05
+          ]
+        ],
+        "summary": {
+          "series": "series0601-unknown",
+          "series_description": "2CH",
+          "series_number": 601,
+          "n_instances": 30,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "103540.25"
+        }
+      },
+      {
+        "series_dir": "series0701-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "3CH",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9969273209571838
+          ],
+          [
+            "WBLGE",
+            0.003016453003510833
+          ],
+          [
+            "DBLGE",
+            4.276500112609938e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "3CH",
+            0.9974849224090576
+          ],
+          [
+            "4CH",
+            0.0021314274054020643
+          ],
+          [
+            "2CH",
+            0.00036867737071588635
+          ]
+        ],
+        "summary": {
+          "series": "series0701-unknown",
+          "series_description": "3CH",
+          "series_number": 701,
+          "n_instances": 30,
+          "rows": 224,
+          "columns": 224,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "103622.65"
+        }
+      },
+      {
+        "series_dir": "series0801-unknown",
+        "pred_seq": "MOLLI+",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "MOLLI+",
+            0.9999098777770996
+          ],
+          [
+            "MOLLI-",
+            9.004145977087319e-05
+          ],
+          [
+            "NoGroup",
+            6.51923457439807e-08
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "LVOT2",
+            2.8255733752757806e-08
+          ],
+          [
+            "4CH",
+            7.464381113209129e-09
+          ]
+        ],
+        "summary": {
+          "series": "series0801-unknown",
+          "series_description": "T1_native 3 slice",
+          "series_number": 801,
+          "n_instances": 45,
+          "rows": 352,
+          "columns": 352,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "103724.55"
+        }
+      },
+      {
+        "series_dir": "series0901-unknown",
+        "pred_seq": "TestPERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TestPERF",
+            0.8121951222419739
+          ],
+          [
+            "CINE",
+            0.18772871792316437
+          ],
+          [
+            "PERF",
+            7.612633635289967e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "3CH",
+            4.73757533203667e-10
+          ],
+          [
+            "LVOT2",
+            7.851205796605143e-11
+          ]
+        ],
+        "summary": {
+          "series": "series0901-unknown",
+          "series_description": "3 SA  cine perfusion planning",
+          "series_number": 901,
+          "n_instances": 90,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "103850.75"
+        }
+      },
+      {
+        "series_dir": "series1001-unknown",
+        "pred_seq": "PERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "PERF",
+            0.999984860420227
+          ],
+          [
+            "TestPERF",
+            1.5134877685341053e-05
+          ],
+          [
+            "NoGroup",
+            3.5858798361853943e-16
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "2CH",
+            8.73200706725268e-24
+          ],
+          [
+            "AORTA",
+            5.417809799098818e-26
+          ]
+        ],
+        "summary": {
+          "series": "series1001-unknown",
+          "series_description": "qPERF sTFE_3sl",
+          "series_number": 1001,
+          "n_instances": 60,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "104050.40"
+        }
+      },
+      {
+        "series_dir": "series1101-unknown",
+        "pred_seq": "PERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "PERF",
+            0.9999998807907104
+          ],
+          [
+            "TestPERF",
+            1.399507993937732e-07
+          ],
+          [
+            "NoGroup",
+            7.847883506222363e-18
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "LVOT2",
+            1.968564014824893e-28
+          ],
+          [
+            "2CH",
+            2.5229837248648002e-29
+          ]
+        ],
+        "summary": {
+          "series": "series1101-unknown",
+          "series_description": "STRESS qPERF sTFE_3sl",
+          "series_number": 1101,
+          "n_instances": 600,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "104443.45"
+        }
+      },
+      {
+        "series_dir": "series1201-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9839178323745728
+          ],
+          [
+            "WBLGE",
+            0.012156879529356956
+          ],
+          [
+            "HASTE",
+            0.0017141617136076093
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9992184638977051
+          ],
+          [
+            "2CH",
+            0.00043854134855791926
+          ],
+          [
+            "AORTA",
+            0.00019318514387123287
+          ]
+        ],
+        "summary": {
+          "series": "series1201-unknown",
+          "series_description": "early gad 2CH",
+          "series_number": 1201,
+          "n_instances": 3,
+          "rows": 512,
+          "columns": 512,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "104747.31"
+        }
+      },
+      {
+        "series_dir": "series1301-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9840679168701172
+          ],
+          [
+            "WBLGE",
+            0.008585210889577866
+          ],
+          [
+            "PC",
+            0.005977494176477194
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9960834980010986
+          ],
+          [
+            "2CH",
+            0.0019391340902075171
+          ],
+          [
+            "AORTA",
+            0.00166600092779845
+          ]
+        ],
+        "summary": {
+          "series": "series1301-unknown",
+          "series_description": "early gad 3CH",
+          "series_number": 1301,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "104833.30"
+        }
+      },
+      {
+        "series_dir": "series1401-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.963873565196991
+          ],
+          [
+            "WBLGE",
+            0.03494011238217354
+          ],
+          [
+            "PC",
+            0.0007934087188914418
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9996634721755981
+          ],
+          [
+            "2CH",
+            0.00023295640130527318
+          ],
+          [
+            "AORTA",
+            8.759281627135351e-05
+          ]
+        ],
+        "summary": {
+          "series": "series1401-unknown",
+          "series_description": "early gad 4CH",
+          "series_number": 1401,
+          "n_instances": 3,
+          "rows": 480,
+          "columns": 480,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "104921.27"
+        }
+      },
+      {
+        "series_dir": "series1501-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9710277915000916
+          ],
+          [
+            "EGE",
+            0.028924332931637764
+          ],
+          [
+            "WBLGE",
+            4.7902503865770996e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999997615814209
+          ],
+          [
+            "3CH",
+            1.8792624700836313e-07
+          ],
+          [
+            "AV",
+            6.353519377277905e-10
+          ]
+        ],
+        "summary": {
+          "series": "series1501-unknown",
+          "series_description": "sa stack",
+          "series_number": 1501,
+          "n_instances": 420,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "104947.96"
+        }
+      },
+      {
+        "series_dir": "series1601-unknown",
+        "pred_seq": "MOLLI+",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "MOLLI+",
+            0.9999915361404419
+          ],
+          [
+            "NoGroup",
+            8.326783245138358e-06
+          ],
+          [
+            "WBLGE",
+            8.928938655117236e-08
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999709129333496
+          ],
+          [
+            "4CH",
+            2.9105194698786363e-05
+          ],
+          [
+            "RVOT",
+            7.395144219213279e-11
+          ]
+        ],
+        "summary": {
+          "series": "series1601-unknown",
+          "series_description": "T1_native (PRE-REST)",
+          "series_number": 1601,
+          "n_instances": 45,
+          "rows": 352,
+          "columns": 352,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "105247.83"
+        }
+      },
+      {
+        "series_dir": "series1701-unknown",
+        "pred_seq": "PERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "PERF",
+            0.9999996423721313
+          ],
+          [
+            "TestPERF",
+            3.262840095885622e-07
+          ],
+          [
+            "NoGroup",
+            6.262348174856027e-17
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "LVOT2",
+            2.2321830426449332e-27
+          ],
+          [
+            "2CH",
+            6.48522422589335e-29
+          ]
+        ],
+        "summary": {
+          "series": "series1701-unknown",
+          "series_description": "REST qPERF sTFE_3sl",
+          "series_number": 1701,
+          "n_instances": 504,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "105644.83"
+        }
+      },
+      {
+        "series_dir": "series1801-unknown",
+        "pred_seq": "TIscout",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TIscout",
+            0.9018269777297974
+          ],
+          [
+            "MOLLI+",
+            0.07073961943387985
+          ],
+          [
+            "MRA",
+            0.023343542590737343
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999996423721313
+          ],
+          [
+            "COR",
+            3.5458080560601957e-07
+          ],
+          [
+            "4CH",
+            4.565494649000357e-09
+          ]
+        ],
+        "summary": {
+          "series": "series1801-unknown",
+          "series_description": "LL 2beat",
+          "series_number": 2401,
+          "n_instances": 21,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110725.29"
+        }
+      },
+      {
+        "series_dir": "series1901-unknown",
+        "pred_seq": "TIscout",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TIscout",
+            1.0
+          ],
+          [
+            "CINE",
+            4.40807279005588e-28
+          ],
+          [
+            "MOLLI+",
+            1.5999000974578579e-28
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "4CH",
+            4.187849682116042e-20
+          ],
+          [
+            "2CH",
+            5.319527128846409e-27
+          ]
+        ],
+        "summary": {
+          "series": "series1901-unknown",
+          "series_description": "LL 2beat",
+          "series_number": 1901,
+          "n_instances": 23,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110104.89"
+        }
+      },
+      {
+        "series_dir": "series2001-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9861853718757629
+          ],
+          [
+            "WBLGE",
+            0.01170586422085762
+          ],
+          [
+            "PC",
+            0.002090158872306347
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999631643295288
+          ],
+          [
+            "AORTA",
+            2.8362184821162373e-05
+          ],
+          [
+            "2CH",
+            8.381000043300446e-06
+          ]
+        ],
+        "summary": {
+          "series": "series2001-unknown",
+          "series_description": "DB scar_2CH",
+          "series_number": 2001,
+          "n_instances": 3,
+          "rows": 512,
+          "columns": 512,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110206.14"
+        }
+      },
+      {
+        "series_dir": "series2101-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.8886776566505432
+          ],
+          [
+            "PC",
+            0.07215963304042816
+          ],
+          [
+            "WBLGE",
+            0.03909534960985184
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9938110709190369
+          ],
+          [
+            "AORTA",
+            0.0053498344495892525
+          ],
+          [
+            "2CH",
+            0.0008323549409396946
+          ]
+        ],
+        "summary": {
+          "series": "series2101-unknown",
+          "series_description": "DB scar_3CH",
+          "series_number": 2101,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110248.77"
+        }
+      },
+      {
+        "series_dir": "series2201-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9446666836738586
+          ],
+          [
+            "WBLGE",
+            0.03236379846930504
+          ],
+          [
+            "PC",
+            0.022917436435818672
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9979561567306519
+          ],
+          [
+            "AORTA",
+            0.0015954191330820322
+          ],
+          [
+            "2CH",
+            0.0004440589400473982
+          ]
+        ],
+        "summary": {
+          "series": "series2201-unknown",
+          "series_description": "DB scar_4CH",
+          "series_number": 2201,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110331.44"
+        }
+      },
+      {
+        "series_dir": "series2301-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9181374907493591
+          ],
+          [
+            "WBLGE",
+            0.07782524824142456
+          ],
+          [
+            "PC",
+            0.0032136780209839344
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999827146530151
+          ],
+          [
+            "AORTA",
+            8.890378012438305e-06
+          ],
+          [
+            "2CH",
+            8.078909559117164e-06
+          ]
+        ],
+        "summary": {
+          "series": "series2301-unknown",
+          "series_description": "DB scar_SA",
+          "series_number": 2301,
+          "n_instances": 42,
+          "rows": 448,
+          "columns": 448,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110417.67"
+        }
+      },
+      {
+        "series_dir": "series2401-unknown",
+        "pred_seq": "TIscout",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TIscout",
+            1.0
+          ],
+          [
+            "MOLLI+",
+            7.653247610303615e-14
+          ],
+          [
+            "T2MAPPING",
+            1.3576514787987668e-21
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "2CH",
+            2.3824096696173725e-19
+          ],
+          [
+            "4CH",
+            5.739198163508262e-20
+          ]
+        ],
+        "summary": {
+          "series": "series2401-unknown",
+          "series_description": "LL 2beat",
+          "series_number": 2401,
+          "n_instances": 19,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110725.29"
+        }
+      },
+      {
+        "series_dir": "series2501-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9757406115531921
+          ],
+          [
+            "WBLGE",
+            0.015866465866565704
+          ],
+          [
+            "PC",
+            0.008362614549696445
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.99947589635849
+          ],
+          [
+            "AORTA",
+            0.0004276034305803478
+          ],
+          [
+            "2CH",
+            9.493697143625468e-05
+          ]
+        ],
+        "summary": {
+          "series": "series2501-unknown",
+          "series_description": "DB scar_X",
+          "series_number": 2501,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110814.48"
+        }
+      },
+      {
+        "series_dir": "series2601-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.8698586225509644
+          ],
+          [
+            "WBLGE",
+            0.12838855385780334
+          ],
+          [
+            "PC",
+            0.0016938562039285898
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999240636825562
+          ],
+          [
+            "2CH",
+            4.352218093117699e-05
+          ],
+          [
+            "AORTA",
+            3.1996511097531766e-05
+          ]
+        ],
+        "summary": {
+          "series": "series2601-unknown",
+          "series_description": "scar_2CH",
+          "series_number": 2601,
+          "n_instances": 3,
+          "rows": 528,
+          "columns": 528,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110858.32"
+        }
+      },
+      {
+        "series_dir": "series2701-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.4044925272464752
+          ],
+          [
+            "WBLGE",
+            0.3289239704608917
+          ],
+          [
+            "PC",
+            0.26624375581741333
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.986301064491272
+          ],
+          [
+            "AORTA",
+            0.012508547864854336
+          ],
+          [
+            "2CH",
+            0.0011761999921873212
+          ]
+        ],
+        "summary": {
+          "series": "series2701-unknown",
+          "series_description": "scar_3CH",
+          "series_number": 2701,
+          "n_instances": 3,
+          "rows": 400,
+          "columns": 400,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "110942.16"
+        }
+      },
+      {
+        "series_dir": "series2801-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.8638821244239807
+          ],
+          [
+            "WBLGE",
+            0.1322697252035141
+          ],
+          [
+            "PC",
+            0.0036833910271525383
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9997170567512512
+          ],
+          [
+            "2CH",
+            0.00014951315824873745
+          ],
+          [
+            "AORTA",
+            0.0001302395248785615
+          ]
+        ],
+        "summary": {
+          "series": "series2801-unknown",
+          "series_description": "scar_4CH",
+          "series_number": 2801,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "111022.47"
+        }
+      },
+      {
+        "series_dir": "series2901-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.8861947655677795
+          ],
+          [
+            "WBLGE",
+            0.11290748417377472
+          ],
+          [
+            "PC",
+            0.0008570825448259711
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999634027481079
+          ],
+          [
+            "2CH",
+            2.178382419515401e-05
+          ],
+          [
+            "AORTA",
+            1.442544180463301e-05
+          ]
+        ],
+        "summary": {
+          "series": "series2901-unknown",
+          "series_description": "scar_X",
+          "series_number": 2901,
+          "n_instances": 3,
+          "rows": 480,
+          "columns": 480,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "111112.03"
+        }
+      },
+      {
+        "series_dir": "series3001-unknown",
+        "pred_seq": "WBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "WBLGE",
+            0.824979305267334
+          ],
+          [
+            "DBLGE",
+            0.17421618103981018
+          ],
+          [
+            "TestPERF",
+            0.0007389764068648219
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999994039535522
+          ],
+          [
+            "2CH",
+            5.218977321419516e-07
+          ],
+          [
+            "AORTA",
+            1.2081846989531186e-07
+          ]
+        ],
+        "summary": {
+          "series": "series3001-unknown",
+          "series_description": "scar_SA",
+          "series_number": 3001,
+          "n_instances": 42,
+          "rows": 512,
+          "columns": 512,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "111157.37"
+        }
+      },
+      {
+        "series_dir": "series3101-unknown",
+        "pred_seq": "MOLLI+",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "MOLLI+",
+            0.9992709755897522
+          ],
+          [
+            "NoGroup",
+            0.0007285004248842597
+          ],
+          [
+            "TestPERF",
+            4.5943775717205426e-07
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9997163414955139
+          ],
+          [
+            "4CH",
+            0.0002836260828189552
+          ],
+          [
+            "AORTA",
+            5.20571541429149e-09
+          ]
+        ],
+        "summary": {
+          "series": "series3101-unknown",
+          "series_description": "T1_3 slice enhanced (ECV)",
+          "series_number": 3101,
+          "n_instances": 48,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20191030",
+          "acquisition_time": "111506.77"
+        }
+      },
+      {
+        "series_dir": "series9000-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9001-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9002-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9003-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9004-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9005-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9006-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9007-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series9008-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      }
+    ],
+    "QLGE02_": [
+      {
+        "series_dir": "series0101-unknown",
+        "pred_seq": "Scouts",
+        "pred_plane": "MP",
+        "seq_top3": [
+          [
+            "Scouts",
+            0.9999574422836304
+          ],
+          [
+            "HASTE",
+            4.2527495679678395e-05
+          ],
+          [
+            "MRA",
+            1.2612610511553157e-08
+          ]
+        ],
+        "plane_top3": [
+          [
+            "MP",
+            0.9999504089355469
+          ],
+          [
+            "AX",
+            4.9589580157771707e-05
+          ],
+          [
+            "ARCH",
+            7.353157194245341e-09
+          ]
+        ],
+        "summary": {
+          "series": "series0101-unknown",
+          "series_description": "SurveySSh fb non gated new",
+          "series_number": 101,
+          "n_instances": 60,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "121736.33"
+        }
+      },
+      {
+        "series_dir": "series0201-unknown",
+        "pred_seq": "HASTE",
+        "pred_plane": "AX",
+        "seq_top3": [
+          [
+            "HASTE",
+            0.9999617338180542
+          ],
+          [
+            "TestPERF",
+            1.4885998098179698e-05
+          ],
+          [
+            "CINE",
+            1.314812743657967e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "AX",
+            0.999902606010437
+          ],
+          [
+            "SAX",
+            9.739845700096339e-05
+          ],
+          [
+            "MP",
+            1.548513672844365e-08
+          ]
+        ],
+        "summary": {
+          "series": "series0201-unknown",
+          "series_description": "BB_anatomy REST",
+          "series_number": 201,
+          "n_instances": 26,
+          "rows": 528,
+          "columns": 528,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "122218.34"
+        }
+      },
+      {
+        "series_dir": "series0301-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "2CH",
+        "seq_top3": [
+          [
+            "CINE",
+            1.0
+          ],
+          [
+            "TestPERF",
+            2.648800734306178e-09
+          ],
+          [
+            "WBLGE",
+            2.726841530353852e-10
+          ]
+        ],
+        "plane_top3": [
+          [
+            "2CH",
+            0.996537446975708
+          ],
+          [
+            "LVOT2",
+            0.0033899431582540274
+          ],
+          [
+            "SAX",
+            3.350375482114032e-05
+          ]
+        ],
+        "summary": {
+          "series": "series0301-unknown",
+          "series_description": "p2CH",
+          "series_number": 301,
+          "n_instances": 25,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "122427.50"
+        }
+      },
+      {
+        "series_dir": "series0401-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "4CH",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9998500347137451
+          ],
+          [
+            "NoGroup",
+            0.0001175177822005935
+          ],
+          [
+            "WBLGE",
+            2.4946451958385296e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "4CH",
+            0.43516290187835693
+          ],
+          [
+            "3CH",
+            0.2733011543750763
+          ],
+          [
+            "SAX",
+            0.23562000691890717
+          ]
+        ],
+        "summary": {
+          "series": "series0401-unknown",
+          "series_description": "SSL",
+          "series_number": 401,
+          "n_instances": 25,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "122545.67"
+        }
+      },
+      {
+        "series_dir": "series0501-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "4CH",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9999758005142212
+          ],
+          [
+            "WBLGE",
+            2.2744974558008835e-05
+          ],
+          [
+            "TestPERF",
+            1.2187385891593294e-06
+          ]
+        ],
+        "plane_top3": [
+          [
+            "4CH",
+            0.7500152587890625
+          ],
+          [
+            "LVOT2",
+            0.15527395904064178
+          ],
+          [
+            "3CH",
+            0.056460749357938766
+          ]
+        ],
+        "summary": {
+          "series": "series0501-unknown",
+          "series_description": "4CH",
+          "series_number": 501,
+          "n_instances": 30,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "122651.67"
+        }
+      },
+      {
+        "series_dir": "series0601-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "2CH",
+        "seq_top3": [
+          [
+            "CINE",
+            1.0
+          ],
+          [
+            "TestPERF",
+            1.2288505324420385e-08
+          ],
+          [
+            "WBLGE",
+            2.8362276069393566e-11
+          ]
+        ],
+        "plane_top3": [
+          [
+            "2CH",
+            0.9998606443405151
+          ],
+          [
+            "LVOT2",
+            0.00013347266940400004
+          ],
+          [
+            "SAX",
+            5.173293175175786e-06
+          ]
+        ],
+        "summary": {
+          "series": "series0601-unknown",
+          "series_description": "2CH",
+          "series_number": 601,
+          "n_instances": 30,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "122734.57"
+        }
+      },
+      {
+        "series_dir": "series0701-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "3CH",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9888639450073242
+          ],
+          [
+            "WBLGE",
+            0.010670455172657967
+          ],
+          [
+            "PC",
+            0.0002480665280018002
+          ]
+        ],
+        "plane_top3": [
+          [
+            "3CH",
+            0.9985514283180237
+          ],
+          [
+            "4CH",
+            0.0014400718500837684
+          ],
+          [
+            "2CH",
+            4.150405857217265e-06
+          ]
+        ],
+        "summary": {
+          "series": "series0701-unknown",
+          "series_description": "3CH",
+          "series_number": 701,
+          "n_instances": 30,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "122818.60"
+        }
+      },
+      {
+        "series_dir": "series0801-unknown",
+        "pred_seq": "MOLLI-",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "MOLLI-",
+            0.9999579191207886
+          ],
+          [
+            "MOLLI+",
+            3.4254826459800825e-05
+          ],
+          [
+            "CINE",
+            7.815873686922714e-06
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999996423721313
+          ],
+          [
+            "4CH",
+            3.789442928336939e-07
+          ],
+          [
+            "LVOT2",
+            6.265569313379515e-11
+          ]
+        ],
+        "summary": {
+          "series": "series0801-unknown",
+          "series_description": "T1_native",
+          "series_number": 801,
+          "n_instances": 10,
+          "rows": 320,
+          "columns": 320,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "122927.64"
+        }
+      },
+      {
+        "series_dir": "series0901-unknown",
+        "pred_seq": "TestPERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TestPERF",
+            0.817644476890564
+          ],
+          [
+            "CINE",
+            0.18234407901763916
+          ],
+          [
+            "PERF",
+            1.1359475138306152e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999969005584717
+          ],
+          [
+            "3CH",
+            1.923227273437078e-06
+          ],
+          [
+            "AV",
+            7.84191115599242e-07
+          ]
+        ],
+        "summary": {
+          "series": "series0901-unknown",
+          "series_description": "sa 3sl",
+          "series_number": 1001,
+          "n_instances": 90,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "123343.22"
+        }
+      },
+      {
+        "series_dir": "series1001-unknown",
+        "pred_seq": "TestPERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TestPERF",
+            0.817644476890564
+          ],
+          [
+            "CINE",
+            0.18234407901763916
+          ],
+          [
+            "PERF",
+            1.1359475138306152e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999969005584717
+          ],
+          [
+            "3CH",
+            1.923227273437078e-06
+          ],
+          [
+            "AV",
+            7.84191115599242e-07
+          ]
+        ],
+        "summary": {
+          "series": "series1001-unknown",
+          "series_description": "sa 3sl",
+          "series_number": 1001,
+          "n_instances": 90,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "123343.22"
+        }
+      },
+      {
+        "series_dir": "series1101-unknown",
+        "pred_seq": "PERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "PERF",
+            0.9999699592590332
+          ],
+          [
+            "TestPERF",
+            3.0098217393970117e-05
+          ],
+          [
+            "NoGroup",
+            4.5077121560172656e-14
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "2CH",
+            2.0569581383707322e-25
+          ],
+          [
+            "AORTA",
+            7.167469236437606e-27
+          ]
+        ],
+        "summary": {
+          "series": "series1101-unknown",
+          "series_description": "TESTqPERF sTFE_3sl",
+          "series_number": 1101,
+          "n_instances": 36,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "123629.27"
+        }
+      },
+      {
+        "series_dir": "series1201-unknown",
+        "pred_seq": "PERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "PERF",
+            0.9999856948852539
+          ],
+          [
+            "TestPERF",
+            1.4267709047999233e-05
+          ],
+          [
+            "NoGroup",
+            8.104130024390657e-15
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "2CH",
+            5.549059074432491e-27
+          ],
+          [
+            "AORTA",
+            9.373306640778915e-29
+          ]
+        ],
+        "summary": {
+          "series": "series1201-unknown",
+          "series_description": "qPERF sTFE_3sl",
+          "series_number": 1201,
+          "n_instances": 368,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "124157.73"
+        }
+      },
+      {
+        "series_dir": "series1301-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9532362818717957
+          ],
+          [
+            "WBLGE",
+            0.038132138550281525
+          ],
+          [
+            "PC",
+            0.008616060018539429
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999247789382935
+          ],
+          [
+            "AORTA",
+            6.434399983845651e-05
+          ],
+          [
+            "2CH",
+            1.0882276001211721e-05
+          ]
+        ],
+        "summary": {
+          "series": "series1301-unknown",
+          "series_description": "early gad 2CH",
+          "series_number": 1301,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "124416.08"
+        }
+      },
+      {
+        "series_dir": "series1401-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9806422591209412
+          ],
+          [
+            "WBLGE",
+            0.01603112556040287
+          ],
+          [
+            "PC",
+            0.003320001531392336
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999805688858032
+          ],
+          [
+            "AORTA",
+            1.5550092939520255e-05
+          ],
+          [
+            "2CH",
+            3.975525487476261e-06
+          ]
+        ],
+        "summary": {
+          "series": "series1401-unknown",
+          "series_description": "early gad 3CH",
+          "series_number": 1401,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "124512.85"
+        }
+      },
+      {
+        "series_dir": "series1501-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9745820760726929
+          ],
+          [
+            "WBLGE",
+            0.018100973218679428
+          ],
+          [
+            "PC",
+            0.007305372040718794
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999833106994629
+          ],
+          [
+            "AORTA",
+            1.3943265912530478e-05
+          ],
+          [
+            "2CH",
+            2.6822563086170703e-06
+          ]
+        ],
+        "summary": {
+          "series": "series1501-unknown",
+          "series_description": "early gad 4CH",
+          "series_number": 1501,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "124617.31"
+        }
+      },
+      {
+        "series_dir": "series1601-unknown",
+        "pred_seq": "CINE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "CINE",
+            0.9937950372695923
+          ],
+          [
+            "EGE",
+            0.006162797566503286
+          ],
+          [
+            "WBLGE",
+            4.0063285268843174e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9999703168869019
+          ],
+          [
+            "2CH",
+            2.588727329566609e-05
+          ],
+          [
+            "AV",
+            2.571359573266818e-06
+          ]
+        ],
+        "summary": {
+          "series": "series1601-unknown",
+          "series_description": "sa stack",
+          "series_number": 1601,
+          "n_instances": 360,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "124726.76"
+        }
+      },
+      {
+        "series_dir": "series1602-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series1701-unknown",
+        "pred_seq": "PERF",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "PERF",
+            0.9999915361404419
+          ],
+          [
+            "TestPERF",
+            8.48917625262402e-06
+          ],
+          [
+            "NoGroup",
+            6.131699033744666e-15
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "2CH",
+            5.984393967945848e-28
+          ],
+          [
+            "LVOT2",
+            8.106812401010885e-30
+          ]
+        ],
+        "summary": {
+          "series": "series1701-unknown",
+          "series_description": "qREST sTFE_3sl",
+          "series_number": 1701,
+          "n_instances": 276,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "125127.40"
+        }
+      },
+      {
+        "series_dir": "series1801-unknown",
+        "pred_seq": "MOLLI+",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "MOLLI+",
+            0.9999417066574097
+          ],
+          [
+            "TIscout",
+            4.144521881244145e-05
+          ],
+          [
+            "PERF",
+            1.3976887203170918e-05
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "4CH",
+            3.762056000056191e-09
+          ],
+          [
+            "2CH",
+            2.1222297252876388e-09
+          ]
+        ],
+        "summary": {
+          "series": "series1801-unknown",
+          "series_description": "T1_enhanced",
+          "series_number": 1801,
+          "n_instances": 11,
+          "rows": 288,
+          "columns": 288,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "125328.42"
+        }
+      },
+      {
+        "series_dir": "series1901-unknown",
+        "pred_seq": "TIscout",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TIscout",
+            1.0
+          ],
+          [
+            "MOLLI+",
+            1.1687114933572908e-17
+          ],
+          [
+            "T2MAPPING",
+            2.9900880252946466e-22
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "COR",
+            4.34876713666012e-19
+          ],
+          [
+            "2CH",
+            4.249188537464669e-22
+          ]
+        ],
+        "summary": {
+          "series": "series1901-unknown",
+          "series_description": "LL 2beat",
+          "series_number": 2501,
+          "n_instances": 36,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "131245.02"
+        }
+      },
+      {
+        "series_dir": "series2001-unknown",
+        "pred_seq": "TIscout",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TIscout",
+            1.0
+          ],
+          [
+            "MOLLI+",
+            5.893867108629812e-19
+          ],
+          [
+            "T2MAPPING",
+            8.243238316708603e-24
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "COR",
+            6.288625743532761e-20
+          ],
+          [
+            "2CH",
+            4.70451494988153e-23
+          ]
+        ],
+        "summary": {
+          "series": "series2001-unknown",
+          "series_description": "LL 2beat",
+          "series_number": 2001,
+          "n_instances": 36,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "130421.33"
+        }
+      },
+      {
+        "series_dir": "series2101-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.950664758682251
+          ],
+          [
+            "PC",
+            0.03770212084054947
+          ],
+          [
+            "WBLGE",
+            0.00995132327079773
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9748198986053467
+          ],
+          [
+            "AORTA",
+            0.015293887816369534
+          ],
+          [
+            "2CH",
+            0.009414889849722385
+          ]
+        ],
+        "summary": {
+          "series": "series2101-unknown",
+          "series_description": "BB scar_2CH",
+          "series_number": 2101,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "130535.50"
+        }
+      },
+      {
+        "series_dir": "series2201-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.981262743473053
+          ],
+          [
+            "WBLGE",
+            0.016985341906547546
+          ],
+          [
+            "PC",
+            0.0009656852926127613
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9995098114013672
+          ],
+          [
+            "2CH",
+            0.00025718650431372225
+          ],
+          [
+            "AORTA",
+            0.00018259599164593965
+          ]
+        ],
+        "summary": {
+          "series": "series2201-unknown",
+          "series_description": "BB scar_3CH",
+          "series_number": 2201,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "130638.45"
+        }
+      },
+      {
+        "series_dir": "series2301-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.95050048828125
+          ],
+          [
+            "PC",
+            0.03617534413933754
+          ],
+          [
+            "WBLGE",
+            0.012056251056492329
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9791434407234192
+          ],
+          [
+            "AORTA",
+            0.013180301524698734
+          ],
+          [
+            "2CH",
+            0.00741006713360548
+          ]
+        ],
+        "summary": {
+          "series": "series2301-unknown",
+          "series_description": "BB scar_4CH",
+          "series_number": 2301,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "130735.52"
+        }
+      },
+      {
+        "series_dir": "series2401-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9388434886932373
+          ],
+          [
+            "WBLGE",
+            0.027696555480360985
+          ],
+          [
+            "PC",
+            0.027062347158789635
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9875401854515076
+          ],
+          [
+            "2CH",
+            0.0077240061946213245
+          ],
+          [
+            "AORTA",
+            0.004626680631190538
+          ]
+        ],
+        "summary": {
+          "series": "series2401-unknown",
+          "series_description": "BB scar_SA",
+          "series_number": 2401,
+          "n_instances": 42,
+          "rows": 400,
+          "columns": 400,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "130838.38"
+        }
+      },
+      {
+        "series_dir": "series2501-unknown",
+        "pred_seq": "TIscout",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "TIscout",
+            1.0
+          ],
+          [
+            "MOLLI+",
+            1.1687114933572908e-17
+          ],
+          [
+            "T2MAPPING",
+            2.9900880252946466e-22
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            1.0
+          ],
+          [
+            "COR",
+            4.34876713666012e-19
+          ],
+          [
+            "2CH",
+            4.249188537464669e-22
+          ]
+        ],
+        "summary": {
+          "series": "series2501-unknown",
+          "series_description": "LL 2beat",
+          "series_number": 2501,
+          "n_instances": 36,
+          "rows": 256,
+          "columns": 256,
+          "slice_thickness": 10.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "131245.02"
+        }
+      },
+      {
+        "series_dir": "series2601-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9450093507766724
+          ],
+          [
+            "WBLGE",
+            0.04452246055006981
+          ],
+          [
+            "PC",
+            0.010123416781425476
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9987566471099854
+          ],
+          [
+            "AORTA",
+            0.0006719866069033742
+          ],
+          [
+            "2CH",
+            0.0005606982158496976
+          ]
+        ],
+        "summary": {
+          "series": "series2601-unknown",
+          "series_description": "scar_2CH",
+          "series_number": 2601,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "131424.44"
+        }
+      },
+      {
+        "series_dir": "series2701-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9263167977333069
+          ],
+          [
+            "WBLGE",
+            0.07053941488265991
+          ],
+          [
+            "PC",
+            0.0028518009930849075
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9995173215866089
+          ],
+          [
+            "2CH",
+            0.0003012603847309947
+          ],
+          [
+            "AORTA",
+            0.0001729222567519173
+          ]
+        ],
+        "summary": {
+          "series": "series2701-unknown",
+          "series_description": "scar_3CH",
+          "series_number": 2701,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "131519.07"
+        }
+      },
+      {
+        "series_dir": "series2801-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.9430203437805176
+          ],
+          [
+            "WBLGE",
+            0.04449935629963875
+          ],
+          [
+            "PC",
+            0.011936569586396217
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.9984654188156128
+          ],
+          [
+            "AORTA",
+            0.0007926797261461616
+          ],
+          [
+            "2CH",
+            0.0007251939387060702
+          ]
+        ],
+        "summary": {
+          "series": "series2801-unknown",
+          "series_description": "scar_4CH",
+          "series_number": 2801,
+          "n_instances": 3,
+          "rows": 432,
+          "columns": 432,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "131617.55"
+        }
+      },
+      {
+        "series_dir": "series2802-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series2803-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series2901-unknown",
+        "pred_seq": "DBLGE",
+        "pred_plane": "SAX",
+        "seq_top3": [
+          [
+            "DBLGE",
+            0.7677863836288452
+          ],
+          [
+            "WBLGE",
+            0.22672121226787567
+          ],
+          [
+            "TestPERF",
+            0.0033238395117223263
+          ]
+        ],
+        "plane_top3": [
+          [
+            "SAX",
+            0.99978107213974
+          ],
+          [
+            "2CH",
+            0.00017127275350503623
+          ],
+          [
+            "AORTA",
+            4.6038610889809206e-05
+          ]
+        ],
+        "summary": {
+          "series": "series2901-unknown",
+          "series_description": "scar_SA",
+          "series_number": 2901,
+          "n_instances": 39,
+          "rows": 400,
+          "columns": 400,
+          "slice_thickness": 8.0,
+          "acquisition_date": "20190103",
+          "acquisition_time": "131734.35"
+        }
+      },
+      {
+        "series_dir": "series2902-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      },
+      {
+        "series_dir": "series2903-unknown",
+        "pred_seq": null,
+        "pred_plane": null,
+        "seq_top3": null,
+        "plane_top3": null,
+        "summary": null
+      }
+    ]
+  }
+}

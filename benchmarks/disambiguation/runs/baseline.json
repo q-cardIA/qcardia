@@ -1,0 +1,1007 @@
+{
+  "meta": {
+    "name": "baseline",
+    "created": "2026-08-05T11:29:21",
+    "model": "qwen3:8b",
+    "disambiguate_version": {
+      "file_sha1": "d5f224389a39",
+      "git_commit": "834a052"
+    }
+  },
+  "decisions": {
+    "QLGE01_": [
+      {
+        "group_key": "Scouts_MP",
+        "seq": "Scouts",
+        "plane": "MP",
+        "members": [
+          "series0101-unknown"
+        ],
+        "chosen": "series0101-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "HASTE_AX",
+        "seq": "HASTE",
+        "plane": "AX",
+        "members": [
+          "series0201-unknown"
+        ],
+        "chosen": "series0201-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "CINE_2CH",
+        "seq": "CINE",
+        "plane": "2CH",
+        "members": [
+          "series0301-unknown",
+          "series0601-unknown"
+        ],
+        "chosen": "series0601-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series0301-unknown",
+            "role": "planning",
+            "reasoning": "This series has a unique series description 'p2CH single shot BH' which suggests it is a low-resolution planning acquisition, not the intended diagnostic series."
+          },
+          {
+            "series": "series0601-unknown",
+            "role": "primary",
+            "reasoning": "This series has a standard '2CH' description, a higher number of instances (30), and is likely the intended diagnostic series for the CINE/2CH class."
+          }
+        ]
+      },
+      {
+        "group_key": "CINE_SAX",
+        "seq": "CINE",
+        "plane": "SAX",
+        "members": [
+          "series0401-unknown",
+          "series1501-unknown"
+        ],
+        "chosen": "series1501-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series0401-unknown",
+            "role": "planning",
+            "reasoning": "This series is labeled as 'pSAX low-res cine', indicating it is a low-resolution planning acquisition, not the intended diagnostic series."
+          },
+          {
+            "series": "series1501-unknown",
+            "role": "primary",
+            "reasoning": "This series has a higher number of instances (420 vs. 90) and is likely the intended diagnostic series for the CINE/SAX class, as it is more comprehensive and detailed."
+          }
+        ]
+      },
+      {
+        "group_key": "CINE_4CH",
+        "seq": "CINE",
+        "plane": "4CH",
+        "members": [
+          "series0501-unknown"
+        ],
+        "chosen": "series0501-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "CINE_3CH",
+        "seq": "CINE",
+        "plane": "3CH",
+        "members": [
+          "series0701-unknown"
+        ],
+        "chosen": "series0701-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "MOLLI+_SAX",
+        "seq": "MOLLI+",
+        "plane": "SAX",
+        "members": [
+          "series0801-unknown",
+          "series1601-unknown",
+          "series3101-unknown"
+        ],
+        "chosen": "series1601-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series0801-unknown",
+            "role": "planning",
+            "reasoning": "This series has a generic description and is likely a low-resolution planning acquisition."
+          },
+          {
+            "series": "series1601-unknown",
+            "role": "primary",
+            "reasoning": "This series has a clear and specific description ('T1_native (PRE-REST)') and is likely the intended diagnostic series for the MOLLI+/SAX class."
+          },
+          {
+            "series": "series3101-unknown",
+            "role": "other",
+            "reasoning": "This series has a more specialized description ('T1_3 slice enhanced (ECV)') and is likely an enhanced version or a different protocol, not the primary diagnostic series."
+          }
+        ]
+      },
+      {
+        "group_key": "TestPERF_SAX",
+        "seq": "TestPERF",
+        "plane": "SAX",
+        "members": [
+          "series0901-unknown"
+        ],
+        "chosen": "series0901-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "PERF_SAX",
+        "seq": "PERF",
+        "plane": "SAX",
+        "members": [
+          "series1001-unknown",
+          "series1101-unknown",
+          "series1701-unknown"
+        ],
+        "chosen": "series1701-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series1001-unknown",
+            "role": "planning",
+            "reasoning": "The series description lacks explicit role indicators like 'rest' or 'stress', and the series number is not aligned with the rest/stress series, suggesting it is a low-resolution planning acquisition."
+          },
+          {
+            "series": "series1101-unknown",
+            "role": "stress",
+            "reasoning": "The series description explicitly includes 'STRESS', clearly identifying it as the stress perfusion acquisition."
+          },
+          {
+            "series": "series1701-unknown",
+            "role": "rest",
+            "reasoning": "The series description explicitly includes 'REST', clearly identifying it as the rest perfusion acquisition and serving as the primary series for this class."
+          }
+        ]
+      },
+      {
+        "group_key": "DBLGE_SAX",
+        "seq": "DBLGE",
+        "plane": "SAX",
+        "members": [
+          "series1201-unknown",
+          "series1301-unknown",
+          "series1401-unknown",
+          "series2001-unknown",
+          "series2101-unknown",
+          "series2201-unknown",
+          "series2301-unknown",
+          "series2501-unknown",
+          "series2601-unknown",
+          "series2701-unknown",
+          "series2801-unknown",
+          "series2901-unknown"
+        ],
+        "chosen": "series2301-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series1201-unknown",
+            "role": "planning",
+            "reasoning": "The series description 'early gad 2CH' suggests it is a low-resolution planning acquisition, not the intended diagnostic series."
+          },
+          {
+            "series": "series1301-unknown",
+            "role": "planning",
+            "reasoning": "The series description 'early gad 3CH' suggests it is a low-resolution planning acquisition, not the intended diagnostic series."
+          },
+          {
+            "series": "series1401-unknown",
+            "role": "planning",
+            "reasoning": "The series description 'early gad 4CH' suggests it is a low-resolution planning acquisition, not the intended diagnostic series."
+          },
+          {
+            "series": "series2001-unknown",
+            "role": "repeat",
+            "reasoning": "The series description 'DB scar_2CH' is similar to other scar series, and the low number of instances suggests it is a repeat or failed attempt."
+          },
+          {
+            "series": "series2101-unknown",
+            "role": "repeat",
+            "reasoning": "The series description 'DB scar_3CH' is similar to other scar series, and the low number of instances suggests it is a repeat or failed attempt."
+          },
+          {
+            "series": "series2201-unknown",
+            "role": "repeat",
+            "reasoning": "The series description 'DB scar_4CH' is similar to other scar series, and the low number of instances suggests it is a repeat or failed attempt."
+          },
+          {
+            "series": "series2301-unknown",
+            "role": "primary",
+            "reasoning": "This series has the highest number of instances (42), suggesting it is the intended diagnostic series for the DBLGE/SAX class."
+          },
+          {
+            "series": "series2501-unknown",
+            "role": "repeat",
+            "reasoning": "The series description 'DB scar_X' is similar to other scar series, and the low number of instances suggests it is a repeat or failed attempt."
+          },
+          {
+            "series": "series2601-unknown",
+            "role": "other",
+            "reasoning": "The series description 'scar_2CH' is similar to other scar series, but the resolution and instance count suggest it is not the primary diagnostic series."
+          },
+          {
+            "series": "series2701-unknown",
+            "role": "other",
+            "reasoning": "The series description 'scar_3CH' is similar to other scar series, but the resolution and instance count suggest it is not the primary diagnostic series."
+          },
+          {
+            "series": "series2801-unknown",
+            "role": "other",
+            "reasoning": "The series description 'scar_4CH' is similar to other scar series, but the resolution and instance count suggest it is not the primary diagnostic series."
+          },
+          {
+            "series": "series2901-unknown",
+            "role": "other",
+            "reasoning": "The series description 'scar_X' is similar to other scar series, but the resolution and instance count suggest it is not the primary diagnostic series."
+          }
+        ]
+      },
+      {
+        "group_key": "TIscout_SAX",
+        "seq": "TIscout",
+        "plane": "SAX",
+        "members": [
+          "series1801-unknown",
+          "series1901-unknown",
+          "series2401-unknown"
+        ],
+        "chosen": "series1901-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series1801-unknown",
+            "role": "planning",
+            "reasoning": "This series has the same series description and slice thickness as others, but was acquired later and has fewer instances, suggesting it is a low-resolution planning acquisition."
+          },
+          {
+            "series": "series1901-unknown",
+            "role": "primary",
+            "reasoning": "This series has the earliest acquisition time, consistent series description, and is likely the intended diagnostic series for the class."
+          },
+          {
+            "series": "series2401-unknown",
+            "role": "repeat",
+            "reasoning": "This series has the same series description and slice thickness as others, but was acquired at the same time as series1801-unknown, suggesting it is a repeated or failed attempt."
+          }
+        ]
+      },
+      {
+        "group_key": "WBLGE_SAX",
+        "seq": "WBLGE",
+        "plane": "SAX",
+        "members": [
+          "series3001-unknown"
+        ],
+        "chosen": "series3001-unknown",
+        "method": "single",
+        "assessments": []
+      }
+    ],
+    "QLGE02_": [
+      {
+        "group_key": "Scouts_MP",
+        "seq": "Scouts",
+        "plane": "MP",
+        "members": [
+          "series0101-unknown"
+        ],
+        "chosen": "series0101-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "HASTE_AX",
+        "seq": "HASTE",
+        "plane": "AX",
+        "members": [
+          "series0201-unknown"
+        ],
+        "chosen": "series0201-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "CINE_2CH",
+        "seq": "CINE",
+        "plane": "2CH",
+        "members": [
+          "series0301-unknown",
+          "series0601-unknown"
+        ],
+        "chosen": "series0601-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series0301-unknown",
+            "role": "planning",
+            "reasoning": "The series_description 'p2CH' appears to be a low-resolution planning acquisition, likely not intended for diagnostic use."
+          },
+          {
+            "series": "series0601-unknown",
+            "role": "primary",
+            "reasoning": "This series has a clear '2CH' description, a higher number of instances (30 vs. 25), and a later acquisition time, indicating it is the intended diagnostic series for the CINE/2CH class."
+          }
+        ]
+      },
+      {
+        "group_key": "CINE_4CH",
+        "seq": "CINE",
+        "plane": "4CH",
+        "members": [
+          "series0401-unknown",
+          "series0501-unknown"
+        ],
+        "chosen": "series0501-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series0401-unknown",
+            "role": "planning",
+            "reasoning": "This series has a generic 'SSL' description, which is often used for low-resolution planning acquisitions, and has fewer instances compared to the primary series."
+          },
+          {
+            "series": "series0501-unknown",
+            "role": "primary",
+            "reasoning": "This series has a specific '4CH' description, which aligns with the CINE/4CH class, and has a higher number of instances, indicating it is the intended diagnostic series."
+          }
+        ]
+      },
+      {
+        "group_key": "CINE_3CH",
+        "seq": "CINE",
+        "plane": "3CH",
+        "members": [
+          "series0701-unknown"
+        ],
+        "chosen": "series0701-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "MOLLI-_SAX",
+        "seq": "MOLLI-",
+        "plane": "SAX",
+        "members": [
+          "series0801-unknown"
+        ],
+        "chosen": "series0801-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "TestPERF_SAX",
+        "seq": "TestPERF",
+        "plane": "SAX",
+        "members": [
+          "series0901-unknown",
+          "series1001-unknown"
+        ],
+        "chosen": "series0901-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series0901-unknown",
+            "role": "other",
+            "reasoning": "The series lacks explicit role indicators like 'rest' or 'stress' in its description, and there is no clear evidence it is a planning or repeat acquisition. It is the only series with a unique series number, suggesting it may be the original or primary acquisition."
+          },
+          {
+            "series": "series1001-unknown",
+            "role": "repeat",
+            "reasoning": "This series has the same series description and metadata as series0901-unknown, indicating it is likely a repeat or duplicate acquisition, not the intended diagnostic series for the class."
+          }
+        ]
+      },
+      {
+        "group_key": "PERF_SAX",
+        "seq": "PERF",
+        "plane": "SAX",
+        "members": [
+          "series1101-unknown",
+          "series1201-unknown",
+          "series1701-unknown"
+        ],
+        "chosen": "series1701-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series1101-unknown",
+            "role": "planning",
+            "reasoning": "The series description lacks clear perfusion keywords like 'rest' or 'stress', and the series number is lower than others, suggesting it may be a low-resolution planning acquisition."
+          },
+          {
+            "series": "series1201-unknown",
+            "role": "repeat",
+            "reasoning": "This series has a higher number of instances and a later acquisition time than the rest series, suggesting it may be a repeated attempt at perfusion imaging."
+          },
+          {
+            "series": "series1701-unknown",
+            "role": "rest",
+            "reasoning": "The series description explicitly includes 'qREST', clearly identifying it as the rest perfusion acquisition, which is the standard baseline for comparison."
+          }
+        ]
+      },
+      {
+        "group_key": "DBLGE_SAX",
+        "seq": "DBLGE",
+        "plane": "SAX",
+        "members": [
+          "series1301-unknown",
+          "series1401-unknown",
+          "series1501-unknown",
+          "series2101-unknown",
+          "series2201-unknown",
+          "series2301-unknown",
+          "series2401-unknown",
+          "series2601-unknown",
+          "series2701-unknown",
+          "series2801-unknown",
+          "series2901-unknown"
+        ],
+        "chosen": "series2401-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series1301-unknown",
+            "role": "planning",
+            "reasoning": "The series description 'early gad 2CH' suggests a low-resolution planning acquisition, and the series number is lower than others, indicating it may be an early attempt."
+          },
+          {
+            "series": "series1401-unknown",
+            "role": "planning",
+            "reasoning": "The series description 'early gad 3CH' suggests a low-resolution planning acquisition, and the series number is lower than others, indicating it may be an early attempt."
+          },
+          {
+            "series": "series1501-unknown",
+            "role": "planning",
+            "reasoning": "The series description 'early gad 4CH' suggests a low-resolution planning acquisition, and the series number is lower than others, indicating it may be an early attempt."
+          },
+          {
+            "series": "series2101-unknown",
+            "role": "other",
+            "reasoning": "The series description 'BB scar_2CH' is similar to other scar series, but the number of instances is low and the series number is not the highest, suggesting it may be a secondary or supplementary series."
+          },
+          {
+            "series": "series2201-unknown",
+            "role": "other",
+            "reasoning": "The series description 'BB scar_3CH' is similar to other scar series, but the number of instances is low and the series number is not the highest, suggesting it may be a secondary or supplementary series."
+          },
+          {
+            "series": "series2301-unknown",
+            "role": "other",
+            "reasoning": "The series description 'BB scar_4CH' is similar to other scar series, but the number of instances is low and the series number is not the highest, suggesting it may be a secondary or supplementary series."
+          },
+          {
+            "series": "series2401-unknown",
+            "role": "primary",
+            "reasoning": "This series has the highest number of instances (42), and the series description 'BB scar_SA' is consistent with the primary scar series, making it the most complete and likely intended diagnostic series."
+          },
+          {
+            "series": "series2601-unknown",
+            "role": "repeat",
+            "reasoning": "The series description 'scar_2CH' is similar to other scar series, and the series number is lower than the primary series, suggesting it may be a repeated or failed attempt."
+          },
+          {
+            "series": "series2701-unknown",
+            "role": "repeat",
+            "reasoning": "The series description 'scar_3CH' is similar to other scar series, and the series number is lower than the primary series, suggesting it may be a repeated or failed attempt."
+          },
+          {
+            "series": "series2801-unknown",
+            "role": "repeat",
+            "reasoning": "The series description 'scar_4CH' is similar to other scar series, and the series number is lower than the primary series, suggesting it may be a repeated or failed attempt."
+          },
+          {
+            "series": "series2901-unknown",
+            "role": "other",
+            "reasoning": "The series description 'scar_SA' is similar to other scar series, but the series number is lower than the primary series, suggesting it may be a secondary or supplementary series."
+          }
+        ]
+      },
+      {
+        "group_key": "CINE_SAX",
+        "seq": "CINE",
+        "plane": "SAX",
+        "members": [
+          "series1601-unknown"
+        ],
+        "chosen": "series1601-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "MOLLI+_SAX",
+        "seq": "MOLLI+",
+        "plane": "SAX",
+        "members": [
+          "series1801-unknown"
+        ],
+        "chosen": "series1801-unknown",
+        "method": "single",
+        "assessments": []
+      },
+      {
+        "group_key": "TIscout_SAX",
+        "seq": "TIscout",
+        "plane": "SAX",
+        "members": [
+          "series1901-unknown",
+          "series2001-unknown",
+          "series2501-unknown"
+        ],
+        "chosen": "series2001-unknown",
+        "method": "llm",
+        "assessments": [
+          {
+            "series": "series1901-unknown",
+            "role": "planning",
+            "reasoning": "This series has the same series description and metadata as series2001-unknown, but was acquired later, suggesting it is a repeat or planning acquisition."
+          },
+          {
+            "series": "series2001-unknown",
+            "role": "primary",
+            "reasoning": "This series has the earliest acquisition time and is likely the intended diagnostic series for the class, making it the primary."
+          },
+          {
+            "series": "series2501-unknown",
+            "role": "repeat",
+            "reasoning": "This series has identical metadata to series1901-unknown and was acquired at the same time, suggesting it is a repeat attempt."
+          }
+        ]
+      }
+    ]
+  },
+  "classification_notes": {
+    "QLGE01_": {
+      "series0101-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0201-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0301-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0401-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0501-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0601-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0701-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0801-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0901-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1001-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1101-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1201-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1301-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1401-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1501-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1601-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1701-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1801-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1901-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2001-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2101-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2201-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2301-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2401-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2501-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2601-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2701-unknown": {
+        "escalated": true,
+        "escalation_from": [
+          "DBLGE",
+          "SAX"
+        ],
+        "escalation_to": [
+          "DBLGE",
+          "SAX"
+        ],
+        "escalation_reasoning": "The metadata indicates the series is labeled 'scar_3CH', which is a 3-chamber view typically acquired in the short-axis plane (SAX). The top candidate for plane is SAX with 98.6% confidence, strongly supporting this choice. The top sequence candidate is DBLGE (delayed contrast-enhanced MRI), which is commonly used for scar detection in cardiac MRI. The other sequence candidates (WBLGE and PC) are less likely given the context of scar imaging. Therefore, the best pair is (DBLGE, SAX).",
+        "activated": true
+      },
+      "series2801-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2901-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series3001-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series3101-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      }
+    },
+    "QLGE02_": {
+      "series0101-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0201-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0301-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0401-unknown": {
+        "escalated": true,
+        "escalation_from": [
+          "CINE",
+          "4CH"
+        ],
+        "escalation_to": [
+          "CINE",
+          "4CH"
+        ],
+        "escalation_reasoning": "The metadata indicates the series is labeled 'SSL', which is commonly associated with CINE sequences in cardiac MRI. While Cardisort's top sequence candidate is 'CINE' with very high confidence (0.99985), the plane classification is less certain. The top plane candidates are '4CH', '3CH', and 'SAX', with '4CH' having the highest probability (0.435). Given the high confidence in the 'CINE' sequence and the relatively higher confidence in '4CH' plane, the best pair is (CINE, 4CH).",
+        "activated": true
+      },
+      "series0501-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0601-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0701-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0801-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series0901-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1001-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1101-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1201-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1301-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1401-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1501-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1601-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1701-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1801-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series1901-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2001-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2101-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2201-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2301-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2401-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2501-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2601-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2701-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2801-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      },
+      "series2901-unknown": {
+        "escalated": false,
+        "escalation_from": null,
+        "escalation_to": null,
+        "escalation_reasoning": null,
+        "activated": false
+      }
+    }
+  }
+}

@@ -11,6 +11,7 @@ the first underscore into sequence/plane, in order of first appearance.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,71 @@ PLANE_NAMES = {
     12: "DA", 13: "PULV", 14: "MV", 15: "MP", 16: "SAG", 17: "COR",
     -1: "unlabelled",
 }
+
+# Not every cardisort (sequence, plane) class is something the app knows how
+# to load — SEQUENCE_TO_KEY_PREFIX/SUPPORTED_KEY_PLANES + series_key() are
+# the single source of truth for which classes become a loadable app key
+# (e.g. ("CINE", "SAX") -> "CINE_SAX"), shared by the app (dicom_model.py)
+# and the benchmark/review tooling so both agree on what "lands in the app".
+SEQUENCE_TO_KEY_PREFIX = {
+    "CINE": "CINE",
+    "DBLGE": "LGE",
+    "WBLGE": "LGE",
+    "PERF": "PERF",
+    "TestPERF": "PERF",
+}
+SUPPORTED_KEY_PLANES = {"SAX", "2CH", "3CH", "4CH"}
+
+
+def series_key(sequence_name: str, plane_name: str) -> str | None:
+    """The app-facing key for a (sequence_name, plane_name) class, or None if
+    the app doesn't have a slot for this class (unsupported sequence type or
+    plane)."""
+    prefix = SEQUENCE_TO_KEY_PREFIX.get(sequence_name)
+    if prefix is None or plane_name not in SUPPORTED_KEY_PLANES:
+        return None
+    return f"{prefix}_{plane_name}"
+
+# Below this margin between the top-1 and top-2 candidate for a head, the
+# classification is treated as "unsure" (see qcardia.refine_classification) —
+# margin is more robust than an absolute top-1 threshold since the model's
+# overall confidence calibration will keep shifting as it's retrained.
+CONFIDENCE_MARGIN_THRESHOLD = 0.2
+
+
+@dataclass
+class ClassificationResult:
+    """A cardisort prediction, keeping the top-3 candidates and probabilities
+    per head so callers can judge confidence instead of trusting argmax
+    blindly."""
+
+    sequence_name: str
+    plane_name: str
+    sequence_top3: list[tuple[str, float]]
+    plane_top3: list[tuple[str, float]]
+    # Set by qcardia.refine_classification.refine_classification when the
+    # LLM escalation step fires, so review tooling can show why it picked
+    # what it picked. None otherwise (including when cardisort was confident).
+    escalation_reasoning: str | None = None
+
+    @property
+    def is_sequence_uncertain(self) -> bool:
+        return _is_uncertain(self.sequence_top3)
+
+    @property
+    def is_plane_uncertain(self) -> bool:
+        return _is_uncertain(self.plane_top3)
+
+
+def _is_uncertain(top3: list[tuple[str, float]]) -> bool:
+    if len(top3) < 2:
+        return False
+    return (top3[0][1] - top3[1][1]) < CONFIDENCE_MARGIN_THRESHOLD
+
+
+def _topk(probs: torch.Tensor, class_names: dict, k: int = 3) -> list[tuple[str, float]]:
+    ranked_idxs = torch.argsort(probs, descending=True).tolist()[:k]
+    return [(class_names.get(idx, f"class_{idx}"), float(probs[idx])) for idx in ranked_idxs]
 
 
 class CardisortClassifier(nn.Module):
@@ -216,8 +282,9 @@ def classify_sequence_dir(
     target_size: tuple[int, int],
     grid_sample_mode: str,
     verbose: bool = False,
-) -> tuple[str, str] | None:
-    """Predicts the (sequence, plane) label pair for a sequence directory.
+) -> ClassificationResult | None:
+    """Predicts the (sequence, plane) label pair for a sequence directory,
+    plus the top-3 candidates and probabilities per head.
     Returns None (instead of raising) if the series can't be classified, so
     one malformed series doesn't abort a batch run over many patients."""
     try:
@@ -243,9 +310,11 @@ def classify_sequence_dir(
         print_class_probs("sequence", seq_probs, SEQUENCE_NAMES)
         print_class_probs("plane", plane_probs, PLANE_NAMES)
 
-    seq_idx = int(torch.argmax(seq_probs))
-    plane_idx = int(torch.argmax(plane_probs))
-    return (
-        SEQUENCE_NAMES.get(seq_idx, f"seq_class_{seq_idx}"),
-        PLANE_NAMES.get(plane_idx, f"plane_class_{plane_idx}"),
+    sequence_top3 = _topk(seq_probs, SEQUENCE_NAMES)
+    plane_top3 = _topk(plane_probs, PLANE_NAMES)
+    return ClassificationResult(
+        sequence_name=sequence_top3[0][0],
+        plane_name=plane_top3[0][0],
+        sequence_top3=sequence_top3,
+        plane_top3=plane_top3,
     )

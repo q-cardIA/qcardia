@@ -10,6 +10,7 @@ from qcardia.cardisort import (
     load_series_datasets,
 )
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
+from qcardia.refine_classification import refine_classification
 from qcardia.series import LGESeries
 
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cardisort"
@@ -36,7 +37,13 @@ for patient in patient_list[:]:
         )
         if prediction is None:
             continue
-        sequence_classifications[sequence_dir] = prediction
+        datasets = load_series_datasets(sequence_dir)
+        metadata = summarize_sequence_dir(sequence_dir, datasets)
+        prediction = refine_classification(sequence_dir, metadata, prediction)
+        sequence_classifications[sequence_dir] = (
+            prediction.sequence_name,
+            prediction.plane_name,
+        )
 
     # Multiple directories can land on the same (sequence, plane) class (e.g. a
     # low-res planning cine alongside the real diagnostic SAX stack). For each

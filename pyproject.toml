@@ -1,14 +1,37 @@
 [project]
 name = "qcardia"
 version = "0.0.1"
+# qcardia-data pins torch==2.3.1, which has no cp313+/macOS wheels — cap the
+# Python range so `uv run` (e.g. from benchmarks/disambiguation/) resolves
+# against a Python that actually has a matching torch wheel, instead of
+# defaulting to whatever's newest on the machine.
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "scipy==1.12.0",
     "scikit-image==0.22.0",
     "opencv-python==4.10.0.84",
     "requests>=2.31.0",
+    # Below were previously only satisfied transitively (via qcardia-data/
+    # qcardia-models, or via qcardia-app-dev's own direct deps when qcardia
+    # was used only as its dependency) — now declared directly since
+    # src/qcardia/*.py and benchmarks/disambiguation/bench.py import them
+    # and qcardia can be run standalone (e.g. the benchmark).
+    "numpy>=1.26.3",
+    "torch>=2.3.0",
+    "pydicom>=2.4.4",
+    "pyyaml>=6.0.1",
+    "natsort",
+    "nibabel",
+    "matplotlib",
     "qcardia-models@git+https://github.com/q-cardIA/qcardia-models",
     "qcardia-data@git+https://github.com/q-cardIA/qcardia-data"
 ]
+
+[tool.uv]
+# This is a local research workspace, not a published cross-platform
+# package — restricting to Windows avoids uv trying (and failing) to also
+# resolve darwin/linux wheels for exact-pinned deps like torch==2.3.1.
+environments = ["sys_platform == 'win32'"]
 
 [build-system]
 requires = ["setuptools==69.5.1", "wheel"]
