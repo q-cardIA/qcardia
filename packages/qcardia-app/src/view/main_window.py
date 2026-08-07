@@ -144,7 +144,7 @@ class MainWindow(QMainWindow):
         # while actual widget geometry isn't resolved until the first layout pass.
         sidebar_width = self.sidebar.minimumWidth()
         series_width = self.series_browser_widget.minimumWidth()
-        chat_default_width = min(int(screen_width * 0.3), self.chat_widget.maximumWidth())
+        chat_default_width = min(int(screen_width * 0.15), self.chat_widget.maximumWidth())
         display_width = max(400, screen_width - sidebar_width - series_width - chat_default_width)
         content_row.setSizes([sidebar_width, display_width, series_width, chat_default_width])
 
