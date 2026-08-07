@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from qcardia.cardisort import (
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 
+from utils.app_config import DISAMBIGUATION_CACHE_DIR
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
@@ -94,6 +96,14 @@ class DICOMModel:
         self.slice_positions = []
         self._cardisort_model = None
         self._cardisort_config = None
+        # Preprocessing toggles (welcome screen, see WelcomeWidget) -- default
+        # to the fast path; main.py flips these to whatever the user chose
+        # once the welcome screen transitions, before any subject can be
+        # loaded. True = reuse precomputed results when available; False =
+        # always run the cardisort model / always call the disambiguation LLM
+        # live, e.g. for a demo that wants to show that step actually running.
+        self.use_cardisort_cache = True
+        self.use_disambiguation_cache = True
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -408,8 +418,15 @@ class DICOMModel:
         return self._cardisort_model, self._cardisort_config
 
     def _describe_patient_folder(self, folder_path) -> list[SequenceDescriptor]:
+        folder_path = Path(folder_path)
+
+        if self.use_cardisort_cache:
+            cardisorted_target = self._resolve_cardisorted_target(folder_path)
+            if cardisorted_target is not None:
+                return self._describe_cardisorted_folder(cardisorted_target)
+
         model, config = self._get_cardisort_model()
-        sequence_dirs = get_sequence_dirs(Path(folder_path))
+        sequence_dirs = get_sequence_dirs(folder_path)
 
         descriptors = []
         for seq_dir in sequence_dirs:
@@ -436,7 +453,52 @@ class DICOMModel:
 
         return descriptors
 
-    def _group_and_resolve(self, descriptors: list[SequenceDescriptor]) -> dict[str, Path]:
+    def _resolve_cardisorted_target(self, folder_path: Path) -> Path | None:
+        """Dev/runtime speedup: if folder_path already IS cardisort's own output
+        layout, or a 'CardiSorted_<name>' sibling of it already exists on disk,
+        use that directly instead of re-running cardisort classification (slow
+        — one model inference per sequence dir — and redundant if it's already
+        been done once for this subject). Only consulted when
+        self.use_cardisort_cache is True (see the welcome screen's toggle)."""
+        if self._is_cardisorted_layout(folder_path):
+            return folder_path
+        sibling = folder_path.parent / f"CardiSorted_{folder_path.name}"
+        if self._is_cardisorted_layout(sibling):
+            return sibling
+        return None
+
+    @staticmethod
+    def _is_cardisorted_layout(folder_path: Path) -> bool:
+        """True if folder_path has top-level subfolders already named in
+        cardisort's own '{SEQUENCE}_{PLANE}' output convention (e.g. CINE_SAX,
+        WBLGE_4CH) — the unambiguous signature of a CardiSorted_* folder."""
+        if not folder_path.is_dir():
+            return False
+        return any(
+            d.is_dir() and d.name.split("_", 1)[0] in CARDISORT_SEQUENCE_TO_PREFIX
+            for d in folder_path.iterdir()
+        )
+
+    @staticmethod
+    def _describe_cardisorted_folder(folder_path: Path) -> list[SequenceDescriptor]:
+        """Reconstructs SequenceDescriptors straight from an already-cardisorted
+        folder's structure — no model inference. Candidate disambiguation among
+        same-key duplicates (e.g. 'scar_4CH' vs 'DB scar_4CH') still runs
+        normally afterward via _group_and_resolve, unchanged."""
+        descriptors = []
+        for top_dir in sorted(d for d in folder_path.iterdir() if d.is_dir()):
+            sequence_name, _, plane_name = top_dir.name.partition("_")
+            prefix = CARDISORT_SEQUENCE_TO_PREFIX.get(sequence_name)
+            key = (
+                f"{prefix}_{plane_name}"
+                if prefix is not None and plane_name in CARDISORT_SUPPORTED_PLANES
+                else None
+            )
+            for leaf_dir in sorted(d for d in top_dir.iterdir() if d.is_dir()):
+                descriptors.append(SequenceDescriptor(leaf_dir, sequence_name, plane_name, key))
+        return descriptors
+
+    def _group_and_resolve(self, descriptors: list[SequenceDescriptor], folder_path) -> dict[str, Path]:
         dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
         for d in descriptors:
             if d.key is not None:
@@ -444,7 +506,7 @@ class DICOMModel:
 
         classified: dict[str, Path] = {}
         for key, group in dirs_by_key.items():
-            primary = self._resolve_primary_dir(key, [d.path for d in group])
+            primary = self._resolve_primary_dir(key, [d.path for d in group], folder_path)
             classified[key] = primary
             for d in group:
                 d.is_primary = d.path == primary
@@ -452,11 +514,73 @@ class DICOMModel:
         return classified
 
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
-        return self._group_and_resolve(self._describe_patient_folder(folder_path))
+        return self._group_and_resolve(self._describe_patient_folder(folder_path), folder_path)
 
-    def _resolve_primary_dir(self, key: str, dirs: list[Path]) -> Path:
+    # -- duplicate-series disambiguation cache ---------------------------------
+    #
+    # disambiguate_duplicates() is an LLM call (see qcardia.disambiguate) and
+    # is by far the dominant cost of loading a subject. Its result only
+    # depends on which candidate directory NAMES exist for a given (subject,
+    # key), so it's cached to disk per subject and only recomputed if the
+    # candidate set actually changes. Only consulted when
+    # self.use_disambiguation_cache is True (see the welcome screen's
+    # toggle). See precompute_classification_cache.py to warm this ahead of
+    # a demo.
+
+    def _cache_subject_key(self, folder_path) -> str:
+        """Identifies a subject for cache-file naming: the resolved
+        CardiSorted folder's name if one exists (stable regardless of
+        whether callers pass the raw QLGE folder or its CardiSorted_
+        sibling), else the folder passed in directly."""
+        target = self._resolve_cardisorted_target(Path(folder_path))
+        return (target or Path(folder_path)).name
+
+    @staticmethod
+    def _cache_path(subject_key: str) -> Path:
+        return DISAMBIGUATION_CACHE_DIR / f"{subject_key}.json"
+
+    def _read_cached_primary(self, subject_key: str, key: str, signature: list[str]) -> str | None:
+        path = self._cache_path(subject_key)
+        if not path.exists():
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                cache = json.load(f)
+        except Exception:
+            return None
+        entry = cache.get(key)
+        if entry is None or entry.get("candidates") != signature:
+            return None  # stale (candidate dirs changed) or never cached for this key
+        return entry.get("primary")
+
+    def _write_cached_primary(self, subject_key: str, key: str, signature: list[str], primary_name: str):
+        path = self._cache_path(subject_key)
+        try:
+            DISAMBIGUATION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache = {}
+            if path.exists():
+                with open(path, encoding="utf-8") as f:
+                    cache = json.load(f)
+            cache[key] = {"candidates": signature, "primary": primary_name}
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(cache, f, indent=2)
+        except Exception as e:
+            logging.warning(f"Failed to write disambiguation cache for {subject_key}/{key}: {e}")
+
+    def _resolve_primary_dir(self, key: str, dirs: list[Path], folder_path) -> Path:
         if len(dirs) == 1:
             return dirs[0]
+
+        subject_key = self._cache_subject_key(folder_path)
+        signature = sorted(d.name for d in dirs)
+
+        if self.use_disambiguation_cache:
+            cached_name = self._read_cached_primary(subject_key, key, signature)
+            if cached_name is not None:
+                cached = next((d for d in dirs if d.name == cached_name), None)
+                if cached is not None:
+                    return cached
+                logging.warning(f"Disambiguation cache for {subject_key}/{key} pointed at a missing dir, recomputing")
 
         prefix, _, plane_name = key.partition("_")
         try:
@@ -464,13 +588,17 @@ class DICOMModel:
                 summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
             ]
             result = disambiguate_duplicates((prefix, plane_name), candidates)
-            return next(d for d in dirs if d.name == result["primary_series"])
+            primary = next(d for d in dirs if d.name == result["primary_series"])
         except Exception as e:
             logging.warning(
                 f"Disambiguation failed for {key} ({[d.name for d in dirs]}): {e}; "
                 "falling back to largest series"
             )
-            return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
+            primary = max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
+
+        if self.use_disambiguation_cache:
+            self._write_cached_primary(subject_key, key, signature, primary.name)
+        return primary
 
     def load_series_for_key(self, seq_dir: Path, key: str) -> dict:
         if key.startswith("CINE_"):
@@ -484,7 +612,7 @@ class DICOMModel:
 
     def load_patient(self, folder_path) -> PatientLoadResult:
         descriptors = self._describe_patient_folder(folder_path)
-        classified = self._group_and_resolve(descriptors)
+        classified = self._group_and_resolve(descriptors, folder_path)
 
         loaded: dict[str, dict] = {}
         for key, seq_dir in classified.items():
