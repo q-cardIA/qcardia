@@ -199,7 +199,6 @@ class WelcomeWidget(QWidget):
 
         button_row_layout.addWidget(self.left_panel_single_patient_pushbutton, 1)
         button_row_layout.addWidget(self._chevron_btn)
-        layout.addWidget(button_row)
 
         # Options dropdown (hidden until the chevron is toggled open). Read
         # by main.py at the welcome screen's transition_signal via the
@@ -223,7 +222,18 @@ class WelcomeWidget(QWidget):
         self._toggle_preproc_disambig = self._toggle_switch(default=True)
         options_layout.addLayout(self._toggle_row(self._toggle_preproc_disambig, "Preprocessed disambiguation"))
 
-        layout.addWidget(self._options_panel)
+        # button_row and _options_panel must sit with ZERO gap between them
+        # (the panel's top border needs to touch the button row's bottom
+        # border) -- wrapped in their own zero-spacing container so the
+        # panel's normal 12px inter-widget spacing (title/button/desc) can't
+        # sneak a gap in here specifically.
+        button_group = QWidget()
+        button_group_layout = QVBoxLayout(button_group)
+        button_group_layout.setContentsMargins(0, 0, 0, 0)
+        button_group_layout.setSpacing(0)
+        button_group_layout.addWidget(button_row)
+        button_group_layout.addWidget(self._options_panel)
+        layout.addWidget(button_group)
 
         desc = QLabel("Load and analyse a single patient's cardiac MRI study.")
         desc.setProperty("role", "welcomeDescription")

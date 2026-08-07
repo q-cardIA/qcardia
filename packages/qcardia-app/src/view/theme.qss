@@ -581,21 +581,24 @@ QLabel[role="welcomeSectionTitle"] {
 }
 
 /* Single-patient-mode button + "···" options chevron: one visual group.
-   The chevron's left corners and the main button's right corners stay
-   square where they meet; [panelOpen="true"] (set in Python on toggle,
-   see WelcomeWidget._on_chevron_toggled) squares the bottom corners too,
-   so the group sits flush on top of the open options panel. */
+   Both keep a full, IDENTICAL 2px border on all four sides — deliberately
+   not "remove the touching side" (that made the two buttons' box models
+   subtly different heights) — only the corner radii differ, so the shared
+   edge reads as one seam rather than a size mismatch. [panelOpen="true"]
+   (set in Python on toggle, see WelcomeWidget._on_chevron_toggled) squares
+   the bottom corners too, so the group sits flush on top of the open panel. */
 QPushButton[role="welcomeMainAction"] {
 	background-color: rgb(44, 35, 65);
 	border: 2px solid rgb(189, 147, 249);
-	border-right: none;
 	border-top-left-radius: 5px;
 	border-bottom-left-radius: 5px;
 	border-top-right-radius: 0px;
 	border-bottom-right-radius: 0px;
 	color: rgb(221, 221, 221);
 	font-size: 13px;
-	padding: 12px 20px;
+	padding: 0px 20px;
+	min-height: 48px;
+	max-height: 48px;
 	text-align: left;
 }
 QPushButton[role="welcomeMainAction"]:hover {
@@ -614,7 +617,6 @@ QPushButton[role="welcomeMainAction"][panelOpen="true"] {
 QPushButton[role="welcomeChevron"] {
 	background-color: rgb(44, 35, 65);
 	border: 2px solid rgb(189, 147, 249);
-	border-left: 1px solid rgba(0, 0, 0, 0.35);
 	border-top-left-radius: 0px;
 	border-bottom-left-radius: 0px;
 	border-top-right-radius: 5px;
@@ -624,6 +626,8 @@ QPushButton[role="welcomeChevron"] {
 	font-weight: bold;
 	letter-spacing: 2px;
 	padding: 0px;
+	min-height: 48px;
+	max-height: 48px;
 }
 QPushButton[role="welcomeChevron"]:hover {
 	background-color: rgb(60, 48, 88);
