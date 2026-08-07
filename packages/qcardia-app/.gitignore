@@ -136,3 +136,4 @@ dmypy.json
 wandb/
 *output*/
 CLAUDE.md
+src/precompute_classification_cache.py
