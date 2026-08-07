@@ -16,7 +16,12 @@ class DICOMController:
         self.current_time_index = 0
         self._last_result = None
         self._load_worker = None
-        self._seg_worker = None
+        # Keyed by series_key, not a single attribute — CINE_SAX and CINE_4CH
+        # segmentations can be requested back to back (e.g. two run_segmentation
+        # tool calls in one chat turn) and must be able to run concurrently.
+        # A single shared attribute meant the second request saw the first
+        # worker's isRunning()==True and silently no-op'd instead of starting.
+        self._seg_workers: dict[str, CallableWorker] = {}
         self._lge_seg_worker = None
 
         self.view.load_patient_button_signal.connect(self.load_patient)
@@ -157,24 +162,28 @@ class DICOMController:
 
     def run_segmentation(self, series_key: str = "CINE_SAX") -> bool:
         """Starts segmentation for series_key. Returns False (no-op) if a
-        segmentation is already running — callers must check this instead of
-        assuming the request was actually started."""
-        if self._seg_worker is not None and self._seg_worker.isRunning():
+        segmentation for THIS series_key is already running — callers must
+        check this instead of assuming the request was actually started.
+        Segmentation for a DIFFERENT series_key is unaffected and can run
+        concurrently (see _seg_workers)."""
+        existing = self._seg_workers.get(series_key)
+        if existing is not None and existing.isRunning():
             return False
         self._widget.show_segmentation_loading(series_key, "Segmenting…")
-        self._seg_worker = CallableWorker(self.model.predict_segmentation, series_key)
-        self._seg_worker.finished_ok.connect(
+        worker = CallableWorker(self.model.predict_segmentation, series_key)
+        self._seg_workers[series_key] = worker
+        worker.finished_ok.connect(
             lambda result: self._on_segmentation_done(series_key, result)
         )
-        self._seg_worker.error.connect(
+        worker.error.connect(
             lambda exc: self._on_segmentation_error(series_key, exc)
         )
-        self._seg_worker.start()
+        worker.start()
         return True
 
     def _on_segmentation_done(self, series_key: str, temporal_segmentations):
         self._widget.hide_segmentation_loading(series_key)
-        self._seg_worker = None
+        self._seg_workers.pop(series_key, None)
         if temporal_segmentations:
             seg_4d = np.stack(temporal_segmentations, axis=0)
             self._widget.set_segmentation(series_key, seg_4d)
@@ -191,7 +200,7 @@ class DICOMController:
 
     def _on_segmentation_error(self, series_key: str, exc):
         self._widget.hide_segmentation_loading(series_key)
-        self._seg_worker = None
+        self._seg_workers.pop(series_key, None)
         logging.error(f"{series_key} segmentation failed: {exc}")
         self.view.show_error(
             "Segmentation Error", f"Failed to run {series_key} segmentation:\n{exc}"
