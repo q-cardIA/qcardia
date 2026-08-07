@@ -137,3 +137,7 @@ wandb/
 *output*/
 CLAUDE.md
 src/precompute_classification_cache.py
+
+# leftover from context-retrieval branch, not used here
+retrieval_index/
+retrieval_gpu_venv/
