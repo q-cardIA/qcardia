@@ -3,7 +3,7 @@ import os
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -31,9 +31,7 @@ class WelcomeWidget(QWidget):
     def assistant_disabled(self) -> bool:
         """True if the AI Assistant should stay off — either the user opted
         out via the toggle, or Ollama isn't available so there's no toggle."""
-        if self.assistant_disabled_checkbox is None:
-            return True
-        return self.assistant_disabled_checkbox.isChecked()
+        return not (CHAT_AVAILABLE and self._toggle_llm_assistant.isChecked())
 
     @property
     def use_cardisort_cache(self) -> bool:
@@ -41,14 +39,14 @@ class WelcomeWidget(QWidget):
         re-running the cardisort model; False forces a live classification
         run on every load (e.g. for a demo that wants to show cardisort
         actually running). See DICOMModel.use_cardisort_cache."""
-        return self.use_cardisort_cache_checkbox.isChecked()
+        return self._toggle_preproc_cardisort.isChecked()
 
     @property
     def use_disambiguation_cache(self) -> bool:
         """True to reuse a cached duplicate-series disambiguation result
         instead of calling the LLM; False forces a live call on every load.
         See DICOMModel.use_disambiguation_cache."""
-        return self.use_disambiguation_cache_checkbox.isChecked()
+        return self._toggle_preproc_disambig.isChecked()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -69,6 +67,29 @@ class WelcomeWidget(QWidget):
             btn.setIcon(QIcon(pix))
             btn.setIconSize(QSize(20, 20))
         return btn
+
+    def _toggle_switch(self, default: bool, enabled: bool = True) -> QPushButton:
+        """An ON/OFF pill button standing in for a checkbox — used in the
+        options dropdown instead of QCheckBox so all three toggles read as
+        one consistent switch style."""
+        btn = QPushButton("ON" if default else "OFF")
+        btn.setCheckable(True)
+        btn.setChecked(default)
+        btn.setEnabled(enabled)
+        btn.setProperty("role", "welcomeToggleSwitch")
+        btn.toggled.connect(lambda checked, b=btn: b.setText("ON" if checked else "OFF"))
+        return btn
+
+    @staticmethod
+    def _toggle_row(toggle_btn: QPushButton, label_text: str) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        label = QLabel(label_text)
+        label.setProperty("role", "welcomeOptionLabel")
+        row.addWidget(toggle_btn)
+        row.addWidget(label)
+        row.addStretch(1)
+        return row
 
     # ------------------------------------------------------------------
     # Build
@@ -142,41 +163,6 @@ class WelcomeWidget(QWidget):
         card_row.addStretch(1)
         root.addLayout(card_row)
 
-        self.assistant_disabled_checkbox = None
-        root.addSpacing(16)
-        if not CHAT_AVAILABLE:
-            notice = QLabel("AI Assistant disabled — Ollama not detected.")
-            notice.setProperty("role", "welcomeNotice")
-            notice.setAlignment(Qt.AlignCenter)
-            root.addWidget(notice)
-        else:
-            self.assistant_disabled_checkbox = QCheckBox("Disable AI Assistant")
-            self.assistant_disabled_checkbox.setProperty("role", "welcomeToggle")
-            row = QHBoxLayout()
-            row.addStretch(1)
-            row.addWidget(self.assistant_disabled_checkbox)
-            row.addStretch(1)
-            root.addLayout(row)
-
-        # Preprocessing toggles: checked (default) = fast path, unchecked =
-        # force the live/slow path on every load regardless of what's already
-        # cached. Useful for a demo that wants to show cardisort/disambiguation
-        # actually running instead of hitting a cache. See DICOMModel's
-        # use_cardisort_cache/use_disambiguation_cache flags, set from these
-        # at transition time (main.py).
-        self.use_cardisort_cache_checkbox = QCheckBox("Use precomputed cardisort classification")
-        self.use_cardisort_cache_checkbox.setProperty("role", "welcomeToggle")
-        self.use_cardisort_cache_checkbox.setChecked(True)
-        self.use_disambiguation_cache_checkbox = QCheckBox("Use cached LLM disambiguation")
-        self.use_disambiguation_cache_checkbox.setProperty("role", "welcomeToggle")
-        self.use_disambiguation_cache_checkbox.setChecked(True)
-        preprocessing_row = QHBoxLayout()
-        preprocessing_row.addStretch(1)
-        preprocessing_row.addWidget(self.use_cardisort_cache_checkbox)
-        preprocessing_row.addWidget(self.use_disambiguation_cache_checkbox)
-        preprocessing_row.addStretch(1)
-        root.addLayout(preprocessing_row)
-
         root.addStretch(3)
 
     def _build_left_panel(self):
@@ -194,10 +180,50 @@ class WelcomeWidget(QWidget):
         layout.addWidget(title)
         layout.addSpacing(8)
 
+        # Main action button + "···" options chevron, side by side, sharing
+        # one visual group (squared-off inner corners) that expands into a
+        # dropdown of ON/OFF toggles below when the chevron is checked.
+        button_row = QWidget()
+        button_row_layout = QHBoxLayout(button_row)
+        button_row_layout.setContentsMargins(0, 0, 0, 0)
+        button_row_layout.setSpacing(0)
+
         self.left_panel_single_patient_pushbutton = self._icon_btn(
-            "Single patient mode", "patient-icon.png", "welcomePrimaryAction"
+            "Single patient mode", "patient-icon.png", "welcomeMainAction"
         )
-        layout.addWidget(self.left_panel_single_patient_pushbutton)
+        self._chevron_btn = QPushButton("···")
+        self._chevron_btn.setCheckable(True)
+        self._chevron_btn.setChecked(False)
+        self._chevron_btn.setToolTip("Assistant and preprocessing options")
+        self._chevron_btn.setProperty("role", "welcomeChevron")
+
+        button_row_layout.addWidget(self.left_panel_single_patient_pushbutton, 1)
+        button_row_layout.addWidget(self._chevron_btn)
+        layout.addWidget(button_row)
+
+        # Options dropdown (hidden until the chevron is toggled open). Read
+        # by main.py at the welcome screen's transition_signal via the
+        # assistant_disabled/use_cardisort_cache/use_disambiguation_cache
+        # properties above.
+        self._options_panel = QFrame()
+        self._options_panel.setProperty("role", "welcomeOptionsPanel")
+        self._options_panel.hide()
+        options_layout = QVBoxLayout(self._options_panel)
+        options_layout.setContentsMargins(16, 12, 16, 12)
+        options_layout.setSpacing(10)
+
+        self._toggle_llm_assistant = self._toggle_switch(default=True, enabled=CHAT_AVAILABLE)
+        if not CHAT_AVAILABLE:
+            self._toggle_llm_assistant.setToolTip("Ollama not detected")
+        options_layout.addLayout(self._toggle_row(self._toggle_llm_assistant, "LLM assistant"))
+
+        self._toggle_preproc_cardisort = self._toggle_switch(default=True)
+        options_layout.addLayout(self._toggle_row(self._toggle_preproc_cardisort, "Preprocessed cardisort"))
+
+        self._toggle_preproc_disambig = self._toggle_switch(default=True)
+        options_layout.addLayout(self._toggle_row(self._toggle_preproc_disambig, "Preprocessed disambiguation"))
+
+        layout.addWidget(self._options_panel)
 
         desc = QLabel("Load and analyse a single patient's cardiac MRI study.")
         desc.setProperty("role", "welcomeDescription")
@@ -267,6 +293,7 @@ class WelcomeWidget(QWidget):
         btn_h = 52
 
         self.left_panel_single_patient_pushbutton.setFixedHeight(btn_h)
+        self._chevron_btn.setFixedSize(44, btn_h)
         self.left_panel.setMinimumWidth(340)
         self.left_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
@@ -288,6 +315,7 @@ class WelcomeWidget(QWidget):
         self.left_panel_single_patient_pushbutton.clicked.connect(
             self.transition_signal.emit
         )
+        self._chevron_btn.toggled.connect(self._on_chevron_toggled)
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)
         self.right_panel_about_software_pushbutton.clicked.connect(self.about_clicked)
         self.right_panel_helpwiki_pushbutton.clicked.connect(self.help_clicked)
@@ -296,6 +324,17 @@ class WelcomeWidget(QWidget):
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
+
+    def _on_chevron_toggled(self, checked: bool):
+        self._options_panel.setVisible(checked)
+        # Square off the inner corners where the button row meets the open
+        # panel, so the group reads as one seamless block rather than a
+        # floating dropdown. QSS caches property-based matches, so a dynamic
+        # property change needs an explicit unpolish/polish to repaint.
+        for widget in (self.left_panel_single_patient_pushbutton, self._chevron_btn):
+            widget.setProperty("panelOpen", checked)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
 
     def community_clicked(self):
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA"))

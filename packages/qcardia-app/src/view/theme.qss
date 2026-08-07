@@ -567,12 +567,6 @@ QLabel[role="welcomeNotice"] {
 	background-color: transparent;
 }
 
-QCheckBox[role="welcomeToggle"] {
-	color: rgb(113, 126, 149);
-	font-size: 11px;
-	background-color: transparent;
-}
-
 QWidget[role="welcomeSidePanel"] {
 	background-color: rgb(33, 37, 43);
 	border: 1px solid rgb(44, 49, 58);
@@ -586,23 +580,101 @@ QLabel[role="welcomeSectionTitle"] {
 	background-color: transparent;
 }
 
-QPushButton[role="welcomePrimaryAction"] {
+/* Single-patient-mode button + "···" options chevron: one visual group.
+   The chevron's left corners and the main button's right corners stay
+   square where they meet; [panelOpen="true"] (set in Python on toggle,
+   see WelcomeWidget._on_chevron_toggled) squares the bottom corners too,
+   so the group sits flush on top of the open options panel. */
+QPushButton[role="welcomeMainAction"] {
 	background-color: rgb(44, 35, 65);
 	border: 2px solid rgb(189, 147, 249);
-	border-radius: 5px;
+	border-right: none;
+	border-top-left-radius: 5px;
+	border-bottom-left-radius: 5px;
+	border-top-right-radius: 0px;
+	border-bottom-right-radius: 0px;
 	color: rgb(221, 221, 221);
 	font-size: 13px;
 	padding: 12px 20px;
 	text-align: left;
 }
-QPushButton[role="welcomePrimaryAction"]:hover {
+QPushButton[role="welcomeMainAction"]:hover {
 	background-color: rgb(60, 48, 88);
 	border-color: rgb(210, 175, 255);
 	color: rgb(255, 255, 255);
 }
-QPushButton[role="welcomePrimaryAction"]:pressed {
+QPushButton[role="welcomeMainAction"]:pressed {
 	background-color: rgb(189, 147, 249);
 	color: rgb(255, 255, 255);
+}
+QPushButton[role="welcomeMainAction"][panelOpen="true"] {
+	border-bottom-left-radius: 0px;
+}
+
+QPushButton[role="welcomeChevron"] {
+	background-color: rgb(44, 35, 65);
+	border: 2px solid rgb(189, 147, 249);
+	border-left: 1px solid rgba(0, 0, 0, 0.35);
+	border-top-left-radius: 0px;
+	border-bottom-left-radius: 0px;
+	border-top-right-radius: 5px;
+	border-bottom-right-radius: 5px;
+	color: rgb(221, 221, 221);
+	font-size: 18px;
+	font-weight: bold;
+	letter-spacing: 2px;
+	padding: 0px;
+}
+QPushButton[role="welcomeChevron"]:hover {
+	background-color: rgb(60, 48, 88);
+	border-color: rgb(210, 175, 255);
+}
+QPushButton[role="welcomeChevron"]:checked {
+	background-color: rgb(60, 48, 88);
+}
+QPushButton[role="welcomeChevron"][panelOpen="true"] {
+	border-bottom-right-radius: 0px;
+}
+
+QFrame[role="welcomeOptionsPanel"] {
+	background-color: rgb(33, 37, 43);
+	border: 2px solid rgb(189, 147, 249);
+	border-top: none;
+	border-bottom-left-radius: 5px;
+	border-bottom-right-radius: 5px;
+}
+
+QLabel[role="welcomeOptionLabel"] {
+	color: rgb(180, 180, 190);
+	font-size: 12px;
+	background-color: transparent;
+}
+
+QPushButton[role="welcomeToggleSwitch"] {
+	background-color: rgb(52, 59, 72);
+	border: 1px solid rgb(64, 71, 88);
+	border-radius: 11px;
+	color: rgb(140, 148, 160);
+	font-size: 10px;
+	font-weight: bold;
+	min-width: 44px;
+	max-width: 44px;
+	min-height: 22px;
+	max-height: 22px;
+	padding: 0px;
+}
+QPushButton[role="welcomeToggleSwitch"]:hover:enabled {
+	border-color: rgb(91, 101, 124);
+}
+QPushButton[role="welcomeToggleSwitch"]:checked {
+	background-color: rgba(189, 147, 249, 60);
+	border: 1px solid rgb(189, 147, 249);
+	color: rgb(189, 147, 249);
+}
+QPushButton[role="welcomeToggleSwitch"]:disabled {
+	background-color: rgb(40, 44, 52);
+	border-color: rgb(44, 49, 57);
+	color: rgb(70, 76, 88);
 }
 
 QPushButton[role="welcomeInfoAction"] {
