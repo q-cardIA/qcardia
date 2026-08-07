@@ -90,8 +90,19 @@ class _Bubble(QFrame):
     def apply_width_cap(self, cap: int):
         """Fix the bubble's width to whatever is smaller: its natural
         (unwrapped) width, or `cap`. Short messages hug their content; long
-        ones wrap and grow up to the cap — never wider."""
-        self.setFixedWidth(min(cap, max(self.natural_width(), 40)))
+        ones wrap and grow up to the cap — never wider.
+
+        Also fixes the inner QLabel's own width, not just the bubble's --
+        with word-wrap on, a QLabel's wrapped sizeHint only gets recomputed
+        on its OWN next layout pass, which can lag a beat behind the
+        bubble's setFixedWidth (visible as dead space to the right of the
+        text on a freshly-added bubble, until some later event like a
+        window resize forces every bubble's layout to recompute). Setting
+        the label's width explicitly makes it wrap immediately, in the same
+        call, instead of depending on that later event ever firing."""
+        width = min(cap, max(self.natural_width(), 40))
+        self.setFixedWidth(width)
+        self._label.setFixedWidth(max(width - self._MARGINS, 10))
 
 
 class _ToolCallBubble(QFrame):
@@ -230,7 +241,13 @@ class ChatWidget(QFrame):
 
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(0, 0, 0, 4)
+        # Left/right margins matter here, not just visual padding: with 0
+        # margin a bubble's own border sits flush against the panel's outer
+        # edge, which reads as no border at all on that side (nothing to
+        # show it against) even though top/bottom borders are visible thanks
+        # to the inter-row spacing below. See _user_bubble_max_width, which
+        # subtracts these same margins so capped bubbles don't overflow them.
+        self._content_layout.setContentsMargins(8, 0, 8, 4)
         self._content_layout.setSpacing(4)
         self._content_layout.addStretch(1)
 
@@ -368,7 +385,9 @@ class ChatWidget(QFrame):
         self._scroll_to_bottom()
 
     def _user_bubble_max_width(self) -> int:
-        return max(120, int(self._scroll.viewport().width() * _USER_BUBBLE_WIDTH_FRACTION))
+        margins = self._content_layout.contentsMargins()
+        available = self._scroll.viewport().width() - margins.left() - margins.right()
+        return max(120, int(available * _USER_BUBBLE_WIDTH_FRACTION))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
