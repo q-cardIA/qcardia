@@ -18,7 +18,6 @@ class DICOMController:
         self._current_subject_folder = None
         self._load_worker = None
         self._seg_workers: dict[str, CallableWorker] = {}  # keyed by series_key, so different modalities can run concurrently
-        self._lge_seg_worker = None
 
         self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
@@ -168,7 +167,10 @@ class DICOMController:
         if existing is not None and existing.isRunning():
             return False
         self._widget.show_segmentation_loading(series_key, "Segmenting…")
-        worker = CallableWorker(self.model.predict_segmentation, series_key)
+        if series_key == "LGE_SAX":
+            worker = CallableWorker(self.model.predict_lge_segmentation)
+        else:
+            worker = CallableWorker(self.model.predict_segmentation, series_key)
         self._seg_workers[series_key] = worker
         worker.finished_ok.connect(
             lambda result: self._on_segmentation_done(series_key, result)
@@ -179,55 +181,39 @@ class DICOMController:
         worker.start()
         return True
 
-    def _on_segmentation_done(self, series_key: str, temporal_segmentations):
+    def _on_segmentation_done(self, series_key: str, result):
         self._widget.hide_segmentation_loading(series_key)
         self._seg_workers.pop(series_key, None)
-        if temporal_segmentations:
-            seg_4d = np.stack(temporal_segmentations, axis=0)
-            self._widget.set_segmentation(series_key, seg_4d)
-        else:
-            logging.error(
-                f"{series_key} segmentation produced no usable output — see earlier "
-                "'Failed to extract segmentation for time N' warnings for the cause."
-            )
-            self.view.show_warning(
-                "Segmentation Empty",
-                f"The {series_key} segmentation model ran but produced no usable "
-                f"output for this subject. Check the terminal/log output for details.",
-            )
+        # predict_segmentation returns a per-time-frame list (needs stacking);
+        # predict_lge_segmentation returns one volume directly.
+        if isinstance(result, list):
+            if not result:
+                logging.error(
+                    f"{series_key} segmentation produced no usable output — see earlier "
+                    "'Failed to extract segmentation for time N' warnings for the cause."
+                )
+                self.view.show_warning(
+                    "Segmentation Empty",
+                    f"The {series_key} segmentation model ran but produced no usable "
+                    f"output for this subject. Check the terminal/log output for details.",
+                )
+                return
+            result = np.stack(result, axis=0)
+        self._widget.set_segmentation(series_key, result)
 
     def _on_segmentation_error(self, series_key: str, exc):
         self._widget.hide_segmentation_loading(series_key)
         self._seg_workers.pop(series_key, None)
-        logging.error(f"{series_key} segmentation failed: {exc}")
-        self.view.show_error(
-            "Segmentation Error", f"Failed to run {series_key} segmentation:\n{exc}"
-        )
+        if isinstance(exc, ValueError):
+            self.view.show_warning("No Segmentation Data", str(exc))
+        else:
+            logging.error(f"{series_key} segmentation failed: {exc}")
+            self.view.show_error(
+                "Segmentation Error", f"Failed to run {series_key} segmentation:\n{exc}"
+            )
 
     def run_lge_segmentation(self) -> bool:
-        """Starts LGE segmentation. Returns False (no-op) if one is already running."""
-        if self._lge_seg_worker is not None and self._lge_seg_worker.isRunning():
-            return False
-        self._widget.show_segmentation_loading("LGE_SAX", "Segmenting…")
-        self._lge_seg_worker = CallableWorker(self.model.predict_lge_segmentation)
-        self._lge_seg_worker.finished_ok.connect(self._on_lge_segmentation_done)
-        self._lge_seg_worker.error.connect(self._on_lge_segmentation_error)
-        self._lge_seg_worker.start()
-        return True
-
-    def _on_lge_segmentation_done(self, seg_volume):
-        self._widget.hide_segmentation_loading("LGE_SAX")
-        self._lge_seg_worker = None
-        self._widget.set_segmentation("LGE_SAX", seg_volume)
-
-    def _on_lge_segmentation_error(self, exc):
-        self._widget.hide_segmentation_loading("LGE_SAX")
-        self._lge_seg_worker = None
-        if isinstance(exc, ValueError):
-            self.view.show_warning("No LGE Volume", str(exc))
-        else:
-            logging.error(f"LGE segmentation failed: {exc}")
-            self.view.show_error("LGE Segmentation Error", f"Failed to run LGE segmentation:\n{exc}")
+        return self.run_segmentation("LGE_SAX")
 
     def apply_preset(self, name: str):
         if name == "perfusion":

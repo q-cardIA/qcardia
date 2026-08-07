@@ -22,6 +22,10 @@ from view.sidebar_widget import SidebarWidget
 from view.welcome_widget import WelcomeWidget
 
 
+def load_app_icon() -> QIcon | None:
+    return QIcon(str(ICON_PATH)) if ICON_PATH.is_file() else None
+
+
 class MainWindow(QMainWindow):
 
     load_patient_button_signal = Signal(str)
@@ -34,8 +38,9 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        if ICON_PATH.is_file():
-            self.setWindowIcon(QIcon(str(ICON_PATH)))
+        icon = load_app_icon()
+        if icon is not None:
+            self.setWindowIcon(icon)
         self.folder_selected = False
         self.welcome_widget = WelcomeWidget(self)
         self.setCentralWidget(self.welcome_widget)

@@ -135,8 +135,6 @@ _FEW_SHOT_EXAMPLE = [
     },
 ]
 
-_CINE_MODALITIES = ("CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH")
-
 _TOOLS = [
     {
         "type": "function",
@@ -406,7 +404,7 @@ class ChatController:
 
             if name == "run_segmentation":
                 modalities = [
-                    key for key in (*_CINE_MODALITIES, "LGE_SAX") if key in series
+                    key for key in (*self.model.cine_modalities, "LGE_SAX") if key in series
                 ]
                 if not modalities:
                     continue
@@ -529,21 +527,14 @@ class ChatController:
         try:
             if name == "run_segmentation":
                 modality = str(arguments.get("modality", "")).upper()
-                if modality in _CINE_MODALITIES:
-                    if not self.dicom_controller.run_segmentation(modality):
-                        return (
-                            f"A segmentation is already running — try requesting "
-                            f"{modality} again once it finishes."
-                        )
-                    return f"Requested {modality} segmentation (check the app for the result or any errors)."
-                if modality == "LGE_SAX":
-                    if not self.dicom_controller.run_lge_segmentation():
-                        return "A segmentation is already running — try requesting LGE_SAX again once it finishes."
-                    return "Requested LGE_SAX segmentation (check the app for the result or any errors)."
-                return (
-                    f"Unknown modality '{modality}' — expected "
-                    f"{', '.join(repr(m) for m in _CINE_MODALITIES)} or 'LGE_SAX'."
-                )
+                if modality not in (*self.model.cine_modalities, "LGE_SAX"):
+                    return (
+                        f"Unknown modality '{modality}' — expected "
+                        f"{', '.join(repr(m) for m in self.model.cine_modalities)} or 'LGE_SAX'."
+                    )
+                if not self.dicom_controller.run_segmentation(modality):
+                    return f"A segmentation is already running — try requesting {modality} again once it finishes."
+                return f"Requested {modality} segmentation (check the app for the result or any errors)."
 
             if name == "apply_preset":
                 preset_name = str(arguments["preset"])

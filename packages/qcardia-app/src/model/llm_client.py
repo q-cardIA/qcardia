@@ -8,12 +8,11 @@ qcardia.disambiguate.disambiguate_duplicates, just streaming and with tools.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import requests
 from PySide6.QtCore import QThread, Signal
 
-from utils.app_config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX, OLLAMA_URL, import_gguf_model
+from utils.app_config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX, OLLAMA_URL
 
 KEEP_ALIVE = "30m"  # how long Ollama keeps the model resident after a request (default is 5 min)
 
@@ -111,23 +110,3 @@ def warm_model(model: str = OLLAMA_MODEL):
         )
     except requests.RequestException:
         pass  # best-effort warm-up; the real chat call will surface any real connectivity error
-
-
-class ModelImportWorker(QThread):
-    """Registers a local GGUF file as an Ollama model in the background
-    (`ollama create` can take a little while on first import)."""
-
-    finished_ok = Signal(str)  # resulting model tag
-    error = Signal(str)
-
-    def __init__(self, gguf_path: Path):
-        super().__init__()
-        self._gguf_path = gguf_path
-
-    def run(self):
-        try:
-            tag = import_gguf_model(self._gguf_path)
-        except Exception as e:
-            self.error.emit(str(e))
-            return
-        self.finished_ok.emit(tag)

@@ -2,15 +2,14 @@ import logging
 import sys
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from controllers.chat_controller import ChatController
 from controllers.dicom_controller import DICOMController
 from model.dicom_model import DICOMModel
-from utils.app_config import CHAT_AVAILABLE, ICON_PATH
+from utils.app_config import CHAT_AVAILABLE
 from view.theme import apply_theme
-from view.main_window import MainWindow
+from view.main_window import MainWindow, load_app_icon
 
 logging.basicConfig(level=logging.INFO)
 
@@ -31,8 +30,9 @@ def _set_windows_taskbar_icon():
 def main():
     _set_windows_taskbar_icon()
     app = QApplication()
-    if ICON_PATH.is_file():
-        app.setWindowIcon(QIcon(str(ICON_PATH)))
+    icon = load_app_icon()
+    if icon is not None:
+        app.setWindowIcon(icon)
     apply_theme(app)
     main_window = MainWindow()
 
@@ -57,7 +57,7 @@ def main():
 
     main_window.show()
 
-    if ICON_PATH.is_file():
+    if icon is not None:
         # Windows' taskbar button is created from python.exe's own icon the
         # moment the window first appears; the WM_SETICON calls above (made
         # before/at construction, while heavy imports like torch/tf-keras are
@@ -66,7 +66,6 @@ def main():
         # is actually pumping messages so Explorer picks up the real icon
         # immediately instead of only after some later repaint.
         def _reapply_icon():
-            icon = QIcon(str(ICON_PATH))
             app.setWindowIcon(icon)
             main_window.setWindowIcon(icon)
 

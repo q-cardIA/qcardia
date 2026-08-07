@@ -91,7 +91,6 @@ class DICOMModel:
         self.series: dict[str, BaseSeries] = {}
         self.folder_path = None
         self.temporal_volumes = []
-        self.temporal_segmentations = []
         self.num_time_frames = 0
         self.slice_positions = []
         self._cardisort_model = None
@@ -109,6 +108,7 @@ class DICOMModel:
             "CINE_3CH": wandb_path / "CINE_4CH",
             "CINE_4CH": wandb_path / "CINE_4CH",
         }
+        self.cine_modalities = tuple(self._seg_wandb_paths)
         self.lge_wandb_run_path = wandb_path / "LGE_SAX"
 
         # Only feeds a best-effort shape heuristic in predict_segmentation; falls back to {}.
@@ -368,8 +368,6 @@ class DICOMModel:
                 logging.error(f"Failed to extract any segmentation: {e}")
                 results = []
 
-        if series_key == "CINE_SAX":
-            self.temporal_segmentations = results
         return results
 
     def get_geometry(self, series_key: str) -> VolumeGeometry | None:
@@ -495,12 +493,20 @@ class DICOMModel:
             if d.key is not None:
                 dirs_by_key[d.key].append(d)
 
+        subject_key = self._cache_subject_key(folder_path)
+        cache = self._load_disambiguation_cache(subject_key) if self.use_disambiguation_cache else {}
+        cache_dirty = False
+
         classified: dict[str, Path] = {}
         for key, group in dirs_by_key.items():
-            primary = self._resolve_primary_dir(key, [d.path for d in group], folder_path)
+            primary, wrote = self._resolve_primary_dir(key, [d.path for d in group], cache)
+            cache_dirty = cache_dirty or wrote
             classified[key] = primary
             for d in group:
                 d.is_primary = d.path == primary
+
+        if cache_dirty:
+            self._save_disambiguation_cache(subject_key, cache)
 
         return classified
 
@@ -508,6 +514,8 @@ class DICOMModel:
         return self._group_and_resolve(self._describe_patient_folder(folder_path), folder_path)
 
     # -- duplicate-series disambiguation cache, gated by self.use_disambiguation_cache --
+    # One JSON file per subject, loaded/saved once per _group_and_resolve call
+    # rather than per ambiguous key.
 
     def _cache_subject_key(self, folder_path) -> str:
         """Identifies a subject for cache-file naming: the resolved
@@ -521,55 +529,50 @@ class DICOMModel:
     def _cache_path(subject_key: str) -> Path:
         return DISAMBIGUATION_CACHE_DIR / f"{subject_key}.json"
 
-    def _read_cached_primary(self, subject_key: str, key: str, signature: list[str]) -> str | None:
+    def _load_disambiguation_cache(self, subject_key: str) -> dict:
         path = self._cache_path(subject_key)
         if not path.exists():
-            return None
+            return {}
         try:
             with open(path, encoding="utf-8") as f:
-                cache = json.load(f)
+                return json.load(f)
         except Exception:
-            return None
-        entry = cache.get(key)
-        if entry is None or entry.get("candidates") != signature:
-            return None  # stale (candidate dirs changed) or never cached for this key
-        return entry.get("primary")
+            return {}
 
-    def _write_cached_primary(self, subject_key: str, key: str, signature: list[str], primary_name: str):
-        path = self._cache_path(subject_key)
+    def _save_disambiguation_cache(self, subject_key: str, cache: dict):
         try:
             DISAMBIGUATION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            cache = {}
-            if path.exists():
-                with open(path, encoding="utf-8") as f:
-                    cache = json.load(f)
-            cache[key] = {"candidates": signature, "primary": primary_name}
-            with open(path, "w", encoding="utf-8") as f:
+            with open(self._cache_path(subject_key), "w", encoding="utf-8") as f:
                 json.dump(cache, f, indent=2)
         except Exception as e:
-            logging.warning(f"Failed to write disambiguation cache for {subject_key}/{key}: {e}")
+            logging.warning(f"Failed to write disambiguation cache for {subject_key}: {e}")
 
     def update_disambiguation_cache(self, folder_path, key: str, candidate_names: list[str], primary_name: str):
         """Called from manual reclassification (reassign_series) so a later
         load doesn't silently revert the user's choice via a stale cache entry."""
-        if self.use_disambiguation_cache:
-            subject_key = self._cache_subject_key(folder_path)
-            self._write_cached_primary(subject_key, key, sorted(candidate_names), primary_name)
-
-    def _resolve_primary_dir(self, key: str, dirs: list[Path], folder_path) -> Path:
-        if len(dirs) == 1:
-            return dirs[0]
-
+        if not self.use_disambiguation_cache:
+            return
         subject_key = self._cache_subject_key(folder_path)
+        cache = self._load_disambiguation_cache(subject_key)
+        cache[key] = {"candidates": sorted(candidate_names), "primary": primary_name}
+        self._save_disambiguation_cache(subject_key, cache)
+
+    def _resolve_primary_dir(self, key: str, dirs: list[Path], cache: dict) -> tuple[Path, bool]:
+        """Returns (primary_dir, cache_was_written_to) — the cache dict is
+        mutated in place; the caller flushes it to disk once per patient
+        load instead of once per ambiguous key."""
+        if len(dirs) == 1:
+            return dirs[0], False
+
         signature = sorted(d.name for d in dirs)
 
         if self.use_disambiguation_cache:
-            cached_name = self._read_cached_primary(subject_key, key, signature)
-            if cached_name is not None:
-                cached = next((d for d in dirs if d.name == cached_name), None)
+            entry = cache.get(key)
+            if entry is not None and entry.get("candidates") == signature:
+                cached = next((d for d in dirs if d.name == entry.get("primary")), None)
                 if cached is not None:
-                    return cached
-                logging.warning(f"Disambiguation cache for {subject_key}/{key} pointed at a missing dir, recomputing")
+                    return cached, False
+                logging.warning(f"Disambiguation cache for {key} pointed at a missing dir, recomputing")
 
         prefix, _, plane_name = key.partition("_")
         try:
@@ -585,9 +588,10 @@ class DICOMModel:
             )
             primary = max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
 
-        if self.use_disambiguation_cache:
-            self._write_cached_primary(subject_key, key, signature, primary.name)
-        return primary
+        if not self.use_disambiguation_cache:
+            return primary, False
+        cache[key] = {"candidates": signature, "primary": primary.name}
+        return primary, True
 
     def load_series_for_key(self, seq_dir: Path, key: str) -> dict:
         if key.startswith("CINE_"):
