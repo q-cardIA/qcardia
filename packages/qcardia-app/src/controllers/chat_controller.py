@@ -418,7 +418,7 @@ class ChatController:
             preconditions = {
                 "display_series": bool(series),
                 "set_time_frame": self.model.num_time_frames > 0,
-                "save_segmentation": bool(self.model.temporal_segmentations),
+                "save_segmentation": hasattr(series.get("CINE_SAX"), "_segmentation_prediction"),
             }
             if preconditions.get(name, True):
                 tools.append(tool)
@@ -513,8 +513,12 @@ class ChatController:
             self._execute_tool_sequence(remaining)
             return
 
-        def _on_complete():
-            result = f"Loaded subject {subject_number} from {path}."
+        def _on_complete(success: bool):
+            result = (
+                f"Loaded subject {subject_number} from {path}."
+                if success
+                else f"Failed to load subject {subject_number} (still busy loading a previous subject, or load failed)."
+            )
             bubble.set_result(result)
             self._append_tool_history("load_subject", arguments, result)
             self._execute_tool_sequence(remaining)
@@ -563,6 +567,8 @@ class ChatController:
                 max_val = self.view.time_slider.maximum()
                 if not (0 <= time_index <= max_val):
                     return f"time_index out of range (0-{max_val})."
+                if self.view.time_slider.value() == time_index:
+                    return f"Already at time frame {time_index}."
                 self.view.time_slider.setValue(time_index)  # triggers the normal slider signal chain
                 return f"Jumped to time frame {time_index}."
 

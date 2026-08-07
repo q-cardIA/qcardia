@@ -15,6 +15,7 @@ class DICOMController:
         self.model = model
         self.current_time_index = 0
         self._last_result = None
+        self._current_subject_folder = None
         self._load_worker = None
         self._seg_workers: dict[str, CallableWorker] = {}  # keyed by series_key, so different modalities can run concurrently
         self._lge_seg_worker = None
@@ -32,16 +33,14 @@ class DICOMController:
         return self.view.display_area_widget
 
     def load_patient(self, folder_path, on_complete=None):
-        """Classify + load a patient folder in the background (cardisort +
-        series loading can take tens of seconds). `on_complete()` is called
-        once loading has finished (success or failure) — used by the chat
-        assistant to defer any tool calls that depend on this subject being
-        loaded until it's actually ready."""
+        """Classify + load a patient folder in the background. `on_complete(success)`
+        fires once loading has actually finished (or been rejected as busy)."""
         if self._load_worker is not None and self._load_worker.isRunning():
             if on_complete:
-                on_complete()
+                on_complete(False)
             return
 
+        self._current_subject_folder = Path(folder_path)
         self.view.show_loading(f"Loading {Path(folder_path).name}…")
         self._load_worker = CallableWorker(self.model.load_patient, folder_path)
         self._load_worker.finished_ok.connect(
@@ -56,7 +55,7 @@ class DICOMController:
         logging.error(f"Failed to load patient: {exc}")
         self.view.show_error("Load Error", f"Failed to load patient folder:\n{exc}")
         if on_complete:
-            on_complete()
+            on_complete(False)
 
     def _on_patient_loaded(self, result, on_complete=None):
         self.view.hide_loading()
@@ -67,7 +66,7 @@ class DICOMController:
                 "No Series Found", "No sequence directories found in this folder."
             )
             if on_complete:
-                on_complete()
+                on_complete(False)
             return
 
         max_frames = 0
@@ -93,7 +92,7 @@ class DICOMController:
             )
 
         if on_complete:
-            on_complete()
+            on_complete(True)
 
     def reassign_series(self, card_info: SeriesCardInfo, new_key: str):
         if self._last_result is None:
@@ -117,6 +116,12 @@ class DICOMController:
                 entry.key, entry.is_primary = new_key, True
             elif entry.key == new_key:
                 entry.is_primary = False
+
+        if self._current_subject_folder is not None:
+            candidate_names = [e.path.name for e in self._last_result.entries if e.key == new_key]
+            self.model.update_disambiguation_cache(
+                self._current_subject_folder, new_key, candidate_names, card_info.path.name
+            )
 
         self._last_result.loaded[new_key] = info
         self.view.series_browser_widget.populate(self._build_browser_cards(self._last_result))

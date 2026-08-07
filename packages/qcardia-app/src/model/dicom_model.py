@@ -352,27 +352,25 @@ class DICOMModel:
             # the display volume (see predict_lge_segmentation for the same fix).
             return result[::-1]
 
-        self.temporal_segmentations = []
+        results = []
         if tframes and tframes > 1:
             for t in range(tframes):
                 try:
-                    vol = extract_ZHW_at_time(t)
-                    self.temporal_segmentations.append(vol)
+                    results.append(extract_ZHW_at_time(t))
                 except Exception as e:
                     logging.warning(f"Failed to extract segmentation for time {t}: {e}")
 
-        if not self.temporal_segmentations:
+        if not results:
             try:
                 seg_volume = extract_ZHW_at_time(0)
-                if self.num_time_frames and self.num_time_frames > 1:
-                    self.temporal_segmentations = [seg_volume] * self.num_time_frames
-                else:
-                    self.temporal_segmentations = [seg_volume]
+                results = [seg_volume] * self.num_time_frames if self.num_time_frames and self.num_time_frames > 1 else [seg_volume]
             except Exception as e:
                 logging.error(f"Failed to extract any segmentation: {e}")
-                self.temporal_segmentations = []
+                results = []
 
-        return self.temporal_segmentations
+        if series_key == "CINE_SAX":
+            self.temporal_segmentations = results
+        return results
 
     def get_geometry(self, series_key: str) -> VolumeGeometry | None:
         series = self.series.get(series_key)
@@ -550,6 +548,13 @@ class DICOMModel:
                 json.dump(cache, f, indent=2)
         except Exception as e:
             logging.warning(f"Failed to write disambiguation cache for {subject_key}/{key}: {e}")
+
+    def update_disambiguation_cache(self, folder_path, key: str, candidate_names: list[str], primary_name: str):
+        """Called from manual reclassification (reassign_series) so a later
+        load doesn't silently revert the user's choice via a stale cache entry."""
+        if self.use_disambiguation_cache:
+            subject_key = self._cache_subject_key(folder_path)
+            self._write_cached_primary(subject_key, key, sorted(candidate_names), primary_name)
 
     def _resolve_primary_dir(self, key: str, dirs: list[Path], folder_path) -> Path:
         if len(dirs) == 1:

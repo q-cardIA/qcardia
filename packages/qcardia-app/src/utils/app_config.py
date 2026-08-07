@@ -72,7 +72,7 @@ OLLAMA_NUM_CTX: int = 16384
 def ollama_available() -> bool:
     """True when an Ollama server is reachable at OLLAMA_TAGS_URL."""
     try:
-        response = requests.get(OLLAMA_TAGS_URL, timeout=1.5)
+        response = requests.get(OLLAMA_TAGS_URL, timeout=0.5)
         return response.ok
     except requests.RequestException:
         return False
@@ -88,7 +88,7 @@ def list_ollama_models() -> list[dict]:
     display label (parameter size + file size instead of the raw tag, which
     is often just a meaningless ':latest')."""
     try:
-        response = requests.get(OLLAMA_TAGS_URL, timeout=1.5)
+        response = requests.get(OLLAMA_TAGS_URL, timeout=0.5)
         response.raise_for_status()
         models = response.json().get("models", [])
     except requests.RequestException:
