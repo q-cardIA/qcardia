@@ -13,7 +13,13 @@ from pathlib import Path
 import requests
 from PySide6.QtCore import QThread, Signal
 
-from utils.app_config import OLLAMA_MODEL, OLLAMA_NUM_CTX, OLLAMA_URL, import_gguf_model
+from utils.app_config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX, OLLAMA_URL, import_gguf_model
+
+# How long Ollama keeps the model resident in VRAM after a request with no
+# follow-up. Ollama's own default (5 minutes) is usually fine for continuous
+# chat use, but a demo can have longer gaps between messages than that —
+# explicit and generous here so the model doesn't cold-unload mid-demo.
+KEEP_ALIVE = "30m"
 
 
 class OllamaWorker(QThread):
@@ -45,6 +51,7 @@ class OllamaWorker(QThread):
             "messages": self._messages,
             "stream": True,
             "think": False,
+            "keep_alive": KEEP_ALIVE,
             "options": {"num_ctx": OLLAMA_NUM_CTX, "temperature": 0.2},
         }
         if self._tools:
@@ -87,6 +94,37 @@ class OllamaWorker(QThread):
             return
 
         self.finished_ok.emit()
+
+
+def warm_model(model: str = OLLAMA_MODEL):
+    """Blocking call that gets the model resident in VRAM with num_ctx
+    matching what chat actually uses, without generating any text (empty
+    prompt to /api/generate is Ollama's documented no-op "just load" form).
+    Meant to run off the main thread (see model/background_worker.CallableWorker),
+    fired in parallel with a slow tool (e.g. load_subject) so the model is
+    already loaded by the time chat needs to generate its follow-up reply.
+
+    Matching num_ctx matters, not just calling the model at all: Ollama can
+    only keep one resident "runner" per (model, num_ctx) pair, and a request
+    with a DIFFERENT num_ctx forces a fresh ~12-14s reload even if the same
+    model was just loaded a moment ago (measured) -- this is also why
+    interleaving chat (num_ctx=OLLAMA_NUM_CTX) with qcardia.disambiguate's
+    calls (which don't set num_ctx at all) can look like the model is being
+    "loaded and unloaded a lot": every switch between the two IS a reload.
+    """
+    try:
+        requests.post(
+            OLLAMA_GENERATE_URL,
+            json={
+                "model": model,
+                "prompt": "",
+                "keep_alive": KEEP_ALIVE,
+                "options": {"num_ctx": OLLAMA_NUM_CTX},
+            },
+            timeout=60,
+        )
+    except requests.RequestException:
+        pass  # best-effort warm-up; the real chat call will surface any real connectivity error
 
 
 class ModelImportWorker(QThread):

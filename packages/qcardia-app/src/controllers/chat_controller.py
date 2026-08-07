@@ -9,7 +9,8 @@ from __future__ import annotations
 import copy
 import logging
 
-from model.llm_client import OllamaWorker
+from model.background_worker import CallableWorker
+from model.llm_client import OllamaWorker, warm_model
 from utils.app_config import OLLAMA_MODEL, discover_subject_numbers, subject_folder_path
 
 # Plane abbreviations used throughout the app's series keys (e.g. CINE_SAX).
@@ -299,6 +300,12 @@ class ChatController:
         self._worker = None
         self._llm_model = OLLAMA_MODEL
         self._available_subjects_cache: list[int] | None = None
+        # Fire-and-forget warm-up ping (see _on_tool_calls) -- kept as an
+        # attribute, not a bare local, for the same reason every other
+        # background QThread in this app is: losing the only Python
+        # reference to a still-running QThread lets it get garbage-collected
+        # mid-run, which crashes the process.
+        self._warmup_worker: CallableWorker | None = None
 
         self.view.chat_widget.message_submitted.connect(self.send_message)
         self.view.chat_widget.model_changed.connect(self._on_model_changed)
@@ -450,7 +457,25 @@ class ChatController:
         # load_subject loads in the background (see DICOMController.load_patient),
         # so any remaining calls in this batch must wait for it to actually
         # finish rather than firing immediately against not-yet-loaded series.
+        self._warm_model_in_background()
         self._execute_tool_sequence(list(calls))
+
+    def _warm_model_in_background(self):
+        """Ollama unloads the model between calls whenever num_ctx differs
+        from the previous request (measured: ~12-14s to reload vs ~2s once
+        resident) -- e.g. qcardia.disambiguate's live LLM calls don't set
+        num_ctx, so they evict whatever chat had loaded. The tool(s) about to
+        run always end in another chat request (_execute_tool_sequence's
+        empty-remaining branch), so getting the model resident with chat's
+        own num_ctx NOW, while the tool itself is still working, means that
+        request doesn't pay a cold-load penalty on top of its own latency."""
+        if self._warmup_worker is not None and self._warmup_worker.isRunning():
+            return
+        worker = CallableWorker(warm_model, self._llm_model)
+        self._warmup_worker = worker
+        worker.finished_ok.connect(lambda _: setattr(self, "_warmup_worker", None))
+        worker.error.connect(lambda _: setattr(self, "_warmup_worker", None))
+        worker.start()
 
     def _execute_tool_sequence(self, remaining: list):
         if not remaining:

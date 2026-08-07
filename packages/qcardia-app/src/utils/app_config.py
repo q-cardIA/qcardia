@@ -63,6 +63,7 @@ def discover_subject_numbers() -> list[int]:
 # ---------------------------------------------------------------------------
 
 OLLAMA_URL: str = "http://localhost:11434/api/chat"
+OLLAMA_GENERATE_URL: str = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL: str = "http://localhost:11434/api/tags"
 OLLAMA_MODEL: str = "qwen3:8b"
 
