@@ -35,6 +35,21 @@ class WelcomeWidget(QWidget):
             return True
         return self.assistant_disabled_checkbox.isChecked()
 
+    @property
+    def use_cardisort_cache(self) -> bool:
+        """True to reuse an already-CardiSorted_ subject folder instead of
+        re-running the cardisort model; False forces a live classification
+        run on every load (e.g. for a demo that wants to show cardisort
+        actually running). See DICOMModel.use_cardisort_cache."""
+        return self.use_cardisort_cache_checkbox.isChecked()
+
+    @property
+    def use_disambiguation_cache(self) -> bool:
+        """True to reuse a cached duplicate-series disambiguation result
+        instead of calling the LLM; False forces a live call on every load.
+        See DICOMModel.use_disambiguation_cache."""
+        return self.use_disambiguation_cache_checkbox.isChecked()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -142,6 +157,25 @@ class WelcomeWidget(QWidget):
             row.addWidget(self.assistant_disabled_checkbox)
             row.addStretch(1)
             root.addLayout(row)
+
+        # Preprocessing toggles: checked (default) = fast path, unchecked =
+        # force the live/slow path on every load regardless of what's already
+        # cached. Useful for a demo that wants to show cardisort/disambiguation
+        # actually running instead of hitting a cache. See DICOMModel's
+        # use_cardisort_cache/use_disambiguation_cache flags, set from these
+        # at transition time (main.py).
+        self.use_cardisort_cache_checkbox = QCheckBox("Use precomputed cardisort classification")
+        self.use_cardisort_cache_checkbox.setProperty("role", "welcomeToggle")
+        self.use_cardisort_cache_checkbox.setChecked(True)
+        self.use_disambiguation_cache_checkbox = QCheckBox("Use cached LLM disambiguation")
+        self.use_disambiguation_cache_checkbox.setProperty("role", "welcomeToggle")
+        self.use_disambiguation_cache_checkbox.setChecked(True)
+        preprocessing_row = QHBoxLayout()
+        preprocessing_row.addStretch(1)
+        preprocessing_row.addWidget(self.use_cardisort_cache_checkbox)
+        preprocessing_row.addWidget(self.use_disambiguation_cache_checkbox)
+        preprocessing_row.addStretch(1)
+        root.addLayout(preprocessing_row)
 
         root.addStretch(3)
 

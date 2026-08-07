@@ -39,6 +39,12 @@ def main():
     model = DICOMModel()
     controller = DICOMController(main_window, model)
 
+    def _configure_preprocessing():
+        model.use_cardisort_cache = main_window.welcome_widget.use_cardisort_cache
+        model.use_disambiguation_cache = main_window.welcome_widget.use_disambiguation_cache
+
+    main_window.welcome_widget.transition_signal.connect(_configure_preprocessing)
+
     if CHAT_AVAILABLE:
         # chat_widget only exists after build_analysis_interface() runs, which
         # itself only fires once the welcome screen's transition_signal fires.
