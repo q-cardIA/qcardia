@@ -32,7 +32,7 @@ _USER_BUBBLE_WIDTH_FRACTION = 0.7  # user bubbles can grow up to 70% of the pane
 # already says (e.g. "Apply viability preset" -> "Applied 'viability'
 # preset.") add nothing when shown underneath it, so only surface a result
 # when it looks like something went wrong.
-_FAILURE_MARKERS = ("failed", "not found", "out of range", "unknown tool")
+_FAILURE_MARKERS = ("failed", "not found", "not loaded", "out of range", "unknown tool")
 
 # Friendly one-line phrasing for tool calls, so the panel reads like "Load
 # subject 3" instead of raw JSON — the exact parsed arguments are still
@@ -44,7 +44,12 @@ _TOOL_SUMMARY_FORMATTERS = {
     "apply_preset": lambda a: f"Apply {a.get('preset')} preset",
     "display_series": lambda a: (
         f"Show {a.get('series_key')} in panel {a.get('panel_idx')}"
-        + (f" ({a['axis']})" if a.get("axis") else "")
+        # "transverse" is the tool's own default axis (see chat_controller's
+        # display_series handling) -- the model passes it even when the user
+        # never asked for a specific reslice, so showing it back is just
+        # noise. A genuinely non-default axis (sagittal/coronal) is still
+        # worth surfacing.
+        + (f" ({a['axis']})" if a.get("axis") not in (None, "", "transverse") else "")
     ),
     "set_time_frame": lambda a: f"Jump to time frame {a.get('time_index')}",
     "save_segmentation": lambda a: "Save segmentation",
@@ -241,13 +246,15 @@ class ChatWidget(QFrame):
 
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
-        # Left/right margins matter here, not just visual padding: with 0
-        # margin a bubble's own border sits flush against the panel's outer
-        # edge, which reads as no border at all on that side (nothing to
-        # show it against) even though top/bottom borders are visible thanks
-        # to the inter-row spacing below. See _user_bubble_max_width, which
-        # subtracts these same margins so capped bubbles don't overflow them.
-        self._content_layout.setContentsMargins(8, 0, 8, 4)
+        # Uniform margins matter here, not just visual padding: with 0 margin
+        # on a side, a bubble's own border sits flush against the panel's
+        # outer edge, which reads as no border at all on that side (nothing
+        # to show it against) — this used to be the case on top (first
+        # message's top border invisible against the panel) and asymmetric
+        # on bottom (half the left/right value). See _user_bubble_max_width,
+        # which subtracts these same left/right margins so capped bubbles
+        # don't overflow them.
+        self._content_layout.setContentsMargins(8, 8, 8, 8)
         self._content_layout.setSpacing(4)
         self._content_layout.addStretch(1)
 
