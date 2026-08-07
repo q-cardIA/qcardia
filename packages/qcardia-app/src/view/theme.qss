@@ -581,15 +581,8 @@ QLabel[role="welcomeSectionTitle"] {
 	background-color: transparent;
 }
 
-/* Single-patient-mode button + "···" options chevron: one visual group.
-   The touching edge is owned by the chevron's full 2px border alone (main's
-   right border is removed) so the seam is one 2px line, matching the group's
-   outer border weight, not a doubled 4px one. Height match comes from
-   explicit min/max-height on both (the real culprit for an earlier height
-   mismatch was mismatched vertical padding, not this border asymmetry — a
-   one-sided border removal doesn't change a box's height). [panelOpen="true"]
-   (set in Python on toggle, see WelcomeWidget._on_chevron_toggled) squares
-   the bottom corners too, so the group sits flush on top of the open panel. */
+/* Single-patient-mode button + "···" chevron, styled as one group.
+   [panelOpen="true"] is set in Python (WelcomeWidget._on_chevron_toggled). */
 QPushButton[role="welcomeMainAction"] {
 	background-color: rgb(44, 35, 65);
 	border: 2px solid rgb(189, 147, 249);

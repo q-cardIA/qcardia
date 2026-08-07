@@ -29,23 +29,14 @@ class WelcomeWidget(QWidget):
 
     @property
     def assistant_disabled(self) -> bool:
-        """True if the AI Assistant should stay off — either the user opted
-        out via the toggle, or Ollama isn't available so there's no toggle."""
         return not (CHAT_AVAILABLE and self._toggle_llm_assistant.isChecked())
 
     @property
     def use_cardisort_cache(self) -> bool:
-        """True to reuse an already-CardiSorted_ subject folder instead of
-        re-running the cardisort model; False forces a live classification
-        run on every load (e.g. for a demo that wants to show cardisort
-        actually running). See DICOMModel.use_cardisort_cache."""
         return self._toggle_preproc_cardisort.isChecked()
 
     @property
     def use_disambiguation_cache(self) -> bool:
-        """True to reuse a cached duplicate-series disambiguation result
-        instead of calling the LLM; False forces a live call on every load.
-        See DICOMModel.use_disambiguation_cache."""
         return self._toggle_preproc_disambig.isChecked()
 
     # ------------------------------------------------------------------
@@ -180,9 +171,6 @@ class WelcomeWidget(QWidget):
         layout.addWidget(title)
         layout.addSpacing(8)
 
-        # Main action button + "···" options chevron, side by side, sharing
-        # one visual group (squared-off inner corners) that expands into a
-        # dropdown of ON/OFF toggles below when the chevron is checked.
         button_row = QWidget()
         button_row_layout = QHBoxLayout(button_row)
         button_row_layout.setContentsMargins(0, 0, 0, 0)
@@ -200,10 +188,6 @@ class WelcomeWidget(QWidget):
         button_row_layout.addWidget(self.left_panel_single_patient_pushbutton, 1)
         button_row_layout.addWidget(self._chevron_btn)
 
-        # Options dropdown (hidden until the chevron is toggled open). Read
-        # by main.py at the welcome screen's transition_signal via the
-        # assistant_disabled/use_cardisort_cache/use_disambiguation_cache
-        # properties above.
         self._options_panel = QFrame()
         self._options_panel.setProperty("role", "welcomeOptionsPanel")
         self._options_panel.hide()
@@ -222,11 +206,8 @@ class WelcomeWidget(QWidget):
         self._toggle_preproc_disambig = self._toggle_switch(default=True)
         options_layout.addLayout(self._toggle_row(self._toggle_preproc_disambig, "Preprocessed disambiguation"))
 
-        # button_row and _options_panel must sit with ZERO gap between them
-        # (the panel's top border needs to touch the button row's bottom
-        # border) -- wrapped in their own zero-spacing container so the
-        # panel's normal 12px inter-widget spacing (title/button/desc) can't
-        # sneak a gap in here specifically.
+        # Zero-spacing container so button_row and _options_panel touch —
+        # the panel's own layout spacing would otherwise gap them apart.
         button_group = QWidget()
         button_group_layout = QVBoxLayout(button_group)
         button_group_layout.setContentsMargins(0, 0, 0, 0)
@@ -337,10 +318,7 @@ class WelcomeWidget(QWidget):
 
     def _on_chevron_toggled(self, checked: bool):
         self._options_panel.setVisible(checked)
-        # Square off the inner corners where the button row meets the open
-        # panel, so the group reads as one seamless block rather than a
-        # floating dropdown. QSS caches property-based matches, so a dynamic
-        # property change needs an explicit unpolish/polish to repaint.
+        # unpolish/polish forces Qt to re-match QSS after a property change.
         for widget in (self.left_panel_single_patient_pushbutton, self._chevron_btn):
             widget.setProperty("panelOpen", checked)
             widget.style().unpolish(widget)

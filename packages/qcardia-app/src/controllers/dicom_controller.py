@@ -16,12 +16,7 @@ class DICOMController:
         self.current_time_index = 0
         self._last_result = None
         self._load_worker = None
-        # Keyed by series_key, not a single attribute — CINE_SAX and CINE_4CH
-        # segmentations can be requested back to back (e.g. two run_segmentation
-        # tool calls in one chat turn) and must be able to run concurrently.
-        # A single shared attribute meant the second request saw the first
-        # worker's isRunning()==True and silently no-op'd instead of starting.
-        self._seg_workers: dict[str, CallableWorker] = {}
+        self._seg_workers: dict[str, CallableWorker] = {}  # keyed by series_key, so different modalities can run concurrently
         self._lge_seg_worker = None
 
         self.view.load_patient_button_signal.connect(self.load_patient)
@@ -163,9 +158,7 @@ class DICOMController:
     def run_segmentation(self, series_key: str = "CINE_SAX") -> bool:
         """Starts segmentation for series_key. Returns False (no-op) if a
         segmentation for THIS series_key is already running — callers must
-        check this instead of assuming the request was actually started.
-        Segmentation for a DIFFERENT series_key is unaffected and can run
-        concurrently (see _seg_workers)."""
+        check this instead of assuming the request was actually started."""
         existing = self._seg_workers.get(series_key)
         if existing is not None and existing.isRunning():
             return False

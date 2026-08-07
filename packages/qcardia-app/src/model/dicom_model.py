@@ -96,13 +96,7 @@ class DICOMModel:
         self.slice_positions = []
         self._cardisort_model = None
         self._cardisort_config = None
-        # Preprocessing toggles (welcome screen, see WelcomeWidget) -- default
-        # to the fast path; main.py flips these to whatever the user chose
-        # once the welcome screen transitions, before any subject can be
-        # loaded. True = reuse precomputed results when available; False =
-        # always run the cardisort model / always call the disambiguation LLM
-        # live, e.g. for a demo that wants to show that step actually running.
-        self.use_cardisort_cache = True
+        self.use_cardisort_cache = True  # welcome-screen toggles, see WelcomeWidget / main.py
         self.use_disambiguation_cache = True
         self._load_segmentation_model()
 
@@ -458,8 +452,7 @@ class DICOMModel:
         layout, or a 'CardiSorted_<name>' sibling of it already exists on disk,
         use that directly instead of re-running cardisort classification (slow
         — one model inference per sequence dir — and redundant if it's already
-        been done once for this subject). Only consulted when
-        self.use_cardisort_cache is True (see the welcome screen's toggle)."""
+        been done once for this subject). Gated by self.use_cardisort_cache."""
         if self._is_cardisorted_layout(folder_path):
             return folder_path
         sibling = folder_path.parent / f"CardiSorted_{folder_path.name}"
@@ -516,16 +509,7 @@ class DICOMModel:
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
         return self._group_and_resolve(self._describe_patient_folder(folder_path), folder_path)
 
-    # -- duplicate-series disambiguation cache ---------------------------------
-    #
-    # disambiguate_duplicates() is an LLM call (see qcardia.disambiguate) and
-    # is by far the dominant cost of loading a subject. Its result only
-    # depends on which candidate directory NAMES exist for a given (subject,
-    # key), so it's cached to disk per subject and only recomputed if the
-    # candidate set actually changes. Only consulted when
-    # self.use_disambiguation_cache is True (see the welcome screen's
-    # toggle). See precompute_classification_cache.py to warm this ahead of
-    # a demo.
+    # -- duplicate-series disambiguation cache, gated by self.use_disambiguation_cache --
 
     def _cache_subject_key(self, folder_path) -> str:
         """Identifies a subject for cache-file naming: the resolved

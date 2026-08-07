@@ -15,11 +15,7 @@ from PySide6.QtCore import QThread, Signal
 
 from utils.app_config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX, OLLAMA_URL, import_gguf_model
 
-# How long Ollama keeps the model resident in VRAM after a request with no
-# follow-up. Ollama's own default (5 minutes) is usually fine for continuous
-# chat use, but a demo can have longer gaps between messages than that —
-# explicit and generous here so the model doesn't cold-unload mid-demo.
-KEEP_ALIVE = "30m"
+KEEP_ALIVE = "30m"  # how long Ollama keeps the model resident after a request (default is 5 min)
 
 
 class OllamaWorker(QThread):
@@ -97,21 +93,11 @@ class OllamaWorker(QThread):
 
 
 def warm_model(model: str = OLLAMA_MODEL):
-    """Blocking call that gets the model resident in VRAM with num_ctx
-    matching what chat actually uses, without generating any text (empty
-    prompt to /api/generate is Ollama's documented no-op "just load" form).
-    Meant to run off the main thread (see model/background_worker.CallableWorker),
-    fired in parallel with a slow tool (e.g. load_subject) so the model is
-    already loaded by the time chat needs to generate its follow-up reply.
-
-    Matching num_ctx matters, not just calling the model at all: Ollama can
-    only keep one resident "runner" per (model, num_ctx) pair, and a request
-    with a DIFFERENT num_ctx forces a fresh ~12-14s reload even if the same
-    model was just loaded a moment ago (measured) -- this is also why
-    interleaving chat (num_ctx=OLLAMA_NUM_CTX) with qcardia.disambiguate's
-    calls (which don't set num_ctx at all) can look like the model is being
-    "loaded and unloaded a lot": every switch between the two IS a reload.
-    """
+    """Blocking call that gets the model resident with num_ctx matching
+    chat's, without generating text. Meant to run off the main thread,
+    fired in parallel with a slow tool so chat's follow-up call doesn't
+    also pay a cold-load penalty. Mismatched num_ctx forces Ollama to
+    reload the model (~12-14s), so matching it here is what matters."""
     try:
         requests.post(
             OLLAMA_GENERATE_URL,

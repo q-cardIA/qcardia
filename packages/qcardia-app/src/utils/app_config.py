@@ -26,13 +26,9 @@ ICON_PATH: Path = APP_DIR / "assets" / "images" / "q-cardIA.png"
 # Used by the AI assistant's load_subject tool.
 SUBJECT_BASE_DIR: Path = WORKSPACE_DIR / "data" / "new_data"
 
-# Cached duplicate-series disambiguation results (model/dicom_model.py's
-# _resolve_primary_dir), one JSON file per CardiSorted subject folder. The
-# LLM disambiguation call is the dominant cost of loading a subject (~90% of
-# load time, measured) -- this cache makes it a one-time cost instead of a
-# per-load one. See src/precompute_classification_cache.py to warm it ahead
-# of a demo. Lives alongside the subject data rather than inside the app
-# repo -- it's derived FROM that data, not from app code.
+# Cached duplicate-series disambiguation results (model/dicom_model.py).
+# Lives alongside the subject data, not inside the app repo, since it's
+# derived from that data.
 DISAMBIGUATION_CACHE_DIR: Path = SUBJECT_BASE_DIR / "disambiguation_cache"
 
 
