@@ -428,19 +428,24 @@ class ChatController:
         self._worker.tool_calls_ready.connect(self._on_tool_calls)
         self._worker.finished_ok.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
+        # Clear the reference on `finished`, not `finished_ok`/`error` — those fire
+        # from inside run() before the thread has actually stopped, so dropping the
+        # last reference there races the thread teardown and aborts the process.
+        self._worker.finished.connect(self._clear_worker)
         self._worker.start()
+
+    def _clear_worker(self):
+        self._worker = None
 
     def _on_finished(self):
         text = self.view.chat_widget.finalize_assistant_message()
         if text:
             self._history.append({"role": "assistant", "content": text})
-        self._worker = None
         self.view.chat_widget.set_enabled(True)
 
     def _on_error(self, message: str):
         self.view.chat_widget.finalize_assistant_message()
         self.view.chat_widget.append_system_message(f"Error: {message}")
-        self._worker = None
         self.view.chat_widget.set_enabled(True)
 
     def _on_tool_calls(self, calls: list):
@@ -461,8 +466,7 @@ class ChatController:
             return
         worker = CallableWorker(warm_model, self._llm_model)
         self._warmup_worker = worker
-        worker.finished_ok.connect(lambda _: setattr(self, "_warmup_worker", None))
-        worker.error.connect(lambda _: setattr(self, "_warmup_worker", None))
+        worker.finished.connect(lambda: setattr(self, "_warmup_worker", None))
         worker.start()
 
     def _execute_tool_sequence(self, remaining: list):

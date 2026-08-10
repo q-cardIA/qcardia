@@ -46,11 +46,18 @@ class DICOMController:
             lambda result: self._on_patient_loaded(result, on_complete)
         )
         self._load_worker.error.connect(lambda exc: self._on_patient_load_error(exc, on_complete))
+        # Clear the reference on QThread's own `finished`, not `finished_ok`/`error` —
+        # those fire from inside run() before the thread has actually stopped, so
+        # dropping the last reference there races the thread teardown and aborts
+        # the process ("QThread: Destroyed while thread is still running").
+        self._load_worker.finished.connect(self._clear_load_worker)
         self._load_worker.start()
+
+    def _clear_load_worker(self):
+        self._load_worker = None
 
     def _on_patient_load_error(self, exc, on_complete=None):
         self.view.hide_loading()
-        self._load_worker = None
         logging.error(f"Failed to load patient: {exc}")
         self.view.show_error("Load Error", f"Failed to load patient folder:\n{exc}")
         if on_complete:
@@ -58,7 +65,6 @@ class DICOMController:
 
     def _on_patient_loaded(self, result, on_complete=None):
         self.view.hide_loading()
-        self._load_worker = None
 
         if not result.entries:
             self.view.show_warning(
@@ -178,12 +184,12 @@ class DICOMController:
         worker.error.connect(
             lambda exc: self._on_segmentation_error(series_key, exc)
         )
+        worker.finished.connect(lambda: self._seg_workers.pop(series_key, None))
         worker.start()
         return True
 
     def _on_segmentation_done(self, series_key: str, result):
         self._widget.hide_segmentation_loading(series_key)
-        self._seg_workers.pop(series_key, None)
         # predict_segmentation returns a per-time-frame list (needs stacking);
         # predict_lge_segmentation returns one volume directly.
         if isinstance(result, list):
@@ -203,7 +209,6 @@ class DICOMController:
 
     def _on_segmentation_error(self, series_key: str, exc):
         self._widget.hide_segmentation_loading(series_key)
-        self._seg_workers.pop(series_key, None)
         if isinstance(exc, ValueError):
             self.view.show_warning("No Segmentation Data", str(exc))
         else:

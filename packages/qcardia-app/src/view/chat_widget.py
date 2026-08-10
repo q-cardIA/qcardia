@@ -310,14 +310,20 @@ class ChatWidget(QFrame):
         self._import_worker = CallableWorker(import_gguf_model, Path(gguf_path_str))
         self._import_worker.finished_ok.connect(self._on_import_finished)
         self._import_worker.error.connect(self._on_import_error)
+        # Clear the reference on `finished`, not `finished_ok`/`error` — those fire
+        # from inside run() before the thread has actually stopped, so dropping the
+        # last reference there races the thread teardown and aborts the process.
+        self._import_worker.finished.connect(self._clear_import_worker)
         self._import_worker.start()
+
+    def _clear_import_worker(self):
+        self._import_worker = None
 
     def _finish_import(self, message: str, select_tag: str | None = None):
         self._send_btn.stop_loading()
         self.set_enabled(True)
         self._model_combo.setEnabled(True)
         self.append_system_message(message)
-        self._import_worker = None
         self._populate_model_combo(select_tag=select_tag)
 
     def _on_import_finished(self, tag: str):
