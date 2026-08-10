@@ -263,7 +263,7 @@ class ChatWidget(QFrame):
     # -- model picker ---------------------------------------------------
 
     def _populate_model_combo(self, select_tag: str | None = None):
-        select_tag = select_tag or self._current_tag() or OLLAMA_MODEL
+        select_tag = select_tag or self.current_tag() or OLLAMA_MODEL
         self._model_combo.blockSignals(True)
         self._model_combo.clear()
 
@@ -289,7 +289,7 @@ class ChatWidget(QFrame):
         if self._model_combo.count():
             self.model_changed.emit(self._model_combo.currentData())
 
-    def _current_tag(self) -> str | None:
+    def current_tag(self) -> str | None:
         return self._model_combo.currentData() if self._model_combo.count() else None
 
     def _on_model_selected(self, index: int):

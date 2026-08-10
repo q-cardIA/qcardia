@@ -296,7 +296,11 @@ class ChatController:
         self.model = model
         self._history: list[dict] = []
         self._worker = None
-        self._llm_model = OLLAMA_MODEL
+        # ChatWidget builds and selects its model combo before this controller
+        # exists (see MainWindow.build_analysis_interface), so read its actual
+        # selection here rather than assuming OLLAMA_MODEL independently — the
+        # two must not be able to silently disagree.
+        self._llm_model = self.view.chat_widget.current_tag() or OLLAMA_MODEL
         self._available_subjects_cache: list[int] | None = None
         self._warmup_worker: CallableWorker | None = None  # see _warm_model_in_background
 
