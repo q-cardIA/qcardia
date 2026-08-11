@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from view.custom_graphics_view import CustomQGraphicsView
+from view.loading_overlay import LoadingOverlay
 from view.series_browser_widget import SERIES_KEY_MIME_TYPE
 from view.volume_geometry import VolumeGeometry
 
@@ -27,6 +28,7 @@ class _Panel:
     slider: QSlider
     title_label: QLabel
     slice_label: QLabel
+    loading_overlay: LoadingOverlay
 
 
 class _PanelDropContainer(QWidget):
@@ -100,6 +102,23 @@ class CentralDisplayAreaWidget(QWidget):
     @property
     def n_panels(self) -> int:
         return self._grid_rows * self._grid_cols
+
+    @property
+    def grid_size(self) -> tuple[int, int]:
+        return self._grid_rows, self._grid_cols
+
+    def panel_assignments(self) -> list[dict]:
+        """Per-panel state (series key, axis, whether a segmentation exists) —
+        used by the chat assistant to describe the current layout."""
+        return [
+            {
+                "idx": i,
+                "series_key": self._panel_series_key[i],
+                "axis": self._panel_axis[i],
+                "has_segmentation": self._panel_series_key[i] in self._segmentations,
+            }
+            for i in range(self.n_panels)
+        ]
 
     def set_grid_size(self, rows: int, cols: int):
         if rows == self._grid_rows and cols == self._grid_cols:
@@ -204,12 +223,15 @@ class CentralDisplayAreaWidget(QWidget):
         vbox.addWidget(slider)
         vbox.addWidget(viewer)
 
+        overlay = LoadingOverlay(container)
+
         return _Panel(
             container=container,
             viewer=viewer,
             slider=slider,
             title_label=title,
             slice_label=slice_lbl,
+            loading_overlay=overlay,
         )
 
     # ── External API ──────────────────────────────────────────────────────
@@ -291,6 +313,20 @@ class CentralDisplayAreaWidget(QWidget):
         for i in range(self.n_panels):
             if self._panel_series_key[i] == series_key:
                 self._update_panel(i)
+
+    def show_segmentation_loading(self, series_key: str, text: str = "Segmenting…"):
+        """Show a small loading overlay only over the panel(s) currently
+        displaying series_key, instead of blocking the whole display area —
+        so segmenting CINE and LGE at the same time doesn't have one
+        overlay's hide_overlay() prematurely dismiss the other's."""
+        for i in range(self.n_panels):
+            if self._panel_series_key[i] == series_key:
+                self._panels[i].loading_overlay.show_message(text)
+
+    def hide_segmentation_loading(self, series_key: str):
+        for i in range(self.n_panels):
+            if self._panel_series_key[i] == series_key:
+                self._panels[i].loading_overlay.hide_overlay()
 
     def set_time_index(self, t: int):
         self.current_time_index = t

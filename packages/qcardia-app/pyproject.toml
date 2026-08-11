@@ -14,12 +14,11 @@ dependencies = [
     "torch>=2.3.0",
     "scipy>=1.11.4",
     "pyyaml>=6.0.1",
-    "qcardia-data",
-    "qcardia-models",
+    "requests>=2.31.0",
     "qcardia",
 ]
 
+# qcardia-models/qcardia-data aren't imported here directly — they resolve
+# transitively through qcardia's own dependency spec, so nothing to override.
 [tool.uv.sources]
-qcardia-data = { git = "https://github.com/q-cardIA/qcardia-data.git" }
-qcardia-models = { git = "https://github.com/q-cardIA/qcardia-models.git" }
-qcardia = { git = "https://github.com/q-cardIA/qcardia.git", rev = "62a8555" }
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "apply-cardisort" }

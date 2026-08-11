@@ -3122,7 +3122,7 @@ wheels = [
 [[package]]
 name = "qcardia"
 version = "0.0.1"
-source = { git = "https://github.com/q-cardIA/qcardia.git?rev=62a8555#62a8555847e5e1e257ce2f8f8fdc1eb5703fd16a" }
+source = { git = "https://github.com/q-cardIA/qcardia.git?branch=apply-cardisort#79650cc120ba9fc138dfcafc938b9537d1d5932b" }
 dependencies = [
     { name = "opencv-python" },
     { name = "qcardia-data" },
@@ -3142,8 +3142,7 @@ dependencies = [
     { name = "pyside6" },
     { name = "pyyaml" },
     { name = "qcardia" },
-    { name = "qcardia-data" },
-    { name = "qcardia-models" },
+    { name = "requests" },
     { name = "scipy" },
     { name = "torch" },
 ]
@@ -3154,9 +3153,8 @@ requires-dist = [
     { name = "pydicom", specifier = ">=2.4.4" },
     { name = "pyside6", specifier = ">=6.6.2" },
     { name = "pyyaml", specifier = ">=6.0.1" },
-    { name = "qcardia", git = "https://github.com/q-cardIA/qcardia.git?rev=62a8555" },
-    { name = "qcardia-data", git = "https://github.com/q-cardIA/qcardia-data.git" },
-    { name = "qcardia-models", git = "https://github.com/q-cardIA/qcardia-models.git" },
+    { name = "qcardia", git = "https://github.com/q-cardIA/qcardia.git?branch=apply-cardisort" },
+    { name = "requests", specifier = ">=2.31.0" },
     { name = "scipy", specifier = ">=1.11.4" },
     { name = "torch", specifier = ">=2.3.0" },
 ]
@@ -3164,7 +3162,7 @@ requires-dist = [
 [[package]]
 name = "qcardia-data"
 version = "1.0.0"
-source = { git = "https://github.com/q-cardIA/qcardia-data#cb6f39981fe3a0d1c6219a673dcad9ed24892fa4" }
+source = { git = "https://github.com/q-cardIA/qcardia-data#f9a343ff85892a07c2578d2fb2f140289331d513" }
 dependencies = [
     { name = "jupyter" },
     { name = "matplotlib" },
@@ -3184,7 +3182,7 @@ dependencies = [
 [[package]]
 name = "qcardia-models"
 version = "1.0.0"
-source = { git = "https://github.com/q-cardIA/qcardia-models#661dac58908c0c22f600f6ed17a9b3a5d0c37eab" }
+source = { git = "https://github.com/q-cardIA/qcardia-models#55fee5ce8885b0dc910d3319a56241a6b2066cbc" }
 dependencies = [
     { name = "numpy" },
     { name = "torch" },
