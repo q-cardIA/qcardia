@@ -346,11 +346,6 @@ QPushButton[role="sidebarButton"]:pressed {
 QPushButton[role="sidebarButton"][busy="true"] {
 	color: rgb(27, 29, 35);
 }
-QPushButton[role="sidebarButton"][recording="true"] {
-	background-color: rgb(65, 25, 30);
-	border: 1px solid rgb(220, 80, 80);
-	color: rgb(255, 121, 121);
-}
 
 QPushButton[role="sidebarSubButton"] {
 	background-color: transparent;

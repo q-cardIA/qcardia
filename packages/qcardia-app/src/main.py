@@ -1,5 +1,11 @@
 import logging
+import os
 import sys
+
+# torch (via MKL) and faster-whisper's ctranslate2 backend each bundle their
+# own Intel OpenMP runtime (libiomp5md.dll); Windows loading both aborts the
+# process with "OMP: Error #15". Must be set before either is imported below.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication

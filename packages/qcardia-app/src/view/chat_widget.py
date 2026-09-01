@@ -263,7 +263,7 @@ class ChatWidget(QFrame):
         self._input.returnPressed.connect(self._on_send_clicked)
         input_row.addWidget(self._input, 1)
 
-        self._mic_btn = QPushButton("🎤")
+        self._mic_btn = _SendButton("🎤")
         self._mic_btn.setProperty("role", "sidebarButton")
         if VOICE_AVAILABLE:
             self._mic_btn.setToolTip("Hold to speak (or hold F9)\nRight-click to select microphone")
@@ -425,7 +425,10 @@ class ChatWidget(QFrame):
     def _on_mic_press(self):
         if not VOICE_AVAILABLE or self._mic_worker is not None:
             return
-        self._set_mic_recording(True)
+        # setDown() gives the mic button the same pressed accent look as the
+        # send button while it's held — also covers the F9 path, which has
+        # no real mouse press for Qt's own :pressed state to latch onto.
+        self._mic_btn.setDown(True)
         self._mic_worker = MicrophoneWorker(self)
         self._mic_worker.finished.connect(self._on_mic_audio_ready)
         self._mic_worker.error.connect(self._on_mic_error)
@@ -436,8 +439,8 @@ class ChatWidget(QFrame):
             return
         self._mic_worker.stop()
         self._mic_worker = None
-        self._set_mic_recording(False)
-        self._set_mic_transcribing(True)
+        self._mic_btn.setDown(False)
+        self._mic_btn.start_loading()  # same spinning-arc busy indicator as Send
 
     def _on_mic_audio_ready(self, audio):
         self._transcription_worker = TranscriptionWorker(audio, parent=self)
@@ -446,7 +449,7 @@ class ChatWidget(QFrame):
         self._transcription_worker.start()
 
     def _on_transcription_done(self, text: str):
-        self._set_mic_transcribing(False)
+        self._mic_btn.stop_loading()
         self._transcription_worker = None
         if not text:
             return
@@ -457,20 +460,11 @@ class ChatWidget(QFrame):
         self._input.setFocus()
 
     def _on_mic_error(self, message: str):
-        self._set_mic_recording(False)
-        self._set_mic_transcribing(False)
+        self._mic_btn.setDown(False)
+        self._mic_btn.stop_loading()
         self._mic_worker = None
         self._transcription_worker = None
         self.append_system_message(f"Voice error: {message}")
-
-    def _set_mic_recording(self, active: bool):
-        self._mic_btn.setProperty("recording", active)
-        self._mic_btn.setText("⏺" if active else "🎤")
-        self.style().unpolish(self._mic_btn)
-        self.style().polish(self._mic_btn)
-
-    def _set_mic_transcribing(self, active: bool):
-        self._mic_btn.setText("…" if active else "🎤")
 
     # -- bubbles ------------------------------------------------------------
 
