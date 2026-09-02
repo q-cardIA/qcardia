@@ -7,10 +7,12 @@ from matplotlib.colors import ListedColormap
 from natsort import natsorted
 
 from qcardia.cardisort import (
-    classify_sequence_dir,
+    classify_sequence_group,
     get_sequence_dirs,
+    group_reconstruction_variants,
     load_cardisort_model,
     load_series_datasets,
+    pick_processing_representative,
 )
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import CineSeries, LGESeries
@@ -18,7 +20,7 @@ from qcardia.series import CineSeries, LGESeries
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cardisort"
 LGE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-seg"
 CINE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cine-seg"
-PATH_TO_DATASET = Path.cwd() / "data" 
+PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
@@ -27,11 +29,19 @@ cardisort_model, cardisort_config = load_cardisort_model(CARDISORT_WANDB_RUN_PAT
 for patient in patient_list[:]:
     sequence_dirs = get_sequence_dirs(patient)
 
-    sequence_classifications = {}
-    for sequence_dir in sequence_dirs:
+    # Some scanners (seen: Siemens) export several reconstructions of the
+    # same acquisition as separate directories (magnitude/PSIR, or a
+    # perfusion acquisition's AIF/MOCO/LR/HR/SEG/MAP variants). Group those
+    # together first so each acquisition is classified once, from frames
+    # pooled across its variants, rather than as several separate
+    # (and possibly inconsistent) candidates.
+    groups = group_reconstruction_variants(sequence_dirs)
+
+    group_classifications = {}
+    for group in groups:
         try:
-            prediction = classify_sequence_dir(
-                sequence_dir,
+            prediction = classify_sequence_group(
+                group,
                 cardisort_model,
                 cardisort_config["model"]["nr_input_channels"],
                 tuple(cardisort_config["data"]["target_pixdim"]),
@@ -40,28 +50,36 @@ for patient in patient_list[:]:
                 verbose=False,
             )
         except Exception as e:
-            print(f"  ! failed to classify {sequence_dir}: {e!r}")
+            print(f"  ! failed to classify {[d.name for d in group]}: {e!r}")
             continue
         if prediction is None:
             continue
-        sequence_classifications[sequence_dir] = prediction
+        group_classifications[tuple(group)] = prediction
 
-    # Multiple directories can land on the same (sequence, plane) class (e.g. a
-    # low-res planning cine alongside the real diagnostic SAX stack). For each
-    # such group, ask a local LLM to pick the primary series from DICOM
-    # metadata; the rest are dropped from downstream processing.
-    dirs_by_class = defaultdict(list)
-    for sequence_dir, class_label in sequence_classifications.items():
-        dirs_by_class[class_label].append(sequence_dir)
+    # Multiple acquisition groups can land on the same (sequence, plane)
+    # class (e.g. a low-effort planning cine alongside the real diagnostic
+    # SAX stack, or a stress/rest pair). For each such case, ask a local LLM
+    # (or a deterministic structural check) to pick the primary group from
+    # DICOM metadata; the rest are dropped from downstream processing.
+    groups_by_class = defaultdict(list)
+    for group_key, class_label in group_classifications.items():
+        groups_by_class[class_label].append(list(group_key))
 
     primary_dirs = {}
-    for class_label, dirs in dirs_by_class.items():
-        if len(dirs) == 1:
-            primary_dirs[dirs[0]] = class_label
+    for class_label, class_groups in groups_by_class.items():
+        representative_by_name = {}
+        for group in class_groups:
+            representative = pick_processing_representative(group)
+            representative_by_name[representative.name] = representative
+
+        if len(class_groups) == 1:
+            (representative,) = representative_by_name.values()
+            primary_dirs[representative] = class_label
             continue
 
         candidates = [
-            summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
+            summarize_sequence_dir(representative, load_series_datasets(representative))
+            for representative in representative_by_name.values()
         ]
         result = disambiguate_duplicates(class_label, candidates)
         # for assessment in result["assessments"]:
@@ -69,8 +87,7 @@ for patient in patient_list[:]:
         #         f"  {class_label}: {assessment['series']} -> "
         #         f"{assessment['role']} ({assessment['reasoning']})"
         #     )
-        primary_dir = next(d for d in dirs if d.name == result["primary_series"])
-        primary_dirs[primary_dir] = class_label
+        primary_dirs[representative_by_name[result["primary_series"]]] = class_label
 
     cine_dirs = [
         sequence_dir
