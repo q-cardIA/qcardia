@@ -1,11 +1,5 @@
 """Push-to-talk voice input using faster-whisper for transcription.
 
-faster-whisper's `base` model (~145 MB, downloaded from HuggingFace on first
-use and cached in ~/.cache/huggingface/) runs int8 on CPU and transcribes a
-push-to-talk clip (a few seconds of a clinical command, not long-form audio)
-in well under a second — `tiny` was tried first but under-recognizes
-clinical/anatomical vocabulary ("short axis", "LGE", "ischaemia"); `base`
-fixes most of that at a similar latency budget.
 """
 from __future__ import annotations
 
