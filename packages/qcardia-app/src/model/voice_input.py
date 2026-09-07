@@ -26,7 +26,7 @@ except ImportError as _e:
     _import_error = str(_e)
 
 SAMPLE_RATE = 16_000   # Hz — Whisper's native sample rate
-DEFAULT_MODEL_SIZE = "base"
+DEFAULT_MODEL_SIZE = "small"
 
 # Biases Whisper's decoding toward clinical/viewer vocabulary it otherwise
 # mishears (e.g. "CINE" as "sign"/"seen").
@@ -154,7 +154,7 @@ class TranscriptionWorker(QThread):
             self._load(self._model_size)
             segments, _info = TranscriptionWorker._model.transcribe(
                 audio,
-                language=None,           # auto-detect
+                language="en",           # auto-detect
                 beam_size=5,
                 vad_filter=False,        # disabled: VAD strips push-to-talk clips
                 no_speech_threshold=0.4, # default 0.6 — more permissive
