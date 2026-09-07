@@ -28,6 +28,14 @@ except ImportError as _e:
 SAMPLE_RATE = 16_000   # Hz — Whisper's native sample rate
 DEFAULT_MODEL_SIZE = "base"
 
+# Biases Whisper's decoding toward clinical/viewer vocabulary it otherwise
+# mishears (e.g. "CINE" as "sign"/"seen").
+INITIAL_PROMPT = (
+    "Cardiac MRI viewer terms: CINE, LGE, SAX, LAX, four chamber, three "
+    "chamber, two chamber, perfusion, stress, rest, T1 mapping, T2 mapping. "
+    "Apply the functional preset. Show the CINE SAX segmentation."
+)
+
 # Selected input device index — None means sounddevice's default device.
 _selected_device: "int | None" = None
 
@@ -151,6 +159,7 @@ class TranscriptionWorker(QThread):
                 vad_filter=False,        # disabled: VAD strips push-to-talk clips
                 no_speech_threshold=0.4, # default 0.6 — more permissive
                 temperature=0.0,
+                initial_prompt=INITIAL_PROMPT,
             )
             text = " ".join(seg.text.strip() for seg in segments).strip()
             logging.info("Voice: %r", text)
