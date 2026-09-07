@@ -1,3 +1,4 @@
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -24,9 +25,11 @@ PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
+_last_line100_time = None
+
 cardisort_model, cardisort_config = load_cardisort_model(CARDISORT_WANDB_RUN_PATH)
 
-for patient in patient_list[:]:
+for patient in patient_list[:2]:
     sequence_dirs = get_sequence_dirs(patient)
 
     # Some scanners (seen: Siemens) export several reconstructions of the
@@ -77,6 +80,10 @@ for patient in patient_list[:]:
             primary_dirs[representative] = class_label
             continue
 
+        sequence_name, plane_name = class_label
+        if not (sequence_name == "CINE" or "LGE" in sequence_name or sequence_name == "PERF"):
+            continue
+
         candidates = [
             summarize_sequence_dir(representative, load_series_datasets(representative))
             for representative in representative_by_name.values()
@@ -94,6 +101,8 @@ for patient in patient_list[:]:
         for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
         if sequence_name == "CINE" and plane_name == "SAX"
     ]
+    # print(cine_dirs)
+
     cine_dir = cine_dirs[0]
     cine_seq = CineSeries(cine_dir)
     cine_segmentation = cine_seq.predict_segmentation(CINE_SEG_WANDB_RUN_PATH)
