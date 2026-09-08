@@ -5,7 +5,7 @@ import numpy as np
 
 from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
-from utils.hanging_protocols import PRESETS, build_perfusion_preset
+from utils.hanging_protocols import PERF_REST_KEY, PERF_STRESS_KEY, PRESETS, build_perfusion_preset
 from view.series_browser_widget import SeriesCardInfo
 
 
@@ -46,10 +46,8 @@ class DICOMController:
             lambda result: self._on_patient_loaded(result, on_complete)
         )
         self._load_worker.error.connect(lambda exc: self._on_patient_load_error(exc, on_complete))
-        # Clear the reference on QThread's own `finished`, not `finished_ok`/`error` —
-        # those fire from inside run() before the thread has actually stopped, so
-        # dropping the last reference there races the thread teardown and aborts
-        # the process ("QThread: Destroyed while thread is still running").
+        # `finished`, not `finished_ok`/`error`: those fire before the thread
+        # actually stops, so clearing the reference there races teardown.
         self._load_worker.finished.connect(self._clear_load_worker)
         self._load_worker.start()
 
@@ -220,19 +218,27 @@ class DICOMController:
     def run_lge_segmentation(self) -> bool:
         return self.run_segmentation("LGE_SAX")
 
-    def apply_preset(self, name: str):
+    def apply_preset(self, name: str) -> tuple[int, int] | None:
+        """Returns (panels_filled, panels_total), or None for an unknown preset name."""
         if name == "perfusion":
             avail = set(self.model.series.keys())
             preset = build_perfusion_preset(
-                has_stress="PERF_STRESS_SAX" in avail,
-                has_rest="PERF_REST_SAX" in avail,
+                has_stress=PERF_STRESS_KEY in avail,
+                has_rest=PERF_REST_KEY in avail,
             )
         else:
             preset = PRESETS.get(name)
 
         if preset is None:
             logging.warning(f"apply_preset: unknown preset {name!r}")
-            return
+            return None
+
+        total = len(preset.panels)
+        filled = sum(1 for panel in preset.panels if self._widget.is_series_registered(panel.key))
+        if filled == 0:
+            # Leave the current grid/panels untouched — a total no-op should
+            # actually be a no-op, not silently wipe what was displayed.
+            return 0, total
 
         rows, cols = preset.grid
         self._widget.set_grid_size(rows, cols)
@@ -241,6 +247,7 @@ class DICOMController:
                 self._widget.set_panel_series(panel.idx, panel.key, axis=panel.axis)
             else:
                 self._widget.set_panel_empty(panel.idx)
+        return filled, total
 
     def set_time_frame(self, time_index):
         self.current_time_index = time_index
