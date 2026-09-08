@@ -1,6 +1,5 @@
-"""Push-to-talk voice input using faster-whisper for transcription.
+"""Push-to-talk voice input using faster-whisper for transcription."""
 
-"""
 from __future__ import annotations
 
 import logging
@@ -13,20 +12,23 @@ VOICE_AVAILABLE = False
 _import_error: str = ""
 
 try:
-    import sounddevice as sd          # noqa: F401
+    import sounddevice as sd  # noqa: F401
     from faster_whisper import WhisperModel  # noqa: F401
+
     VOICE_AVAILABLE = True
 except ImportError as _e:
     _import_error = str(_e)
 
-SAMPLE_RATE = 16_000   # Hz — Whisper's native sample rate
+SAMPLE_RATE = 16_000  # Hz — Whisper's native sample rate
 DEFAULT_MODEL_SIZE = "small"
 
 # Biases Whisper's decoding toward clinical/viewer vocabulary it otherwise
 # mishears (e.g. "CINE" as "sign"/"seen").
 INITIAL_PROMPT = (
     "Cardiac MRI viewer terms: CINE, LGE, SAX, LAX, four chamber, three "
-    "chamber, two chamber, perfusion, stress, rest, T1 mapping, T2 mapping. "
+    "LGE is late gadolinium enhancement (late gad). SAX is short axis. LAX is long axis. "
+    "chamber, two chamber, perfusion, stress, rest, T1 mapping, T2 mapping, "
+    "viability. Commonly we want to do segmention or run the model."
     "Apply the functional preset. Show the CINE SAX segmentation."
 )
 
@@ -39,7 +41,11 @@ def list_input_devices() -> list[tuple[int, str]]:
     if not VOICE_AVAILABLE:
         return []
     devices = sd.query_devices()
-    return [(i, dev["name"]) for i, dev in enumerate(devices) if dev["max_input_channels"] > 0]
+    return [
+        (i, dev["name"])
+        for i, dev in enumerate(devices)
+        if dev["max_input_channels"] > 0
+    ]
 
 
 def selected_input_device() -> "int | None":
@@ -59,7 +65,7 @@ class MicrophoneWorker(QThread):
     Emits finished(audio_array) where audio_array is float32 mono at SAMPLE_RATE.
     """
 
-    finished = Signal(object)   # np.ndarray float32, shape (n_samples,)
+    finished = Signal(object)  # np.ndarray float32, shape (n_samples,)
     error = Signal(str)
 
     def __init__(self, parent=None):
@@ -83,28 +89,39 @@ class MicrophoneWorker(QThread):
 
         self._stop_event.clear()
         try:
-            with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                                 callback=_callback, device=_selected_device):
+            with sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                callback=_callback,
+                device=_selected_device,
+            ):
                 self._stop_event.wait()
         except Exception as exc:
             self.error.emit(str(exc))
             return
 
-        audio = np.concatenate(chunks, axis=0).flatten() if chunks else np.zeros(0, dtype=np.float32)
+        audio = (
+            np.concatenate(chunks, axis=0).flatten()
+            if chunks
+            else np.zeros(0, dtype=np.float32)
+        )
         self.finished.emit(audio)
 
 
 class TranscriptionWorker(QThread):
     """Runs faster-whisper on a float32 audio array in a background thread."""
 
-    finished = Signal(str)   # transcribed text (may be empty)
+    finished = Signal(str)  # transcribed text (may be empty)
     error = Signal(str)
 
     _model: "WhisperModel | None" = None
     _loaded_size: str = ""
     _lock = threading.Lock()
 
-    def __init__(self, audio: np.ndarray, model_size: str = DEFAULT_MODEL_SIZE, parent=None):
+    def __init__(
+        self, audio: np.ndarray, model_size: str = DEFAULT_MODEL_SIZE, parent=None
+    ):
         super().__init__(parent)
         self._audio = audio
         self._model_size = model_size
@@ -134,7 +151,7 @@ class TranscriptionWorker(QThread):
             self.finished.emit("")
             return
 
-        rms = float(np.sqrt(np.mean(self._audio ** 2)))
+        rms = float(np.sqrt(np.mean(self._audio**2)))
         if rms < 1e-6:
             self.error.emit("No audio captured — is the microphone muted?")
             return
@@ -148,10 +165,10 @@ class TranscriptionWorker(QThread):
             self._load(self._model_size)
             segments, _info = TranscriptionWorker._model.transcribe(
                 audio,
-                language="en",           # auto-detect
+                language="en",  # auto-detect
                 beam_size=5,
-                vad_filter=False,        # disabled: VAD strips push-to-talk clips
-                no_speech_threshold=0.4, # default 0.6 — more permissive
+                vad_filter=False,  # disabled: VAD strips push-to-talk clips
+                no_speech_threshold=0.4,  # default 0.6 — more permissive
                 temperature=0.0,
                 initial_prompt=INITIAL_PROMPT,
             )
