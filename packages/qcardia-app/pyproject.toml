@@ -6,7 +6,7 @@ authors = [
     {name = "Cian Scannell", email = "c.m.scannell@tue.nl"}
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "pyside6>=6.6.2",
     "pydicom>=2.4.4",
@@ -16,6 +16,8 @@ dependencies = [
     "pyyaml>=6.0.1",
     "requests>=2.31.0",
     "qcardia",
+    "faster-whisper>=1.0.3",
+    "sounddevice>=0.4.6",
 ]
 
 # qcardia-models/qcardia-data aren't imported here directly — they resolve

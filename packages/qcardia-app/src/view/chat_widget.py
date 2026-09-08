@@ -3,14 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -19,6 +21,14 @@ from PySide6.QtWidgets import (
 )
 
 from model.background_worker import CallableWorker
+from model.voice_input import (
+    VOICE_AVAILABLE,
+    MicrophoneWorker,
+    TranscriptionWorker,
+    list_input_devices,
+    select_input_device,
+    selected_input_device,
+)
 from utils.app_config import (
     OLLAMA_MODEL,
     discover_local_gguf_files,
@@ -220,6 +230,9 @@ class ChatWidget(QFrame):
         self._import_worker: CallableWorker | None = None
         self._user_bubbles: list[_Bubble] = []
         self._busy = False
+        self._mic_worker: MicrophoneWorker | None = None
+        self._transcription_worker: TranscriptionWorker | None = None
+        self._f9_held = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -249,6 +262,21 @@ class ChatWidget(QFrame):
         self._input.setPlaceholderText("Ask something…")
         self._input.returnPressed.connect(self._on_send_clicked)
         input_row.addWidget(self._input, 1)
+
+        self._mic_btn = _SendButton("🎤")
+        self._mic_btn.setProperty("role", "sidebarButton")
+        if VOICE_AVAILABLE:
+            self._mic_btn.setToolTip("Hold to speak (or hold F9)\nRight-click to select microphone")
+            self._mic_btn.pressed.connect(self._on_mic_press)
+            self._mic_btn.released.connect(self._on_mic_release)
+            self._mic_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            self._mic_btn.customContextMenuRequested.connect(self._show_mic_device_menu)
+            QApplication.instance().installEventFilter(self)
+        else:
+            self._mic_btn.setToolTip("Voice input unavailable — install faster-whisper and sounddevice.")
+            self._mic_btn.setEnabled(False)
+        input_row.addWidget(self._mic_btn)
+
         self._send_btn = _SendButton("Send")
         self._send_btn.setProperty("role", "sidebarButton")
         self._send_btn.clicked.connect(self._on_send_clicked)
@@ -351,6 +379,92 @@ class ChatWidget(QFrame):
             self._send_btn.stop_loading()
         else:
             self._send_btn.start_loading()
+
+    # -- voice input (push-to-talk) ------------------------------------------
+
+    def eventFilter(self, obj, event):
+        """Global F9 push-to-talk, so it works from any focused widget."""
+        if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+            if event.key() == Qt.Key_F9 and not self._f9_held:
+                self._f9_held = True
+                self._on_mic_press()
+                return True
+        elif event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
+            if event.key() == Qt.Key_F9 and self._f9_held:
+                self._f9_held = False
+                self._on_mic_release()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _show_mic_device_menu(self, pos):
+        """Right-click context menu on the mic button to choose an input device."""
+        devices = list_input_devices()
+        if not devices:
+            return
+        current = selected_input_device()
+        menu = QMenu(self)
+        act_default = menu.addAction("System default")
+        act_default.setCheckable(True)
+        act_default.setChecked(current is None)
+        menu.addSeparator()
+        actions = {}
+        for idx, name in devices:
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(idx == current)
+            actions[act] = idx
+
+        chosen = menu.exec(self._mic_btn.mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen is act_default:
+            select_input_device(None)
+        elif chosen in actions:
+            select_input_device(actions[chosen])
+
+    def _on_mic_press(self):
+        if not VOICE_AVAILABLE or self._mic_worker is not None:
+            return
+        # setDown() gives the mic button the same pressed accent look as the
+        # send button while it's held — also covers the F9 path, which has
+        # no real mouse press for Qt's own :pressed state to latch onto.
+        self._mic_btn.setDown(True)
+        self._mic_worker = MicrophoneWorker(self)
+        self._mic_worker.finished.connect(self._on_mic_audio_ready)
+        self._mic_worker.error.connect(self._on_mic_error)
+        self._mic_worker.start()
+
+    def _on_mic_release(self):
+        if self._mic_worker is None:
+            return
+        self._mic_worker.stop()
+        self._mic_worker = None
+        self._mic_btn.setDown(False)
+        self._mic_btn.start_loading()  # same spinning-arc busy indicator as Send
+
+    def _on_mic_audio_ready(self, audio):
+        self._transcription_worker = TranscriptionWorker(audio, parent=self)
+        self._transcription_worker.finished.connect(self._on_transcription_done)
+        self._transcription_worker.error.connect(self._on_mic_error)
+        self._transcription_worker.start()
+
+    def _on_transcription_done(self, text: str):
+        self._mic_btn.stop_loading()
+        self._transcription_worker = None
+        if not text:
+            return
+        current = self._input.text()
+        if current and not current.endswith(" "):
+            text = " " + text
+        self._input.insert(text)
+        self._input.setFocus()
+
+    def _on_mic_error(self, message: str):
+        self._mic_btn.setDown(False)
+        self._mic_btn.stop_loading()
+        self._mic_worker = None
+        self._transcription_worker = None
+        self.append_system_message(f"Voice error: {message}")
 
     # -- bubbles ------------------------------------------------------------
 
