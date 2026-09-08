@@ -26,9 +26,7 @@ ICON_PATH: Path = APP_DIR / "assets" / "images" / "q-cardIA.png"
 # Used by the AI assistant's load_subject tool.
 SUBJECT_BASE_DIR: Path = WORKSPACE_DIR / "data" / "new_data"
 
-# Cached duplicate-series disambiguation results (model/dicom_model.py).
-# Lives alongside the subject data, not inside the app repo, since it's
-# derived from that data.
+# Cached duplicate-series disambiguation results, kept alongside the subject data.
 DISAMBIGUATION_CACHE_DIR: Path = SUBJECT_BASE_DIR / "disambiguation_cache"
 
 
@@ -58,14 +56,14 @@ def discover_subject_numbers() -> list[int]:
 # Ollama (local LLM chat assistant)
 # ---------------------------------------------------------------------------
 
-OLLAMA_URL: str = "http://localhost:11434/api/chat"
-OLLAMA_GENERATE_URL: str = "http://localhost:11434/api/generate"
-OLLAMA_TAGS_URL: str = "http://localhost:11434/api/tags"
-OLLAMA_MODEL: str = "qwen3:8b"
+# Local Ollama server — 127.0.0.1, not "localhost" (can resolve to an
+# unreachable IPv6 address and hang).
+OLLAMA_URL: str = "http://127.0.0.1:11434/api/chat"
+OLLAMA_GENERATE_URL: str = "http://127.0.0.1:11434/api/generate"
+OLLAMA_TAGS_URL: str = "http://127.0.0.1:11434/api/tags"
+OLLAMA_MODEL: str = "qwen3.5:latest"
 
-# Explicit context window — Ollama silently truncates from the front of the
-# prompt if this is left too low, which would otherwise drop the system
-# prompt/tool definitions with no error.
+# Too low silently truncates the prompt (dropping the system prompt/tools) with no error.
 OLLAMA_NUM_CTX: int = 16384
 
 
@@ -107,9 +105,7 @@ def list_ollama_models() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Local GGUF weights (models/llm/) — not pulled into Ollama by default.
-# Ollama only knows about models in its own store, so these are surfaced
-# separately and imported into Ollama on first use via `ollama create`.
+# Local GGUF weights (models/llm/) — imported into Ollama on first use via `ollama create`.
 # ---------------------------------------------------------------------------
 
 LLM_WEIGHTS_DIR: Path = WORKSPACE_DIR / "models" / "llm"
@@ -150,6 +146,8 @@ def import_gguf_model(gguf_path: Path) -> str:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
     except subprocess.CalledProcessError as e:
