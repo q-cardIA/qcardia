@@ -3571,6 +3571,8 @@ dependencies = [
     { name = "opencv-python" },
     { name = "qcardia-data" },
     { name = "qcardia-models" },
+    { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "requests", version = "2.34.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "scikit-image" },
     { name = "scipy" },
 ]
@@ -3580,6 +3582,7 @@ requires-dist = [
     { name = "opencv-python", specifier = "==4.10.0.84" },
     { name = "qcardia-data", git = "https://github.com/q-cardIA/qcardia-data" },
     { name = "qcardia-models", git = "https://github.com/q-cardIA/qcardia-models" },
+    { name = "requests", specifier = ">=2.31.0" },
     { name = "scikit-image", specifier = "==0.22.0" },
     { name = "scipy", specifier = "==1.12.0" },
 ]

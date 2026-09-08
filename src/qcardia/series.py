@@ -181,6 +181,15 @@ class BaseSeries:
         # Read DICOM files and extract relevant information
         for file in files:
             the_ds = pydicom.read_file(file)
+            # Skip multi-frame ("Enhanced") instances: some scanners emit one
+            # alongside the individual single-frame instances for the same
+            # images, and its ImagePositionPatient/ImageOrientationPatient
+            # live per-frame in PerFrameFunctionalGroupsSequence rather than
+            # as top-level attributes. Checked via NumberOfFrames rather than
+            # pixel_array.ndim, since a single-frame RGB image (e.g. a color
+            # secondary capture) is also 3D but isn't multi-frame.
+            if int(getattr(the_ds, "NumberOfFrames", 1) or 1) > 1:
+                continue
             all_dicom_data.append(the_ds)
             slice_position.append(the_ds.ImagePositionPatient)
             slice_orientation.append(the_ds.ImageOrientationPatient)
