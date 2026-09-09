@@ -86,10 +86,12 @@ def load_devices() -> list[Device]:
     known = {f.name for f in fields(Device)}
     for entry in raw if isinstance(raw, list) else raw.get("devices", []):
         try:
+            # A gateway is remote by definition, so its mode can be left out of the config.
+            mode = entry.get("mode") or ("http" if entry.get("url") else "local")
             # A local entry is already covered above; an unknown protocol is unusable.
-            if entry.get("mode", "local") == "local" or entry.get("protocol", "ollama") not in _PROTOCOLS:
+            if mode == "local" or entry.get("protocol", "ollama") not in _PROTOCOLS:
                 continue
-            kwargs = {k: v for k, v in entry.items() if k in known}
+            kwargs = {k: v for k, v in entry.items() if k in known} | {"mode": mode}
             kwargs.update({k: int(kwargs[k]) for k in ("port", "local_port") if k in kwargs})
             devices.append(Device(**kwargs))
         except (AttributeError, TypeError, ValueError):
@@ -120,13 +122,22 @@ def _serves_ollama(port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def _resolve_local_port(device: Device) -> int:
-    """The configured port, reused if a live tunnel already holds it, else a free one."""
-    if not _port_open(device.local_port) or _serves_ollama(device.local_port):
-        return device.local_port
+def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _resolve_local_port(device: Device) -> int:
+    """The configured port, reused if this device's own tunnel already holds it."""
+    # local_port defaults to 11435 for every device, so two remote machines configured
+    # from the example share it; without this check the second would adopt the first's
+    # tunnel and quietly send its chat (and DICOM headers) to the wrong machine.
+    if device.local_port in {p for i, p in _active_ports.items() if i != device.id}:
+        return _free_port()
+    if not _port_open(device.local_port) or _serves_ollama(device.local_port):
+        return device.local_port
+    return _free_port()
 
 
 def ensure_tunnel(device: Device) -> None:
@@ -142,8 +153,8 @@ def ensure_tunnel(device: Device) -> None:
     close_tunnel(device.id)
 
     local_port = _resolve_local_port(device)
-    if _serves_ollama(local_port):
-        _active_ports[device.id] = local_port  # tunnel left by an earlier run, adopt it
+    if local_port == device.local_port and _serves_ollama(local_port):
+        _active_ports[device.id] = local_port  # this device's tunnel from an earlier run
         return
 
     proc = subprocess.Popen(
@@ -185,6 +196,9 @@ def close_tunnel(device_id: str) -> None:
     except Exception:
         with suppress(Exception):
             proc.kill()
+            proc.wait(timeout=3)  # reap it, so POSIX doesn't keep a zombie
+    with suppress(Exception):
+        proc.stderr.close()
 
 
 def shutdown() -> None:
@@ -321,13 +335,18 @@ def apply(device: Device) -> None:
         openai_client.CHAT_URL = f"{base}/chat/completions"
         openai_client.API_KEY = _api_key(device)
 
-    # Disambiguation sends DICOM headers, so it follows the device only when cleared for them.
+    # Disambiguation sends DICOM headers, so it follows the device only when cleared for
+    # them and that device actually has the fixed model qcardia asks for; otherwise every
+    # subject load with a duplicate-series group would fail with model-not-found.
     try:
         from qcardia import disambiguate
     except ImportError:
         pass  # qcardia not importable here; chat still switches fine
     else:
-        disambiguate.OLLAMA_URL = f"{ollama if device.patient_data_ok else _LOCAL_URL}/api/chat"
+        follows = device.patient_data_ok and (
+            device.is_local or any(m["tag"] == disambiguate.OLLAMA_MODEL for m in _models)
+        )
+        disambiguate.OLLAMA_URL = f"{ollama if follows else _LOCAL_URL}/api/chat"
 
     _current = device
 
@@ -337,8 +356,9 @@ def activate(device: Device, timeout: float = DEVICE_PROBE_TIMEOUT) -> ProbeResu
     global _available, _models
     result = probe(device, timeout=timeout)
     if result.ok:
+        _models = result.models  # before apply(), which checks them
         apply(device)
-        _available, _models = True, result.models
+        _available = True
     return result
 
 

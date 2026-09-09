@@ -107,9 +107,10 @@ def list_ollama_models(timeout: float | None = None) -> list[dict]:
     try:
         response = requests.get(OLLAMA_TAGS_URL, timeout=timeout or OLLAMA_HTTP_TIMEOUT)
         response.raise_for_status()
-    except requests.RequestException:
-        return []
-    return format_ollama_models(response.json().get("models", []))
+        models = response.json().get("models", [])
+    except (requests.RequestException, ValueError):
+        return []  # ValueError: a rebound URL can land on something serving HTML
+    return format_ollama_models(models)
 
 
 # ---------------------------------------------------------------------------

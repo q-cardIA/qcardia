@@ -307,7 +307,7 @@ class ChatController:
         self._available_subjects_cache: list[int] | None = None
         self._warmup_worker: CallableWorker | None = None  # see _warm_model_in_background
         self._model_load_worker: CallableWorker | None = None  # see _preload_selected_model
-        self._abandoned_workers: list = []  # see _on_device_changed
+        self._live_workers: list = []  # anything whose thread must outlive its variable
 
         self.view.chat_widget.message_submitted.connect(self.send_message)
         self.view.chat_widget.model_changed.connect(self._on_model_changed)
@@ -326,23 +326,26 @@ class ChatController:
         """
         worker = self._worker
         if worker is None:
+            # A tool sequence with no worker in flight is still mid-run, and re-enabling
+            # input would let the next send race its follow-up request.
             return
         self._worker = None
         for signal in (worker.token_received, worker.tool_calls_ready,
                        worker.finished_ok, worker.error, worker.finished):
             with suppress(RuntimeError, TypeError):
                 signal.disconnect()  # no args = drop every slot on that signal
-        self._abandoned_workers.append(worker)
-        worker.finished.connect(lambda w=worker: self._forget_abandoned(w))
+        self._hold(worker)
         self.view.chat_widget.finalize_assistant_message()  # close the dangling bubble
         self.view.chat_widget.append_system_message(
             f"Abandoned the request still running on the previous device. "
             f"Ask again to run it on {device.label}."
         )
+        self.view.chat_widget.set_enabled(True)
 
-    def _forget_abandoned(self, worker):
-        if worker in self._abandoned_workers:
-            self._abandoned_workers.remove(worker)
+    def _hold(self, worker):
+        """Keep a worker alive until its thread really ends; dropping it mid-run aborts."""
+        self._live_workers.append(worker)
+        worker.finished.connect(lambda w=worker: w in self._live_workers and self._live_workers.remove(w))
 
     def _preload_selected_model(self):
         """Load the newly picked model now, so the next send doesn't absorb the cold load."""
@@ -350,7 +353,9 @@ class ChatController:
             return
         self.view.chat_widget.set_model_loading(True)
         worker = CallableWorker(warm_model, self._llm_model)
+        # Overwrites a possibly still-running warm-up, so _hold keeps that one referenced.
         self._model_load_worker = worker
+        self._hold(worker)
         worker.finished.connect(lambda w=worker: self._on_model_loaded(w))
         worker.start()
 

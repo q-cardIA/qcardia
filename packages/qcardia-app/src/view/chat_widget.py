@@ -338,9 +338,10 @@ class ChatWidget(QFrame):
         self._device_combo.setEnabled(True)
         self._device_bar.hide()
         if result.ok:
-            # Before re-enabling: the controller must let go of the old device's request first.
+            # The controller re-enables input itself once it has let go of any request on
+            # the old device; a tool sequence still mid-run must stay blocked.
+            self.set_enabled(not self._busy_before_switch)
             self.device_changed.emit(device)
-            self.set_enabled(True)
             self.append_system_message(f"Now using {device.label}: {result.detail}")
             self._populate_model_combo()  # each device serves its own models
         else:

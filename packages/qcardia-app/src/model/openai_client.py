@@ -1,9 +1,11 @@
 """Thin OpenAI-compatible chat client: the second wire format the assistant can speak.
 
-Kept apart from ollama_client rather than branching inside it, since the two
-share nothing but the Qt signals and only one is ever held at a time. Nothing here is
-specific to any one gateway: any /v1 endpoint with a bearer key works. utils.llm_devices
-picks the class and rebinds the two constants below, so both are read at call time.
+Kept apart from ollama_client rather than branching inside it, since the two share
+nothing but the Qt signals and only one is ever held at a time. utils.llm_devices picks
+the class and rebinds the two constants below, so both are read at call time.
+
+Targets a vLLM-style gateway (TU/e's SPIKE-1 is one). A stricter endpoint may reject
+the chat_template_kwargs field in run().
 """
 from __future__ import annotations
 
@@ -16,6 +18,50 @@ from model.background_worker import ChatWorker
 CHAT_URL: str = ""  # rebound by utils.llm_devices.apply(); empty until a device is selected
 API_KEY: str = ""
 
+_COLD_START = (
+    "{model} did not start answering in time. It is most likely still loading onto a "
+    "GPU, so try a model shown as running."
+)
+
+
+def _to_openai(messages: list[dict]) -> list[dict]:
+    """Ollama-shaped history to OpenAI's, which the rest of the app does not speak.
+
+    ChatController builds tool history Ollama's way: no call id, and arguments as a dict.
+    OpenAI needs an id on every call, `type: "function"`, arguments as a JSON *string*,
+    and a matching tool_call_id on each result. Ids are synthesised per request, which is
+    fine because they only have to be consistent within the payload being sent.
+    """
+    out: list[dict] = []
+    pending: list[str] = []
+    for message in messages:
+        calls = message.get("tool_calls")
+        if calls:
+            ids = [f"call_{len(out)}_{i}" for i in range(len(calls))]
+            out.append({
+                "role": message.get("role", "assistant"),
+                "content": message.get("content") or "",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": call["function"]["name"],
+                            "arguments": json.dumps(call["function"].get("arguments", {})),
+                        },
+                    }
+                    for call_id, call in zip(ids, calls)
+                ],
+            })
+            pending = ids
+        elif message.get("role") == "tool":
+            # Results come back in call order, so pair them off against the ids above.
+            call_id = pending.pop(0) if pending else "call_0_0"
+            out.append({"role": "tool", "tool_call_id": call_id, "content": message.get("content", "")})
+        else:
+            out.append(message)
+    return out
+
 
 class OpenAIWorker(ChatWorker):
     """Streams one /chat/completions request."""
@@ -23,7 +69,7 @@ class OpenAIWorker(ChatWorker):
     def run(self):
         payload = {
             "model": self._model,
-            "messages": self._messages,
+            "messages": _to_openai(self._messages),
             "stream": True,
             "max_tokens": 4096,
             "temperature": 0.2,
@@ -39,9 +85,17 @@ class OpenAIWorker(ChatWorker):
                 stream=True, timeout=180,
             )
             response.raise_for_status()
+        except requests.Timeout:
+            # Headers don't arrive until generation starts, so a cold start times out here.
+            self.error.emit(_COLD_START.format(model=self._model))
+            return
         except requests.RequestException as e:
             self.error.emit(f"Could not reach {CHAT_URL}: {e}")
             return
+
+        # SSE carries no charset, so requests leaves encoding unset and would hand back
+        # raw bytes; without this the decode below is skipped and every line is bytes.
+        response.encoding = response.encoding or "utf-8"
 
         # Arguments stream in fragments, so collect per index: one turn can request several tools.
         partial: dict[int, dict] = {}
@@ -71,10 +125,7 @@ class OpenAIWorker(ChatWorker):
                     if delta.get("content"):
                         self.token_received.emit(delta["content"])
         except requests.Timeout:
-            self.error.emit(
-                f"{self._model} did not start answering in time. It is most likely still "
-                "loading onto a GPU, so try a model shown as running."
-            )
+            self.error.emit(_COLD_START.format(model=self._model))
             return
         except requests.RequestException as e:
             self.error.emit(f"Stream interrupted: {e}")
