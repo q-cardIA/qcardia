@@ -4,8 +4,8 @@ Kept apart from ollama_client rather than branching inside it, since the two sha
 nothing but the Qt signals and only one is ever held at a time. utils.llm_devices picks
 the class and rebinds the two constants below, so both are read at call time.
 
-Targets a vLLM-style gateway (TU/e's SPIKE-1 is one). A stricter endpoint may reject
-the chat_template_kwargs field in run().
+Any /v1 endpoint with a bearer key works: anything non-standard a particular gateway
+needs goes in that device's `extra_body`, not in the payload built here.
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from model.background_worker import ChatWorker
 
 CHAT_URL: str = ""  # rebound by utils.llm_devices.apply(); empty until a device is selected
 API_KEY: str = ""
+EXTRA_BODY: dict = {}  # the device's non-standard request fields, if it needs any
 
 _COLD_START = (
     "{model} did not start answering in time. It is most likely still loading onto a "
@@ -73,9 +74,8 @@ class OpenAIWorker(ChatWorker):
             "stream": True,
             "max_tokens": 4096,
             "temperature": 0.2,
-            # Hosted models usually reason first, which looks like a hang and costs budget.
-            "chat_template_kwargs": {"enable_thinking": False},
         }
+        payload.update(EXTRA_BODY)
         if self._tools:
             payload["tools"] = self._tools
 

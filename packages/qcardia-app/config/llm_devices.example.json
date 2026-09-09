@@ -1,8 +1,6 @@
 {
   "//": "Copy this file to llm_devices.json in the same folder (it is gitignored). Only 'devices' is read; 'examples' is ignored, so a plain copy just gives you the local Ollama with nothing to misconfigure. To add a machine, move one entry from 'examples' into 'devices' and fill it in. 'This computer' is always offered and never needs an entry. See the README for what each field means.",
-
   "devices": [],
-
   "examples": [
     {
       "id": "remote-ollama-ssh",
@@ -32,7 +30,12 @@
       "api_key_env": "MY_GATEWAY_API_KEY",
       "model": "some-model",
       "patient_data_ok": false,
-      "note": "Any OpenAI-compatible /v1 endpoint. api_key_env names the environment variable holding the key, never the key itself."
+      "note": "Any OpenAI-compatible /v1 endpoint. api_key_env names the environment variable holding the key, never the key itself. extra_body carries anything non-standard the gateway needs; this one stops vLLM models reasoning before they answer.",
+      "extra_body": {
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
     }
   ]
 }

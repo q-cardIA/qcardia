@@ -138,6 +138,9 @@ wandb/
 CLAUDE.md
 src/precompute_classification_cache.py
 
+# agent worktrees for other branches, checked out inside this repo
+.claude/
+
 # your own LLM device list: host addresses, ssh aliases, gateway URLs
 config/llm_devices.json
 

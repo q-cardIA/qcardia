@@ -45,6 +45,7 @@ class Device:
     url: str = ""                  # full base URL; a gateway needs a scheme and path
     api_key_env: str = ""          # env var holding the bearer token, never the key
     model: str = ""                # default tag; a gateway shares none with Ollama
+    extra_body: dict = field(default_factory=dict)  # non-standard request fields, e.g. vLLM's
     ssh_alias: str | None = None   # ~/.ssh/config entry, so no credentials live here
     local_port: int = 11435        # tunnel's local end; 11434 is this machine's Ollama
     patient_data_ok: bool = False  # may DICOM headers go here? enforced in apply()
@@ -334,6 +335,7 @@ def apply(device: Device) -> None:
 
         openai_client.CHAT_URL = f"{base}/chat/completions"
         openai_client.API_KEY = _api_key(device)
+        openai_client.EXTRA_BODY = dict(device.extra_body)
 
     # Disambiguation sends DICOM headers, so it follows the device only when cleared for
     # them and that device actually has the fixed model qcardia asks for; otherwise every
