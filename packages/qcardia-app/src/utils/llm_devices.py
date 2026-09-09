@@ -306,11 +306,11 @@ def apply(device: Device) -> None:
     # Only chat can follow a non-Ollama device; the rest is Ollama-shaped, so it stays local.
     ollama = base if device.protocol == "ollama" else _LOCAL_URL
 
-    from model import llm_client
+    from model import ollama_client
     from utils import app_config
 
-    # Both modules, not just app_config: llm_client imported these names by value.
-    for module in (app_config, llm_client):
+    # Both modules, not just app_config: ollama_client imported these names by value.
+    for module in (app_config, ollama_client):
         module.OLLAMA_URL = f"{ollama}/api/chat"
         module.OLLAMA_GENERATE_URL = f"{ollama}/api/generate"
     app_config.OLLAMA_TAGS_URL = f"{ollama}/api/tags"
@@ -348,7 +348,7 @@ def worker_class():
         from model.openai_client import OpenAIWorker
 
         return OpenAIWorker
-    from model.llm_client import OllamaWorker
+    from model.ollama_client import OllamaWorker
 
     return OllamaWorker
 

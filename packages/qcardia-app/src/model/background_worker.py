@@ -1,8 +1,4 @@
-"""Generic QThread wrapper for running one blocking call off the GUI thread.
-
-Used for anything slow enough to freeze the UI (segmentation inference, ...)
-without writing a bespoke QThread subclass per operation.
-"""
+"""QThread bases: one for any blocking call, one for the streaming chat transports."""
 from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
@@ -25,3 +21,22 @@ class CallableWorker(QThread):
             self.error.emit(e)
             return
         self.finished_ok.emit(result)
+
+
+class ChatWorker(QThread):
+    """Base for the chat transports, which must stay drop-in for each other.
+
+    ChatController asks llm_devices for a class and never learns which it holds, so the
+    signals and constructor live here rather than being duplicated per wire format.
+    """
+
+    token_received = Signal(str)
+    tool_calls_ready = Signal(list)  # list of (tool_name, arguments) tuples
+    finished_ok = Signal()
+    error = Signal(str)
+
+    def __init__(self, messages: list[dict], tools: list[dict] | None = None, model: str = ""):
+        super().__init__()
+        self._messages = messages
+        self._tools = tools
+        self._model = model

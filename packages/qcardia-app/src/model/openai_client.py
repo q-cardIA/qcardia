@@ -1,6 +1,6 @@
 """Thin OpenAI-compatible chat client: the second wire format the assistant can speak.
 
-Kept apart from llm_client (Ollama) rather than branching inside it, since the two
+Kept apart from ollama_client rather than branching inside it, since the two
 share nothing but the Qt signals and only one is ever held at a time. Nothing here is
 specific to any one gateway: any /v1 endpoint with a bearer key works. utils.llm_devices
 picks the class and rebinds the two constants below, so both are read at call time.
@@ -10,25 +10,15 @@ from __future__ import annotations
 import json
 
 import requests
-from PySide6.QtCore import QThread, Signal
+
+from model.background_worker import ChatWorker
 
 CHAT_URL: str = ""  # rebound by utils.llm_devices.apply(); empty until a device is selected
 API_KEY: str = ""
 
 
-class OpenAIWorker(QThread):
-    """Streams one /chat/completions request. Drop-in for OllamaWorker: same signals and constructor."""
-
-    token_received = Signal(str)
-    tool_calls_ready = Signal(list)  # list of (tool_name, arguments) tuples
-    finished_ok = Signal()
-    error = Signal(str)
-
-    def __init__(self, messages: list[dict], tools: list[dict] | None = None, model: str = ""):
-        super().__init__()
-        self._messages = messages
-        self._tools = tools
-        self._model = model
+class OpenAIWorker(ChatWorker):
+    """Streams one /chat/completions request."""
 
     def run(self):
         payload = {

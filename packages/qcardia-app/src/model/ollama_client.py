@@ -1,44 +1,23 @@
-"""Thin Ollama HTTP client — streams chat responses and native tool calls.
+"""Thin Ollama HTTP client: streams chat responses and native tool calls.
 
-No subprocess, no separate conda env: Ollama runs as its own local service
-(see utils/app_config.py), so this is a plain requests.post from the app's
-main process/env — the same pattern already used by
-qcardia.disambiguate.disambiguate_duplicates, just streaming and with tools.
+No subprocess and no separate env, just a requests.post from the app's own process,
+the same pattern qcardia.disambiguate already uses. See openai_client for the other
+wire format; utils.llm_devices picks between them.
 """
 from __future__ import annotations
 
 import json
 
 import requests
-from PySide6.QtCore import QThread, Signal
-
+from model.background_worker import ChatWorker
 from utils.app_config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX, OLLAMA_URL
 
 KEEP_ALIVE = "30m"  # how long Ollama keeps the model resident after a request (default is 5 min)
 
 
-class OllamaWorker(QThread):
-    """Runs one /api/chat request in the background and streams the result.
-
-    Emits `token_received` for each streamed content chunk, `tool_calls_ready`
-    once with the full list of calls if the model decided to call tools
-    (Ollama sends tool calls whole, not token-by-token, and a single turn can
-    contain more than one call — e.g. "load subject 5 and apply the
-    functional preset" — so all of them must be emitted together rather than
-    only the first), `finished_ok` when the response is complete, and `error`
-    on failure.
-    """
-
-    token_received = Signal(str)
-    tool_calls_ready = Signal(list)  # list of (tool_name, arguments) tuples
-    finished_ok = Signal()
-    error = Signal(str)
-
-    def __init__(self, messages: list[dict], tools: list[dict] | None = None, model: str = OLLAMA_MODEL):
-        super().__init__()
-        self._messages = messages
-        self._tools = tools
-        self._model = model
+class OllamaWorker(ChatWorker):
+    """Streams one /api/chat request. Ollama sends tool calls whole, and a turn can hold
+    several ("load subject 5 and apply the functional preset"), so all are emitted at once."""
 
     def run(self):
         payload = {
@@ -92,11 +71,11 @@ class OllamaWorker(QThread):
 
 
 def warm_model(model: str = OLLAMA_MODEL):
-    """Blocking call that gets the model resident with num_ctx matching
-    chat's, without generating text. Meant to run off the main thread,
-    fired in parallel with a slow tool so chat's follow-up call doesn't
-    also pay a cold-load penalty. Mismatched num_ctx forces Ollama to
-    reload the model (~12-14s), so matching it here is what matters."""
+    """Make the model resident with chat's num_ctx, without generating text.
+
+    Blocking, so run it off the main thread. A mismatched num_ctx forces Ollama to reload
+    the model (~12-14s), which is the whole point of matching it here.
+    """
     try:
         requests.post(
             OLLAMA_GENERATE_URL,

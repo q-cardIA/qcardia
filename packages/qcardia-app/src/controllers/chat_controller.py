@@ -1,7 +1,7 @@
 """ChatController: wires a minimal chat panel to whichever LLM server is selected.
 
 No subprocess, no separate conda env: this talks to Ollama exactly like
-qcardia.disambiguate does (see model/llm_client.py), just streaming and with
+qcardia.disambiguate does (see model/ollama_client.py), just streaming and with
 native tool-calling wired to a handful of existing DICOMController actions.
 The worker class comes from utils.llm_devices, so a device speaking another wire
 format changes nothing below.
@@ -13,7 +13,7 @@ import logging
 from contextlib import suppress
 
 from model.background_worker import CallableWorker
-from model.llm_client import warm_model
+from model.ollama_client import warm_model
 from utils import llm_devices
 from utils.app_config import discover_subject_numbers, subject_folder_path
 
