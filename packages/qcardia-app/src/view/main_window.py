@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from utils.app_config import CHAT_AVAILABLE, ICON_PATH
+from utils.app_config import ICON_PATH
 from view.central_display_area_widget import CentralDisplayAreaWidget
 from view.chat_widget import ChatWidget
 from view.loading_overlay import LoadingOverlay
@@ -159,7 +159,9 @@ class MainWindow(QMainWindow):
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)
 
-        if not CHAT_AVAILABLE or self.welcome_widget.assistant_disabled:
+        # assistant_disabled already folds in whether the selected LLM
+        # device answered its probe on the welcome screen.
+        if self.welcome_widget.assistant_disabled:
             self.chat_widget.hide()
             self.toggle_chat_btn.hide()
 

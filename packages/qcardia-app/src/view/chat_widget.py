@@ -7,7 +7,6 @@ from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,6 +28,7 @@ from model.voice_input import (
     select_input_device,
     selected_input_device,
 )
+from utils import llm_devices
 from utils.app_config import (
     OLLAMA_MODEL,
     discover_local_gguf_files,
@@ -36,6 +36,7 @@ from utils.app_config import (
     import_gguf_model,
     list_ollama_models,
 )
+from view.theme import PopupComboBox, thin_loading_bar
 
 _USER_BUBBLE_WIDTH_FRACTION = 0.7  # user bubbles can grow up to 70% of the panel width
 
@@ -283,10 +284,78 @@ class ChatWidget(QFrame):
         input_row.addWidget(self._send_btn)
         outer.addLayout(input_row)
 
-        self._model_combo = QComboBox()
+        # Which machine serves the LLM. Switchable mid-session, mainly so a
+        # remote device going away doesn't end the conversation.
+        self._device_combo = PopupComboBox()
+        self._device_combo.setProperty("role", "chatCombo")
+        self._populate_device_combo()
+        self._device_combo.currentIndexChanged.connect(self._on_device_selected)
+        outer.addWidget(self._device_combo)
+        self._device_bar = thin_loading_bar()
+        outer.addWidget(self._device_bar)
+
+        self._model_combo = PopupComboBox()
+        self._model_combo.setProperty("role", "chatCombo")
         self._populate_model_combo()
         self._model_combo.currentIndexChanged.connect(self._on_model_selected)
         outer.addWidget(self._model_combo)
+        # Driven by ChatController, which is what actually knows when the
+        # model has finished loading into the server.
+        self._model_bar = thin_loading_bar()
+        outer.addWidget(self._model_bar)
+
+    def set_model_loading(self, loading: bool):
+        """Show/hide the hairline strip under the model picker."""
+        self._model_bar.setVisible(loading)
+
+    # -- device picker --------------------------------------------------
+
+    def _populate_device_combo(self):
+        self._device_combo.blockSignals(True)
+        self._device_combo.clear()
+        active = llm_devices.current()
+        for device in llm_devices.load_devices():
+            self._device_combo.addItem(device.label, device)
+            if device.id == active.id:
+                self._device_combo.setCurrentIndex(self._device_combo.count() - 1)
+        self._device_combo.blockSignals(False)
+
+    def _on_device_selected(self, index: int):
+        device = self._device_combo.itemData(index)
+        if device is None or device.id == llm_devices.current().id:
+            return
+        self._device_combo.setEnabled(False)
+        self._device_bar.show()
+        self.set_enabled(False)
+        self.append_system_message(f"Switching to {device.label}…")
+        worker = CallableWorker(llm_devices.activate, device)
+        worker.finished_ok.connect(lambda result, d=device: self._on_device_switched(d, result))
+        worker.error.connect(lambda exc, d=device: self._on_device_switch_failed(d, exc))
+        self._device_switch_worker = worker
+        worker.start()
+
+    def _on_device_switched(self, device, result):
+        self._device_combo.setEnabled(True)
+        self._device_bar.hide()
+        self.set_enabled(True)
+        if result.ok:
+            self.append_system_message(f"Now using {device.label} — {result.detail}")
+            # Each device has its own pulled models, so the tag list has to be
+            # rebuilt rather than carried over from the previous device.
+            self._populate_model_combo()
+        else:
+            self.append_system_message(
+                f"{device.label} unavailable — {result.detail} "
+                f"Staying on {llm_devices.current().label}."
+            )
+            self._populate_device_combo()  # snap the combo back to what is actually active
+
+    def _on_device_switch_failed(self, device, exc: Exception):
+        self._device_combo.setEnabled(True)
+        self._device_bar.hide()
+        self.set_enabled(True)
+        self.append_system_message(f"Could not switch to {device.label} — {exc}")
+        self._populate_device_combo()
 
     # -- model picker ---------------------------------------------------
 
@@ -295,7 +364,10 @@ class ChatWidget(QFrame):
         self._model_combo.blockSignals(True)
         self._model_combo.clear()
 
-        pulled = list_ollama_models()
+        # Runs on the GUI thread, so don't pay the HTTP timeout when the
+        # selected device already failed its probe — there is nothing to list,
+        # and the widget is built (then hidden) even with the assistant off.
+        pulled = list_ollama_models() if llm_devices.chat_available() else []
         pulled_tags = {m["tag"] for m in pulled}
         if not any(m["tag"] == OLLAMA_MODEL for m in pulled):
             pulled = [{"tag": OLLAMA_MODEL, "label": OLLAMA_MODEL, "local": False}] + pulled
@@ -303,11 +375,15 @@ class ChatWidget(QFrame):
         for m in pulled:
             self._model_combo.addItem(m["label"], m["tag"])
 
-        for gguf_path in discover_local_gguf_files():
-            tag = gguf_model_tag(gguf_path)
-            if tag in pulled_tags:
-                continue  # already imported — shown via its pulled entry above
-            self._model_combo.addItem(f"{gguf_path.stem} (import)", str(gguf_path))
+        # GGUF import drives this machine's ollama CLI against local file
+        # paths, so it can only target the local device — offering it while a
+        # remote one is selected would just fail on a path the server can't see.
+        if llm_devices.current().is_local:
+            for gguf_path in discover_local_gguf_files():
+                tag = gguf_model_tag(gguf_path)
+                if tag in pulled_tags:
+                    continue  # already imported — shown via its pulled entry above
+                self._model_combo.addItem(f"{gguf_path.stem} (import)", str(gguf_path))
 
         if select_tag is not None:
             idx = self._model_combo.findData(select_tag)

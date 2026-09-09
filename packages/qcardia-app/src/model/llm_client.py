@@ -106,7 +106,10 @@ def warm_model(model: str = OLLAMA_MODEL):
                 "keep_alive": KEEP_ALIVE,
                 "options": {"num_ctx": OLLAMA_NUM_CTX},
             },
-            timeout=60,
+            # Generous: this now also backs the model picker's loading
+            # indicator, and a large model on a remote device can take
+            # minutes to become resident. It runs off the GUI thread.
+            timeout=300,
         )
     except requests.RequestException:
         pass  # best-effort warm-up; the real chat call will surface any real connectivity error

@@ -303,12 +303,35 @@ class ChatController:
         self._llm_model = self.view.chat_widget.current_tag() or OLLAMA_MODEL
         self._available_subjects_cache: list[int] | None = None
         self._warmup_worker: CallableWorker | None = None  # see _warm_model_in_background
+        self._model_load_worker: CallableWorker | None = None  # see _preload_selected_model
 
         self.view.chat_widget.message_submitted.connect(self.send_message)
         self.view.chat_widget.model_changed.connect(self._on_model_changed)
 
     def _on_model_changed(self, model_name: str):
         self._llm_model = model_name
+        self._preload_selected_model()
+
+    def _preload_selected_model(self):
+        """Load the newly selected model into the server straight away.
+
+        Picking a model used to do nothing until the next message, so the
+        first send silently absorbed the whole cold-load — worst on a large
+        remote model. Doing it here gives the panel something to show.
+        """
+        self.view.chat_widget.set_model_loading(True)
+        worker = CallableWorker(warm_model, self._llm_model)
+        self._model_load_worker = worker
+        worker.finished.connect(lambda w=worker: self._on_model_loaded(w))
+        worker.start()
+
+    def _on_model_loaded(self, worker):
+        # A newer selection can start while this one is still loading; only
+        # the most recent request should clear the indicator.
+        if worker is not self._model_load_worker:
+            return
+        self._model_load_worker = None
+        self.view.chat_widget.set_model_loading(False)
 
     def _available_subjects(self) -> list[int]:
         """Subject folders rarely change mid-session — cache the disk scan

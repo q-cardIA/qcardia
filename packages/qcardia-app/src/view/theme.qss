@@ -651,6 +651,54 @@ QLabel[role="welcomeOptionLabel"] {
 	background-color: transparent;
 }
 
+QComboBox[role="welcomeDeviceCombo"] {
+	font-size: 12px;
+	padding: 3px;
+	padding-left: 8px;
+}
+
+/* The global QComboBox popup rule above pads the whole view, which on a
+   short list leaves room for barely one row. Size the rows themselves so
+   the popup grows to fit its items instead. */
+QComboBox[role="welcomeDeviceCombo"] QAbstractItemView,
+QComboBox[role="chatCombo"] QAbstractItemView {
+	padding: 2px;
+	outline: none;
+	/* The global popup rule paints entries in the accent colour, which is
+	   too loud for a plain list of device/model names — keep those white and
+	   let the selection highlight do the work. */
+	color: rgb(255, 255, 255);
+	selection-background-color: rgb(52, 59, 72);
+}
+QComboBox[role="welcomeDeviceCombo"] QAbstractItemView::item,
+QComboBox[role="chatCombo"] QAbstractItemView::item {
+	min-height: 24px;
+	padding-left: 6px;
+}
+
+/* Hairline activity indicator under a combo — deliberately ~3px so it reads
+   as an underline on the control rather than a separate progress widget. */
+QProgressBar[role="thinLoadingBar"] {
+	background-color: rgb(33, 37, 43);
+	border: none;
+	border-radius: 1px;
+	min-height: 3px;
+	max-height: 3px;
+}
+QProgressBar[role="thinLoadingBar"]::chunk {
+	background-color: rgb(255, 121, 198);
+	border-radius: 1px;
+}
+
+/* Probe result for the selected LLM device — secondary to the option rows
+   above it, so it reads as status rather than another control. */
+QLabel[role="welcomeDeviceStatus"] {
+	color: rgb(140, 140, 152);
+	font-size: 11px;
+	background-color: transparent;
+	padding-left: 2px;
+}
+
 QPushButton[role="welcomeToggleSwitch"] {
 	background-color: rgb(52, 59, 72);
 	border: 1px solid rgb(64, 71, 88);

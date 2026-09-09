@@ -69,10 +69,20 @@ OLLAMA_MODEL: str = "qwen3:8b"
 OLLAMA_NUM_CTX: int = 16384
 
 
-def ollama_available() -> bool:
+# These URLs are rebound at runtime by utils.llm_devices when the user picks
+# a different machine to serve the LLMs, so every function below must read
+# them at call time rather than capturing them at import.
+
+# Generous enough for a remote device reached over a tunnel; the old 0.5s was
+# sized for localhost only, and silently reported a working remote server as
+# unavailable.
+OLLAMA_HTTP_TIMEOUT: float = 3.0
+
+
+def ollama_available(timeout: float | None = None) -> bool:
     """True when an Ollama server is reachable at OLLAMA_TAGS_URL."""
     try:
-        response = requests.get(OLLAMA_TAGS_URL, timeout=0.5)
+        response = requests.get(OLLAMA_TAGS_URL, timeout=timeout or OLLAMA_HTTP_TIMEOUT)
         return response.ok
     except requests.RequestException:
         return False
@@ -83,12 +93,12 @@ def _format_size(num_bytes: int) -> str:
     return f"{gb:.1f}GB"
 
 
-def list_ollama_models() -> list[dict]:
-    """Models already pulled into the local Ollama server, with a friendly
-    display label (parameter size + file size instead of the raw tag, which
-    is often just a meaningless ':latest')."""
+def list_ollama_models(timeout: float | None = None) -> list[dict]:
+    """Models already pulled into the currently selected Ollama server, with a
+    friendly display label (parameter size + file size instead of the raw tag,
+    which is often just a meaningless ':latest')."""
     try:
-        response = requests.get(OLLAMA_TAGS_URL, timeout=0.5)
+        response = requests.get(OLLAMA_TAGS_URL, timeout=timeout or OLLAMA_HTTP_TIMEOUT)
         response.raise_for_status()
         models = response.json().get("models", [])
     except requests.RequestException:
@@ -132,7 +142,10 @@ def import_gguf_model(gguf_path: Path) -> str:
     """Register a local GGUF file as an Ollama model (idempotent) and return
     its tag. Ollama links the existing file rather than copying/converting
     it, but this still shells out to `ollama create`, so callers should run
-    it off the GUI thread."""
+    it off the GUI thread.
+
+    Local device only: this drives *this* machine's ollama CLI and its file
+    paths, so it cannot import weights into a remote server."""
     tag = gguf_model_tag(gguf_path)
     existing = {m["tag"] for m in list_ollama_models()}
     if tag in existing:
@@ -160,4 +173,6 @@ def import_gguf_model(gguf_path: Path) -> str:
     return tag
 
 
-CHAT_AVAILABLE: bool = ollama_available()
+# Chat availability is no longer decided here. It used to be probed at import
+# time against localhost, which blocked startup and fixed the answer before
+# the user had chosen a device — see utils.llm_devices.chat_available().
