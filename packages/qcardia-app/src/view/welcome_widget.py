@@ -30,9 +30,7 @@ class WelcomeWidget(QWidget):
         self._build()
         self._size()
         self._connect()
-        # Probe the default (local) device in the background so the welcome
-        # screen paints immediately — this used to happen at import time and
-        # stalled startup before any window appeared.
+        # In the background: this used to run at import and stalled startup.
         self._start_device_probe(llm_devices.LOCAL_DEVICE, llm_devices.FAST_PROBE_TIMEOUT)
 
     @property
@@ -203,8 +201,7 @@ class WelcomeWidget(QWidget):
         options_layout.setContentsMargins(16, 12, 16, 12)
         options_layout.setSpacing(10)
 
-        # Which machine serves the LLMs. Defaults to this computer, so the
-        # normal path is unchanged and nobody has to touch this to start.
+        # Defaults to this computer, so nobody has to touch this to start.
         device_row = QHBoxLayout()
         device_row.setSpacing(10)
         self._device_combo = PopupComboBox()
@@ -222,8 +219,7 @@ class WelcomeWidget(QWidget):
         device_row.addStretch(1)
         options_layout.addLayout(device_row)
 
-        # Sits directly under the combo, so the activity reads as belonging
-        # to the device choice rather than to the panel as a whole.
+        # Directly under the combo, so the activity reads as belonging to that choice.
         self._device_bar = thin_loading_bar()
         options_layout.addWidget(self._device_bar)
 
@@ -232,9 +228,7 @@ class WelcomeWidget(QWidget):
         self._device_status.setWordWrap(True)
         options_layout.addWidget(self._device_status)
 
-        # Starts disabled: nothing is known about the device until its first
-        # probe comes back, and enabling it early would let the user turn on
-        # an assistant that cannot answer.
+        # Disabled until the first probe: an assistant that cannot answer helps nobody.
         self._toggle_llm_assistant = self._toggle_switch(default=True, enabled=False)
         options_layout.addLayout(self._toggle_row(self._toggle_llm_assistant, "LLM assistant"))
 
@@ -363,9 +357,7 @@ class WelcomeWidget(QWidget):
             self._start_device_probe(device, llm_devices.DEVICE_PROBE_TIMEOUT)
 
     def _start_device_probe(self, device, timeout: float):
-        """Validate a device off the GUI thread, holding 'Start' until it
-        answers — a remote host can take the full timeout to fail, which
-        would otherwise freeze the welcome screen."""
+        """Validate off the GUI thread, holding Start: a dead host takes the full timeout."""
         self._set_device_busy(True)
         self._device_status.setText(f"Checking {device.label}…")
         worker = CallableWorker(llm_devices.activate, device, timeout=timeout)
@@ -383,13 +375,11 @@ class WelcomeWidget(QWidget):
     def _on_device_probed(self, device, result):
         self._set_device_busy(False)
         if result.ok:
-            self._device_status.setText(f"{device.label} — {result.detail}")
+            self._device_status.setText(f"{device.label}: {result.detail}")
         else:
-            # Naming the device still in use matters: activate() leaves the
-            # previous one active on failure, and silently implying otherwise
-            # would be worse than the error itself.
+            # Name what is still in use: activate() leaves the previous device active.
             self._device_status.setText(
-                f"{device.label} unavailable — {result.detail} "
+                f"{device.label} unavailable. {result.detail} "
                 f"Still using {llm_devices.current().label}."
             )
         enabled = llm_devices.chat_available()
@@ -399,7 +389,7 @@ class WelcomeWidget(QWidget):
 
     def _on_device_probe_failed(self, device, exc: Exception):
         self._set_device_busy(False)
-        self._device_status.setText(f"{device.label} check failed — {exc}")
+        self._device_status.setText(f"{device.label} check failed: {exc}")
         self._toggle_llm_assistant.setEnabled(llm_devices.chat_available())
 
     def _on_chevron_toggled(self, checked: bool):

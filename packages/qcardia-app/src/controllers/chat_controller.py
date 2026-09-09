@@ -1,17 +1,21 @@
-"""ChatController — wires a minimal chat panel to a local Ollama server.
+"""ChatController: wires a minimal chat panel to whichever LLM server is selected.
 
 No subprocess, no separate conda env: this talks to Ollama exactly like
 qcardia.disambiguate does (see model/llm_client.py), just streaming and with
 native tool-calling wired to a handful of existing DICOMController actions.
+The worker class comes from utils.llm_devices, so a device speaking another wire
+format changes nothing below.
 """
 from __future__ import annotations
 
 import copy
 import logging
+from contextlib import suppress
 
 from model.background_worker import CallableWorker
-from model.llm_client import OllamaWorker, warm_model
-from utils.app_config import OLLAMA_MODEL, discover_subject_numbers, subject_folder_path
+from model.llm_client import warm_model
+from utils import llm_devices
+from utils.app_config import discover_subject_numbers, subject_folder_path
 
 # Plane abbreviations used throughout the app's series keys (e.g. CINE_SAX).
 _PLANE_ABBREVIATIONS = {
@@ -298,27 +302,52 @@ class ChatController:
         self._worker = None
         # ChatWidget builds and selects its model combo before this controller
         # exists (see MainWindow.build_analysis_interface), so read its actual
-        # selection here rather than assuming OLLAMA_MODEL independently — the
-        # two must not be able to silently disagree.
-        self._llm_model = self.view.chat_widget.current_tag() or OLLAMA_MODEL
+        # selection here rather than a default: the two must not silently disagree.
+        self._llm_model = self.view.chat_widget.current_tag() or llm_devices.default_model()
         self._available_subjects_cache: list[int] | None = None
         self._warmup_worker: CallableWorker | None = None  # see _warm_model_in_background
         self._model_load_worker: CallableWorker | None = None  # see _preload_selected_model
+        self._abandoned_workers: list = []  # see _on_device_changed
 
         self.view.chat_widget.message_submitted.connect(self.send_message)
         self.view.chat_widget.model_changed.connect(self._on_model_changed)
+        self.view.chat_widget.device_changed.connect(self._on_device_changed)
 
     def _on_model_changed(self, model_name: str):
         self._llm_model = model_name
         self._preload_selected_model()
 
-    def _preload_selected_model(self):
-        """Load the newly selected model into the server straight away.
+    def _on_device_changed(self, device):
+        """Detach, not stop, a request still running on the device we just left.
 
-        Picking a model used to do nothing until the next message, so the
-        first send silently absorbed the whole cold-load — worst on a large
-        remote model. Doing it here gives the panel something to show.
+        It is blocked in a socket read, so it can only be disconnected (a late reply
+        must not land in a moved-on conversation, nor null out the next worker) and
+        held until it finishes (dropping it mid-run aborts the process).
         """
+        worker = self._worker
+        if worker is None:
+            return
+        self._worker = None
+        for signal in (worker.token_received, worker.tool_calls_ready,
+                       worker.finished_ok, worker.error, worker.finished):
+            with suppress(RuntimeError, TypeError):
+                signal.disconnect()  # no args = drop every slot on that signal
+        self._abandoned_workers.append(worker)
+        worker.finished.connect(lambda w=worker: self._forget_abandoned(w))
+        self.view.chat_widget.finalize_assistant_message()  # close the dangling bubble
+        self.view.chat_widget.append_system_message(
+            f"Abandoned the request still running on the previous device. "
+            f"Ask again to run it on {device.label}."
+        )
+
+    def _forget_abandoned(self, worker):
+        if worker in self._abandoned_workers:
+            self._abandoned_workers.remove(worker)
+
+    def _preload_selected_model(self):
+        """Load the newly picked model now, so the next send doesn't absorb the cold load."""
+        if not llm_devices.supports_warmup():
+            return
         self.view.chat_widget.set_model_loading(True)
         worker = CallableWorker(warm_model, self._llm_model)
         self._model_load_worker = worker
@@ -326,8 +355,7 @@ class ChatController:
         worker.start()
 
     def _on_model_loaded(self, worker):
-        # A newer selection can start while this one is still loading; only
-        # the most recent request should clear the indicator.
+        # A newer selection can start first; only the most recent clears the indicator.
         if worker is not self._model_load_worker:
             return
         self._model_load_worker = None
@@ -450,7 +478,8 @@ class ChatController:
         return tools
 
     def _start_worker(self, messages: list[dict]):
-        self._worker = OllamaWorker(messages, tools=self._build_tools(), model=self._llm_model)
+        worker_cls = llm_devices.worker_class()
+        self._worker = worker_cls(messages, tools=self._build_tools(), model=self._llm_model)
         self._worker.token_received.connect(self.view.chat_widget.append_assistant_chunk)
         self._worker.tool_calls_ready.connect(self._on_tool_calls)
         self._worker.finished_ok.connect(self._on_finished)
@@ -489,6 +518,8 @@ class ChatController:
         """Gets Ollama resident with the right num_ctx while the tool call(s)
         below are still running, so the follow-up chat request doesn't also
         pay a cold-load penalty."""
+        if not llm_devices.supports_warmup():
+            return
         if self._warmup_worker is not None and self._warmup_worker.isRunning():
             return
         worker = CallableWorker(warm_model, self._llm_model)

@@ -159,8 +159,7 @@ class MainWindow(QMainWindow):
         main_v.addWidget(time_controls_container)
         self.setCentralWidget(central)
 
-        # assistant_disabled already folds in whether the selected LLM
-        # device answered its probe on the welcome screen.
+        # assistant_disabled already folds in the selected device's probe result.
         if self.welcome_widget.assistant_disabled:
             self.chat_widget.hide()
             self.toggle_chat_btn.hide()

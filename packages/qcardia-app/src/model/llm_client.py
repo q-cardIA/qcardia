@@ -106,9 +106,7 @@ def warm_model(model: str = OLLAMA_MODEL):
                 "keep_alive": KEEP_ALIVE,
                 "options": {"num_ctx": OLLAMA_NUM_CTX},
             },
-            # Generous: this now also backs the model picker's loading
-            # indicator, and a large model on a remote device can take
-            # minutes to become resident. It runs off the GUI thread.
+            # Generous: backs the picker's loading bar, and a big remote model takes minutes.
             timeout=300,
         )
     except requests.RequestException:

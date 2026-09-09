@@ -58,6 +58,7 @@ def discover_subject_numbers() -> list[int]:
 # Ollama (local LLM chat assistant)
 # ---------------------------------------------------------------------------
 
+# utils.llm_devices rebinds these at runtime, so every function below reads them at call time.
 OLLAMA_URL: str = "http://localhost:11434/api/chat"
 OLLAMA_GENERATE_URL: str = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL: str = "http://localhost:11434/api/tags"
@@ -69,13 +70,7 @@ OLLAMA_MODEL: str = "qwen3:8b"
 OLLAMA_NUM_CTX: int = 16384
 
 
-# These URLs are rebound at runtime by utils.llm_devices when the user picks
-# a different machine to serve the LLMs, so every function below must read
-# them at call time rather than capturing them at import.
-
-# Generous enough for a remote device reached over a tunnel; the old 0.5s was
-# sized for localhost only, and silently reported a working remote server as
-# unavailable.
+# 3s rather than 0.5s, which was localhost-sized and called a live remote server dead.
 OLLAMA_HTTP_TIMEOUT: float = 3.0
 
 
@@ -93,17 +88,8 @@ def _format_size(num_bytes: int) -> str:
     return f"{gb:.1f}GB"
 
 
-def list_ollama_models(timeout: float | None = None) -> list[dict]:
-    """Models already pulled into the currently selected Ollama server, with a
-    friendly display label (parameter size + file size instead of the raw tag,
-    which is often just a meaningless ':latest')."""
-    try:
-        response = requests.get(OLLAMA_TAGS_URL, timeout=timeout or OLLAMA_HTTP_TIMEOUT)
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except requests.RequestException:
-        return []
-
+def format_ollama_models(models: list[dict]) -> list[dict]:
+    """Raw /api/tags entries to the picker's shape, labelled better than a bare ':latest'."""
     out = []
     for m in models:
         name = m["name"]
@@ -114,6 +100,16 @@ def list_ollama_models(timeout: float | None = None) -> list[dict]:
         label = f"{base} ({', '.join(bits)})" if bits else base
         out.append({"tag": name, "label": label, "local": False})
     return sorted(out, key=lambda d: d["label"])
+
+
+def list_ollama_models(timeout: float | None = None) -> list[dict]:
+    """Models already pulled into the currently selected Ollama server."""
+    try:
+        response = requests.get(OLLAMA_TAGS_URL, timeout=timeout or OLLAMA_HTTP_TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
+    return format_ollama_models(response.json().get("models", []))
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +138,7 @@ def import_gguf_model(gguf_path: Path) -> str:
     """Register a local GGUF file as an Ollama model (idempotent) and return
     its tag. Ollama links the existing file rather than copying/converting
     it, but this still shells out to `ollama create`, so callers should run
-    it off the GUI thread.
-
-    Local device only: this drives *this* machine's ollama CLI and its file
-    paths, so it cannot import weights into a remote server."""
+    it off the GUI thread. Local device only: it drives this machine's ollama CLI."""
     tag = gguf_model_tag(gguf_path)
     existing = {m["tag"] for m in list_ollama_models()}
     if tag in existing:
@@ -173,6 +166,4 @@ def import_gguf_model(gguf_path: Path) -> str:
     return tag
 
 
-# Chat availability is no longer decided here. It used to be probed at import
-# time against localhost, which blocked startup and fixed the answer before
-# the user had chosen a device — see utils.llm_devices.chat_available().
+# Chat availability moved to utils.llm_devices.chat_available(); probing here blocked startup.

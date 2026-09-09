@@ -44,9 +44,7 @@ def main():
     apply_theme(app)
     main_window = MainWindow()
 
-    # Close any SSH tunnel opened for a remote LLM device. llm_devices also
-    # registers an atexit hook, but that can be skipped on an abrupt Qt exit,
-    # which would leave an orphaned ssh process holding the local port.
+    # Belt and braces over llm_devices' atexit hook, which an abrupt Qt exit can skip.
     app.aboutToQuit.connect(llm_devices.shutdown)
 
     model = DICOMModel()
@@ -58,17 +56,13 @@ def main():
 
     main_window.welcome_widget.transition_signal.connect(_configure_preprocessing)
 
-    # chat_widget only exists after build_analysis_interface() runs, which
-    # itself only fires once the welcome screen's transition_signal fires.
-    # Availability is checked here rather than at import: the user picks the
-    # LLM device on the welcome screen, so nothing is known until they leave it.
+    # Deferred, not checked at import: the LLM device is picked on the welcome screen.
     def _wire_chat():
         if main_window.welcome_widget.assistant_disabled:
             return
         main_window._chat_controller = ChatController(main_window, controller, model)
         if VOICE_AVAILABLE:
-            # Downloads/loads the whisper model off the GUI thread so the
-            # first push-to-talk doesn't stall on a cold model load.
+            # Off the GUI thread, so the first push-to-talk isn't a cold model load.
             main_window._voice_preload_worker = CallableWorker(TranscriptionWorker.preload_model)
             main_window._voice_preload_worker.start()
 

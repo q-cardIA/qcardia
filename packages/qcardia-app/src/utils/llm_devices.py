@@ -1,18 +1,10 @@
-"""Which machine serves the LLMs — local Ollama, or a remote one over SSH.
+"""Which machine serves the LLMs, and which wire format it speaks.
 
-The app talks to Ollama through module-level URL constants in three places
-(`utils.app_config`, `model.llm_client`, and `qcardia.disambiguate` in the
-pinned qcardia dependency). All three read those constants *inside* the
-function that makes the request, so reassigning the module attribute
-redirects every later call. That is what lets this module repoint the whole
-app at another machine without forking qcardia, and what makes switching
-work mid-session rather than only at startup.
-
-Device definitions live OUTSIDE the repo (see DEVICES_PATH) so no host
-addresses or credentials are committed. The preferred remote transport is an
-SSH tunnel: the address and key come from the user's ~/.ssh/config, so there
-is nothing to store here, no firewall change, and Ollama on the remote host
-can stay bound to localhost.
+Switching rebinds the module-level URL constants that every caller reads at request
+time; CLAUDE.md explains why that is safe. Devices come from a gitignored config file
+(DEVICES_PATH), so no addresses or credentials are committed: see the README and
+config/llm_devices.example.json. With no config file the app runs against the local
+Ollama exactly as it did before this module existed.
 """
 from __future__ import annotations
 
@@ -23,70 +15,48 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from contextlib import suppress
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 import requests
 
-# Probing a machine that is off/unreachable costs the full timeout, so the
-# startup default is short (the local server answers in ms) and the explicit
-# "validate this device" path passes a longer budget.
-FAST_PROBE_TIMEOUT: float = 1.0
-DEVICE_PROBE_TIMEOUT: float = 5.0
+FAST_PROBE_TIMEOUT: float = 1.0     # startup check of the local server
+DEVICE_PROBE_TIMEOUT: float = 5.0   # user picked a device and is waiting on it
+TUNNEL_READY_TIMEOUT: float = 8.0   # ssh -L starting to accept connections
 
-# Seconds to wait for `ssh -L` to start accepting connections on the local
-# side. Separate from the probe budget above: the tunnel has to exist before
-# there is anything to probe.
-TUNNEL_READY_TIMEOUT: float = 8.0
+_PROTOCOLS = ("ollama", "openai")
 
-
-def _default_devices_path() -> Path:
-    """Per-user config location, outside the repo and outside the data dir."""
-    if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "qcardia" / "llm_devices.json"
-
-
-DEVICES_PATH: Path = Path(
-    os.environ.get("QCARDIA_LLM_DEVICES", "") or _default_devices_path()
-)
+# Gitignored, so your own file sits next to the example and still cannot be committed.
+_DEFAULT_DEVICES_PATH = Path(__file__).parents[2] / "config" / "llm_devices.json"
+DEVICES_PATH: Path = Path(os.environ.get("QCARDIA_LLM_DEVICES", "") or _DEFAULT_DEVICES_PATH)
 
 
 @dataclass(frozen=True)
 class Device:
-    """One machine that can serve the LLMs.
-
-    `mode` is one of:
-      local   — Ollama on this machine (no tunnel, no network hop)
-      tunnel  — Ollama on a remote host, reached through `ssh -L` using
-                `ssh_alias` from the user's ~/.ssh/config
-      http    — Ollama on a remote host reachable directly (requires the
-                remote server to be bound beyond localhost)
-
-    `patient_data_ok` gates the disambiguation path specifically. That path
-    sends DICOM header content, so a device cleared only for general chat
-    must never receive it — see `apply()`.
-    """
+    """One machine that can serve the LLMs. See config/llm_devices.example.json."""
 
     id: str
     label: str
-    mode: str = "local"
+    mode: str = "local"            # transport: local | tunnel (ssh -L) | http
+    protocol: str = "ollama"       # wire format: ollama | openai (a /v1 gateway)
     host: str = "127.0.0.1"
     port: int = 11434
-    ssh_alias: str | None = None
-    # Local end of the tunnel. Deliberately not 11434 by default: that is
-    # usually taken by this machine's own Ollama, and binding over it would
-    # make "local" and "remote" indistinguishable.
-    local_port: int = 11435
-    patient_data_ok: bool = True
+    url: str = ""                  # full base URL; a gateway needs a scheme and path
+    api_key_env: str = ""          # env var holding the bearer token, never the key
+    model: str = ""                # default tag; a gateway shares none with Ollama
+    ssh_alias: str | None = None   # ~/.ssh/config entry, so no credentials live here
+    local_port: int = 11435        # tunnel's local end; 11434 is this machine's Ollama
+    patient_data_ok: bool = False  # may DICOM headers go here? enforced in apply()
     note: str = ""
 
     @property
     def base_url(self) -> str:
+        if self.url:
+            return self.url.rstrip("/")
         if self.mode == "tunnel":
-            return f"http://127.0.0.1:{self.local_port}"
+            # Not always local_port: see _resolve_local_port().
+            return f"http://127.0.0.1:{_active_ports.get(self.id, self.local_port)}"
         return f"http://{self.host}:{self.port}"
 
     @property
@@ -94,11 +64,8 @@ class Device:
         return self.mode == "local"
 
 
-LOCAL_DEVICE = Device(id="local", label="This computer", mode="local")
-
-# Where the local Ollama lives, kept so disambiguation can be pinned back to
-# it when the selected chat device is not cleared for patient data.
-_LOCAL_BASE_URL = LOCAL_DEVICE.base_url
+LOCAL_DEVICE = Device(id="local", label="This computer", patient_data_ok=True)
+_LOCAL_URL = LOCAL_DEVICE.base_url  # what non-cleared paths stay pinned to
 
 
 @dataclass
@@ -109,69 +76,43 @@ class ProbeResult:
 
 
 def load_devices() -> list[Device]:
-    """Devices from DEVICES_PATH, always with the local one first.
-
-    A missing or malformed file is not an error: the app still works with
-    local Ollama alone, which is the pre-existing behaviour.
-    """
+    """Devices from DEVICES_PATH, local first. A missing or bad file is not an error."""
     devices = [LOCAL_DEVICE]
     try:
         raw = json.loads(DEVICES_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return devices
 
-    entries = raw if isinstance(raw, list) else raw.get("devices", [])
-    for entry in entries:
+    known = {f.name for f in fields(Device)}
+    for entry in raw if isinstance(raw, list) else raw.get("devices", []):
         try:
-            if entry.get("mode", "local") == "local":
-                continue  # the built-in local entry above already covers it
-            devices.append(
-                Device(
-                    id=str(entry["id"]),
-                    label=str(entry.get("label", entry["id"])),
-                    mode=str(entry.get("mode", "http")),
-                    host=str(entry.get("host", "127.0.0.1")),
-                    port=int(entry.get("port", 11434)),
-                    ssh_alias=entry.get("ssh_alias"),
-                    local_port=int(entry.get("local_port", 11435)),
-                    # Default False: a device has to be explicitly declared
-                    # safe before DICOM headers are allowed to reach it.
-                    patient_data_ok=bool(entry.get("patient_data_ok", False)),
-                    note=str(entry.get("note", "")),
-                )
-            )
-        except (KeyError, TypeError, ValueError):
-            continue  # skip a bad entry rather than losing the whole file
+            # A local entry is already covered above; an unknown protocol is unusable.
+            if entry.get("mode", "local") == "local" or entry.get("protocol", "ollama") not in _PROTOCOLS:
+                continue
+            kwargs = {k: v for k, v in entry.items() if k in known}
+            kwargs.update({k: int(kwargs[k]) for k in ("port", "local_port") if k in kwargs})
+            devices.append(Device(**kwargs))
+        except (AttributeError, TypeError, ValueError):
+            continue  # skip one bad entry rather than losing the whole file
     return devices
 
 
-# ---------------------------------------------------------------------------
-# SSH tunnels
-# ---------------------------------------------------------------------------
+# --- SSH tunnels -----------------------------------------------------------
 
 _tunnels: dict[str, subprocess.Popen] = {}
-
-# Port a device's tunnel actually bound, which is not always its configured
-# `local_port` — see _resolve_local_port().
-_active_ports: dict[str, int] = {}
+_active_ports: dict[str, int] = {}  # port each tunnel actually bound
 
 
-def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.5) -> bool:
+def _port_open(port: int, timeout: float = 0.5) -> bool:
     try:
-        with socket.create_connection((host, port), timeout=timeout):
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
             return True
     except OSError:
         return False
 
 
 def _serves_ollama(port: int, timeout: float = 1.0) -> bool:
-    """Whether an Ollama server answers on this local port.
-
-    An open port is not enough to identify one of our tunnels: unrelated
-    local services squat on high ports (VS Code's Remote-SSH helper is one),
-    and treating those as a live tunnel sends every request into a black hole
-    that only surfaces as an unexplained timeout.
-    """
+    """An open port is not proof of our tunnel: VS Code's Remote-SSH helper squats on 11435."""
     try:
         response = requests.get(f"http://127.0.0.1:{port}/api/tags", timeout=timeout)
         return response.ok and "models" in response.json()
@@ -179,77 +120,42 @@ def _serves_ollama(port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def _free_port() -> int:
-    """An unused local port, for when the configured one is taken."""
+def _resolve_local_port(device: Device) -> int:
+    """The configured port, reused if a live tunnel already holds it, else a free one."""
+    if not _port_open(device.local_port) or _serves_ollama(device.local_port):
+        return device.local_port
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
-def _resolve_local_port(device: Device) -> int:
-    """Pick the local port for this device's tunnel.
-
-    Prefers the configured port, reuses it if a working Ollama is already
-    there (a tunnel left by an earlier run), and otherwise steps aside to a
-    free port rather than fighting whatever else holds it.
-    """
-    preferred = device.local_port
-    if not _port_open(preferred):
-        return preferred
-    if _serves_ollama(preferred):
-        return preferred
-    return _free_port()
-
-
-def local_port_for(device: Device) -> int:
-    return _active_ports.get(device.id, device.local_port)
-
-
-def base_url_for(device: Device) -> str:
-    """Base URL for a device, accounting for the port its tunnel really bound."""
-    if device.mode == "tunnel":
-        return f"http://127.0.0.1:{local_port_for(device)}"
-    return device.base_url
-
-
 def ensure_tunnel(device: Device) -> None:
-    """Start `ssh -N -L local_port:localhost:port <alias>` if not already up.
-
-    Uses the alias rather than an address so the key, port and current host
-    all come from ~/.ssh/config — this app never handles credentials.
-    """
+    """Start `ssh -N -L` if not up, via an ~/.ssh/config alias so this app holds no key."""
     if device.mode != "tunnel":
         return
     if not device.ssh_alias:
         raise RuntimeError(f"Device '{device.label}' is mode 'tunnel' but has no ssh_alias.")
 
     existing = _tunnels.get(device.id)
-    if existing is not None and existing.poll() is None and _port_open(local_port_for(device)):
-        return  # already running and accepting connections
+    if existing is not None and existing.poll() is None and _port_open(_active_ports[device.id]):
+        return
     close_tunnel(device.id)
 
     local_port = _resolve_local_port(device)
     if _serves_ollama(local_port):
-        # A working Ollama is already exposed here — almost certainly a tunnel
-        # left by an earlier run. Adopt it rather than stacking another on top.
-        _active_ports[device.id] = local_port
+        _active_ports[device.id] = local_port  # tunnel left by an earlier run, adopt it
         return
 
-    cmd = [
-        "ssh",
-        "-N",
-        "-o", "BatchMode=yes",
-        "-o", "ExitOnForwardFailure=yes",
-        "-o", "ServerAliveInterval=30",
-        "-L", f"{local_port}:localhost:{device.port}",
-        device.ssh_alias,
-    ]
-    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     proc = subprocess.Popen(
-        cmd,
+        ["ssh", "-N",
+         "-o", "BatchMode=yes",
+         "-o", "ExitOnForwardFailure=yes",
+         "-o", "ServerAliveInterval=30",
+         "-L", f"{local_port}:localhost:{device.port}",
+         device.ssh_alias],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-        creationflags=creationflags,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
     _tunnels[device.id] = proc
     _active_ports[device.id] = local_port
@@ -265,9 +171,7 @@ def ensure_tunnel(device: Device) -> None:
         time.sleep(0.15)
 
     close_tunnel(device.id)
-    raise RuntimeError(
-        f"ssh tunnel to {device.ssh_alias} did not open within {TUNNEL_READY_TIMEOUT:.0f}s."
-    )
+    raise RuntimeError(f"ssh tunnel to {device.ssh_alias} did not open within {TUNNEL_READY_TIMEOUT:.0f}s.")
 
 
 def close_tunnel(device_id: str) -> None:
@@ -279,15 +183,12 @@ def close_tunnel(device_id: str) -> None:
         proc.terminate()
         proc.wait(timeout=3)
     except Exception:
-        try:
+        with suppress(Exception):
             proc.kill()
-        except Exception:
-            pass
 
 
 def shutdown() -> None:
-    """Close every tunnel this process opened. Registered with atexit so a
-    normal quit doesn't leave orphaned ssh processes behind."""
+    """Close every tunnel this process opened, so quitting leaves no orphaned ssh."""
     for device_id in list(_tunnels):
         close_tunnel(device_id)
 
@@ -295,51 +196,98 @@ def shutdown() -> None:
 atexit.register(shutdown)
 
 
-# ---------------------------------------------------------------------------
-# Probing
-# ---------------------------------------------------------------------------
+# --- Probing ---------------------------------------------------------------
+
+def _api_key(device: Device) -> str:
+    """Read at call time from the env var the config names, so no key is stored here."""
+    return os.environ.get(device.api_key_env, "").strip() if device.api_key_env else ""
+
+
+def _auth(device: Device) -> dict:
+    key = _api_key(device)
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
+def _fetch_models(device: Device, timeout: float) -> list[dict]:
+    """The device's models in the picker's shape. Raises requests.RequestException if unreachable."""
+    base = device.base_url
+    if device.protocol != "openai":
+        response = requests.get(f"{base}/api/tags", timeout=timeout)
+        response.raise_for_status()
+        from utils.app_config import format_ollama_models
+
+        return format_ollama_models(response.json().get("models", []))
+
+    response = requests.get(f"{base}/models", headers=_auth(device), timeout=timeout)
+    response.raise_for_status()
+    entries = [m for m in response.json().get("data", []) if m.get("accessible", True)]
+    # GPU-resident models first: the rest pay a cold start that can run into minutes.
+    entries.sort(key=lambda m: (not m.get("running"), m.get("id", "")))
+    out = []
+    for m in entries:
+        tag, status = m.get("id", ""), m.get("status_label", "")
+        out.append({
+            "tag": tag,
+            "label": f"{tag} ({status})" if status else tag,
+            "local": False,
+            "running": bool(m.get("running")),
+        })
+    return out
+
+
+def _readable_error(device: Device, exc: Exception) -> str:
+    """Turn a requests exception into something the user can act on."""
+    if isinstance(exc, requests.Timeout):
+        return "Timed out. Reachable, but did not answer in time."
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        code = exc.response.status_code
+        if code in (401, 403):
+            return f"Rejected the API key (HTTP {code}). Check {device.api_key_env}."
+        return f"Answered with HTTP {code}."
+    if isinstance(exc, requests.ConnectionError):
+        if device.protocol == "openai":
+            return "Could not reach the gateway. Is the VPN it needs connected?"
+        if device.is_local:
+            return "No Ollama server on this computer (is `ollama serve` running?)."
+        return "Could not connect. Is Ollama running on that device?"
+    return str(exc)
+
+
+def _no_models_detail(device: Device) -> str:
+    if device.protocol == "openai":
+        return "Reachable, but this key has access to no models."
+    return "Reachable, but no models are installed (run `ollama pull`)."
+
 
 def probe(device: Device, timeout: float = DEVICE_PROBE_TIMEOUT) -> ProbeResult:
-    """Check the device actually serves Ollama, opening a tunnel if needed.
-
-    Blocking, and can take the full timeout — callers on the GUI thread must
-    run this through CallableWorker.
-    """
+    """Check the device answers, opening its tunnel if needed. Blocking, so run it off the GUI thread."""
     try:
         ensure_tunnel(device)
     except RuntimeError as e:
         return ProbeResult(False, str(e))
 
+    if device.protocol == "openai" and not _api_key(device):
+        return ProbeResult(False, f"No API key. Set the {device.api_key_env or 'api_key_env'} environment variable.")
+
     try:
-        response = requests.get(f"{base_url_for(device)}/api/tags", timeout=timeout)
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except requests.RequestException as e:
+        models = _fetch_models(device, timeout)
+    except (requests.RequestException, ValueError) as e:
         return ProbeResult(False, _readable_error(device, e))
 
     if not models:
-        return ProbeResult(True, "Reachable, but no models are pulled on this device.", [])
-    plural = "s" if len(models) != 1 else ""
-    return ProbeResult(True, f"{len(models)} model{plural} available", models)
+        return ProbeResult(True, _no_models_detail(device), [])
+    detail = f"{len(models)} model{'s' if len(models) != 1 else ''} available"
+    if device.protocol == "openai" and not any(m["running"] for m in models):
+        # A gateway lists everything even when swapped out, hiding a long cold start.
+        detail += ", but none is loaded on a GPU, so the first reply will be slow"
+    return ProbeResult(True, detail, models)
 
 
-def _readable_error(device: Device, exc: Exception) -> str:
-    """Turn a requests exception into something a user can act on."""
-    if isinstance(exc, requests.Timeout):
-        return "Timed out — reachable, but did not answer in time."
-    if isinstance(exc, requests.ConnectionError):
-        if device.mode == "local":
-            return "No Ollama server on this computer (is `ollama serve` running?)."
-        return "Could not connect — is Ollama running on that device?"
-    return str(exc)
-
-
-# ---------------------------------------------------------------------------
-# Applying a selection
-# ---------------------------------------------------------------------------
+# --- The active device -----------------------------------------------------
 
 _current: Device = LOCAL_DEVICE
 _available: bool = False
+_models: list[dict] = []
 
 
 def current() -> Device:
@@ -347,65 +295,79 @@ def current() -> Device:
 
 
 def chat_available() -> bool:
-    """Whether the *selected* device answered its last probe.
-
-    Replaces the old import-time `CHAT_AVAILABLE` constant, which probed
-    localhost before the user had chosen anything and blocked startup while
-    it did.
-    """
+    """Whether the selected device answered its last probe."""
     return _available
 
 
-def set_available(value: bool) -> None:
-    global _available
-    _available = value
-
-
 def apply(device: Device) -> None:
-    """Point the app's Ollama URLs at `device`.
-
-    Rebinds the module attributes each caller reads at request time. Note
-    `model.llm_client` imported its URLs by value, so it must be patched on
-    its own module — patching only `utils.app_config` would silently leave
-    chat pointing at localhost while everything else moved.
-    """
+    """Point the app's LLM URLs at `device` by rebinding what each caller reads at request time."""
     global _current
-    base = base_url_for(device)
-
-    from utils import app_config
-
-    app_config.OLLAMA_URL = f"{base}/api/chat"
-    app_config.OLLAMA_GENERATE_URL = f"{base}/api/generate"
-    app_config.OLLAMA_TAGS_URL = f"{base}/api/tags"
+    base = device.base_url
+    # Only chat can follow a non-Ollama device; the rest is Ollama-shaped, so it stays local.
+    ollama = base if device.protocol == "ollama" else _LOCAL_URL
 
     from model import llm_client
+    from utils import app_config
 
-    llm_client.OLLAMA_URL = f"{base}/api/chat"
-    llm_client.OLLAMA_GENERATE_URL = f"{base}/api/generate"
+    # Both modules, not just app_config: llm_client imported these names by value.
+    for module in (app_config, llm_client):
+        module.OLLAMA_URL = f"{ollama}/api/chat"
+        module.OLLAMA_GENERATE_URL = f"{ollama}/api/generate"
+    app_config.OLLAMA_TAGS_URL = f"{ollama}/api/tags"
 
-    # Disambiguation sends DICOM header content, so it follows the selected
-    # device only when that device is cleared for patient data; otherwise it
-    # stays pinned to the local server regardless of where chat points.
+    if device.protocol == "openai":
+        from model import openai_client
+
+        openai_client.CHAT_URL = f"{base}/chat/completions"
+        openai_client.API_KEY = _api_key(device)
+
+    # Disambiguation sends DICOM headers, so it follows the device only when cleared for them.
     try:
         from qcardia import disambiguate
     except ImportError:
         pass  # qcardia not importable here; chat still switches fine
     else:
-        disambiguate_base = base if device.patient_data_ok else _LOCAL_BASE_URL
-        disambiguate.OLLAMA_URL = f"{disambiguate_base}/api/chat"
+        disambiguate.OLLAMA_URL = f"{ollama if device.patient_data_ok else _LOCAL_URL}/api/chat"
 
     _current = device
 
 
 def activate(device: Device, timeout: float = DEVICE_PROBE_TIMEOUT) -> ProbeResult:
-    """Probe `device` and, if it answers, make it the active one.
-
-    A failed probe leaves the previous device in place, so a dead remote host
-    never silently becomes the thing the app thinks it is talking to.
-    Blocking — run it off the GUI thread.
-    """
+    """Probe and, on success, make active. A failure leaves the previous device in place."""
+    global _available, _models
     result = probe(device, timeout=timeout)
     if result.ok:
         apply(device)
-        set_available(True)
+        _available, _models = True, result.models
     return result
+
+
+def worker_class():
+    """The QThread class speaking the active protocol. Both take the same args and signals."""
+    if _current.protocol == "openai":
+        from model.openai_client import OpenAIWorker
+
+        return OpenAIWorker
+    from model.llm_client import OllamaWorker
+
+    return OllamaWorker
+
+
+def list_models(refresh: bool = False) -> list[dict]:
+    """The active device's models, cached by its last probe. Refresh only after changing them."""
+    global _models
+    if refresh:
+        _models = probe(_current).models
+    return _models
+
+
+def default_model() -> str:
+    """Tag to fall back on when the picker has no selection of its own."""
+    from utils.app_config import OLLAMA_MODEL
+
+    return _current.model or OLLAMA_MODEL
+
+
+def supports_warmup() -> bool:
+    """Ollama-only: a gateway schedules its own models and has no keep_alive to set."""
+    return _current.protocol == "ollama"

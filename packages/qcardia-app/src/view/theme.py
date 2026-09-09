@@ -9,10 +9,8 @@ def _rgb(r, g, b) -> QColor:
 
 
 def thin_loading_bar() -> QProgressBar:
-    """A hairline activity strip, meant to sit directly under the control it
-    belongs to. Indeterminate (range 0-0): Ollama reports no progress while
-    loading an already-pulled model into memory, so a percentage would be
-    invented — this only claims that something is happening."""
+    """Hairline activity strip for under a control. Indeterminate: Ollama reports no
+    load progress, so a percentage would be invented."""
     bar = QProgressBar()
     bar.setProperty("role", "thinLoadingBar")
     bar.setRange(0, 0)
@@ -23,14 +21,11 @@ def thin_loading_bar() -> QProgressBar:
 
 
 class PopupComboBox(QComboBox):
-    """Combo whose popup lists its items without needing to scroll.
+    """Combo whose popup shows its items without scrolling.
 
-    Qt derives the popup height from the view's size hint, which the app's
-    padded `QComboBox QAbstractItemView` rule plus platform frame metrics can
-    collapse to barely one row. Setting a minimum height from the actual row
-    count just before the popup opens makes it predictable — a floor, not a
-    ceiling, so a list longer than MAX_ROWS still scrolls rather than growing
-    off-screen.
+    Qt sizes the popup from the view's size hint, which this app's padded
+    QAbstractItemView rule can collapse to one row. Setting a minimum from the row
+    count is a floor, not a ceiling, so a list past MAX_ROWS still scrolls.
     """
 
     MAX_ROWS = 12
@@ -38,8 +33,7 @@ class PopupComboBox(QComboBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # A real QListView honours the ::item metrics in theme.qss; the
-        # default popup view does not.
+        # A real QListView honours the ::item metrics in theme.qss; the default does not.
         self.setView(QListView())
         self.setMaxVisibleItems(self.MAX_ROWS)
 
@@ -48,8 +42,7 @@ class PopupComboBox(QComboBox):
         if rows:
             view = self.view()
             row_h = view.sizeHintForRow(0) or self._FALLBACK_ROW_H
-            # + padding for the view's own top/bottom inset, so the last row
-            # isn't clipped by it.
+            # Plus the view's own top/bottom inset, so the last row isn't clipped.
             view.setMinimumHeight(rows * row_h + 10)
         super().showPopup()
 

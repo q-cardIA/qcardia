@@ -30,11 +30,9 @@ from model.voice_input import (
 )
 from utils import llm_devices
 from utils.app_config import (
-    OLLAMA_MODEL,
     discover_local_gguf_files,
     gguf_model_tag,
     import_gguf_model,
-    list_ollama_models,
 )
 from view.theme import PopupComboBox, thin_loading_bar
 
@@ -218,6 +216,7 @@ class ChatWidget(QFrame):
 
     message_submitted = Signal(str)
     model_changed = Signal(str)
+    device_changed = Signal(object)  # the new Device, once it is actually serving
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -231,6 +230,7 @@ class ChatWidget(QFrame):
         self._import_worker: CallableWorker | None = None
         self._user_bubbles: list[_Bubble] = []
         self._busy = False
+        self._busy_before_switch = False
         self._mic_worker: MicrophoneWorker | None = None
         self._transcription_worker: TranscriptionWorker | None = None
         self._f9_held = False
@@ -284,8 +284,7 @@ class ChatWidget(QFrame):
         input_row.addWidget(self._send_btn)
         outer.addLayout(input_row)
 
-        # Which machine serves the LLM. Switchable mid-session, mainly so a
-        # remote device going away doesn't end the conversation.
+        # Switchable mid-session, so a remote device dropping doesn't end the conversation.
         self._device_combo = PopupComboBox()
         self._device_combo.setProperty("role", "chatCombo")
         self._populate_device_combo()
@@ -299,8 +298,7 @@ class ChatWidget(QFrame):
         self._populate_model_combo()
         self._model_combo.currentIndexChanged.connect(self._on_model_selected)
         outer.addWidget(self._model_combo)
-        # Driven by ChatController, which is what actually knows when the
-        # model has finished loading into the server.
+        # Driven by ChatController, which knows when the model is actually loaded.
         self._model_bar = thin_loading_bar()
         outer.addWidget(self._model_bar)
 
@@ -326,6 +324,8 @@ class ChatWidget(QFrame):
             return
         self._device_combo.setEnabled(False)
         self._device_bar.show()
+        # A switch can start mid-request; on failure the old device and its request live on.
+        self._busy_before_switch = self._busy
         self.set_enabled(False)
         self.append_system_message(f"Switching to {device.label}…")
         worker = CallableWorker(llm_devices.activate, device)
@@ -337,15 +337,16 @@ class ChatWidget(QFrame):
     def _on_device_switched(self, device, result):
         self._device_combo.setEnabled(True)
         self._device_bar.hide()
-        self.set_enabled(True)
         if result.ok:
-            self.append_system_message(f"Now using {device.label} — {result.detail}")
-            # Each device has its own pulled models, so the tag list has to be
-            # rebuilt rather than carried over from the previous device.
-            self._populate_model_combo()
+            # Before re-enabling: the controller must let go of the old device's request first.
+            self.device_changed.emit(device)
+            self.set_enabled(True)
+            self.append_system_message(f"Now using {device.label}: {result.detail}")
+            self._populate_model_combo()  # each device serves its own models
         else:
+            self.set_enabled(not self._busy_before_switch)
             self.append_system_message(
-                f"{device.label} unavailable — {result.detail} "
+                f"{device.label} unavailable. {result.detail} "
                 f"Staying on {llm_devices.current().label}."
             )
             self._populate_device_combo()  # snap the combo back to what is actually active
@@ -353,31 +354,29 @@ class ChatWidget(QFrame):
     def _on_device_switch_failed(self, device, exc: Exception):
         self._device_combo.setEnabled(True)
         self._device_bar.hide()
-        self.set_enabled(True)
-        self.append_system_message(f"Could not switch to {device.label} — {exc}")
+        self.set_enabled(not self._busy_before_switch)
+        self.append_system_message(f"Could not switch to {device.label}: {exc}")
         self._populate_device_combo()
 
     # -- model picker ---------------------------------------------------
 
-    def _populate_model_combo(self, select_tag: str | None = None):
-        select_tag = select_tag or self.current_tag() or OLLAMA_MODEL
+    def _populate_model_combo(self, select_tag: str | None = None, refresh: bool = False):
+        # The device's own default: a hosted gateway shares no model names with local Ollama.
+        fallback = llm_devices.default_model()
+        select_tag = select_tag or self.current_tag() or fallback
         self._model_combo.blockSignals(True)
         self._model_combo.clear()
 
-        # Runs on the GUI thread, so don't pay the HTTP timeout when the
-        # selected device already failed its probe — there is nothing to list,
-        # and the widget is built (then hidden) even with the assistant off.
-        pulled = list_ollama_models() if llm_devices.chat_available() else []
+        # Cached by the device's probe, so the GUI thread pays no HTTP timeout here.
+        pulled = llm_devices.list_models(refresh) if llm_devices.chat_available() else []
         pulled_tags = {m["tag"] for m in pulled}
-        if not any(m["tag"] == OLLAMA_MODEL for m in pulled):
-            pulled = [{"tag": OLLAMA_MODEL, "label": OLLAMA_MODEL, "local": False}] + pulled
+        if fallback not in pulled_tags:
+            pulled = [{"tag": fallback, "label": fallback, "local": False}] + pulled
 
         for m in pulled:
             self._model_combo.addItem(m["label"], m["tag"])
 
-        # GGUF import drives this machine's ollama CLI against local file
-        # paths, so it can only target the local device — offering it while a
-        # remote one is selected would just fail on a path the server can't see.
+        # GGUF import runs this machine's ollama CLI on local paths, so it is local-only.
         if llm_devices.current().is_local:
             for gguf_path in discover_local_gguf_files():
                 tag = gguf_model_tag(gguf_path)
@@ -387,6 +386,9 @@ class ChatWidget(QFrame):
 
         if select_tag is not None:
             idx = self._model_combo.findData(select_tag)
+            if idx < 0:
+                # Carried-over tag isn't served here; index 0 would silently load whatever sorts first.
+                idx = self._model_combo.findData(fallback)
             if idx >= 0:
                 self._model_combo.setCurrentIndex(idx)
         self._model_combo.blockSignals(False)
@@ -428,7 +430,7 @@ class ChatWidget(QFrame):
         self.set_enabled(True)
         self._model_combo.setEnabled(True)
         self.append_system_message(message)
-        self._populate_model_combo(select_tag=select_tag)
+        self._populate_model_combo(select_tag=select_tag, refresh=True)
 
     def _on_import_finished(self, tag: str):
         self._finish_import(f"Model imported as {tag}.", select_tag=tag)
