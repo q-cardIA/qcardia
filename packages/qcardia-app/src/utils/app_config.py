@@ -26,11 +26,6 @@ ICON_PATH: Path = APP_DIR / "assets" / "images" / "q-cardIA.png"
 # Used by the AI assistant's load_subject tool.
 SUBJECT_BASE_DIR: Path = WORKSPACE_DIR / "data" / "new_data"
 
-# Cached duplicate-series disambiguation results (model/dicom_model.py).
-# Lives alongside the subject data, not inside the app repo, since it's
-# derived from that data.
-DISAMBIGUATION_CACHE_DIR: Path = SUBJECT_BASE_DIR / "disambiguation_cache"
-
 
 def subject_folder_path(subject_number: int) -> Path:
     """Return the subject folder path for a given integer subject number."""

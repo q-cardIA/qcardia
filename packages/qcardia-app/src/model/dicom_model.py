@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -18,7 +17,7 @@ from qcardia.cardisort import (
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 
-from utils.app_config import DISAMBIGUATION_CACHE_DIR
+from model.subject_labels import SeriesLabel, SubjectLabels, load_labels, update_primary
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
@@ -95,8 +94,7 @@ class DICOMModel:
         self.slice_positions = []
         self._cardisort_model = None
         self._cardisort_config = None
-        self.use_cardisort_cache = True  # welcome-screen toggles, see WelcomeWidget / main.py
-        self.use_disambiguation_cache = True
+        self.use_cardisort_cache = True  # welcome-screen toggle, see WelcomeWidget / main.py
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -409,12 +407,16 @@ class DICOMModel:
 
     def _describe_patient_folder(self, folder_path) -> list[SequenceDescriptor]:
         folder_path = Path(folder_path)
-
         if self.use_cardisort_cache:
-            cardisorted_target = self._resolve_cardisorted_target(folder_path)
-            if cardisorted_target is not None:
-                return self._describe_cardisorted_folder(cardisorted_target)
+            cached = load_labels(folder_path)
+            if cached is not None:
+                return [
+                    SequenceDescriptor(folder_path / s.dir, s.sequence_name, s.plane_name, s.key)
+                    for s in cached.series
+                ]
+        return self._classify_live(folder_path)
 
+    def _classify_live(self, folder_path: Path) -> list[SequenceDescriptor]:
         model, config = self._get_cardisort_model()
         sequence_dirs = get_sequence_dirs(folder_path)
 
@@ -443,155 +445,78 @@ class DICOMModel:
 
         return descriptors
 
-    def _resolve_cardisorted_target(self, folder_path: Path) -> Path | None:
-        """Dev/runtime speedup: if folder_path already IS cardisort's own output
-        layout, or a 'CardiSorted_<name>' sibling of it already exists on disk,
-        use that directly instead of re-running cardisort classification (slow
-        — one model inference per sequence dir — and redundant if it's already
-        been done once for this subject). Gated by self.use_cardisort_cache."""
-        if self._is_cardisorted_layout(folder_path):
-            return folder_path
-        sibling = folder_path.parent / f"CardiSorted_{folder_path.name}"
-        if self._is_cardisorted_layout(sibling):
-            return sibling
-        return None
-
-    @staticmethod
-    def _is_cardisorted_layout(folder_path: Path) -> bool:
-        """True if folder_path has top-level subfolders already named in
-        cardisort's own '{SEQUENCE}_{PLANE}' output convention (e.g. CINE_SAX,
-        WBLGE_4CH) — the unambiguous signature of a CardiSorted_* folder."""
-        if not folder_path.is_dir():
-            return False
-        return any(
-            d.is_dir() and d.name.split("_", 1)[0] in CARDISORT_SEQUENCE_TO_PREFIX
-            for d in folder_path.iterdir()
-        )
-
-    @staticmethod
-    def _describe_cardisorted_folder(folder_path: Path) -> list[SequenceDescriptor]:
-        """Reconstructs SequenceDescriptors straight from an already-cardisorted
-        folder's structure — no model inference. Candidate disambiguation among
-        same-key duplicates (e.g. 'scar_4CH' vs 'DB scar_4CH') still runs
-        normally afterward via _group_and_resolve, unchanged."""
-        descriptors = []
-        for top_dir in sorted(d for d in folder_path.iterdir() if d.is_dir()):
-            sequence_name, _, plane_name = top_dir.name.partition("_")
-            prefix = CARDISORT_SEQUENCE_TO_PREFIX.get(sequence_name)
-            key = (
-                f"{prefix}_{plane_name}"
-                if prefix is not None and plane_name in CARDISORT_SUPPORTED_PLANES
-                else None
-            )
-            for leaf_dir in sorted(d for d in top_dir.iterdir() if d.is_dir()):
-                descriptors.append(SequenceDescriptor(leaf_dir, sequence_name, plane_name, key))
-        return descriptors
-
     def _group_and_resolve(self, descriptors: list[SequenceDescriptor], folder_path) -> dict[str, Path]:
         dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
         for d in descriptors:
             if d.key is not None:
                 dirs_by_key[d.key].append(d)
 
-        subject_key = self._cache_subject_key(folder_path)
-        cache = self._load_disambiguation_cache(subject_key) if self.use_disambiguation_cache else {}
-        cache_dirty = False
+        cached = load_labels(folder_path) if self.use_cardisort_cache else None
+        primary_by_key = cached.primary_by_key if cached is not None else {}
 
         classified: dict[str, Path] = {}
         for key, group in dirs_by_key.items():
-            primary, wrote = self._resolve_primary_dir(key, [d.path for d in group], cache)
-            cache_dirty = cache_dirty or wrote
+            primary = self._resolve_primary_dir(key, [d.path for d in group], primary_by_key)
             classified[key] = primary
             for d in group:
                 d.is_primary = d.path == primary
-
-        if cache_dirty:
-            self._save_disambiguation_cache(subject_key, cache)
 
         return classified
 
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
         return self._group_and_resolve(self._describe_patient_folder(folder_path), folder_path)
 
-    # -- duplicate-series disambiguation cache, gated by self.use_disambiguation_cache --
-    # One JSON file per subject, loaded/saved once per _group_and_resolve call
-    # rather than per ambiguous key.
+    def label_patient_folder(self, folder_path) -> SubjectLabels:
+        """Live classification + disambiguation for a whole subject, ignoring any cached sidecar; used by the preprocessing script."""
+        folder_path = Path(folder_path)
+        descriptors = self._classify_live(folder_path)
 
-    def _cache_subject_key(self, folder_path) -> str:
-        """Identifies a subject for cache-file naming: the resolved
-        CardiSorted folder's name if one exists (stable regardless of
-        whether callers pass the raw QLGE folder or its CardiSorted_
-        sibling), else the folder passed in directly."""
-        target = self._resolve_cardisorted_target(Path(folder_path))
-        return (target or Path(folder_path)).name
+        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
+        for d in descriptors:
+            if d.key is not None:
+                dirs_by_key[d.key].append(d)
 
-    @staticmethod
-    def _cache_path(subject_key: str) -> Path:
-        return DISAMBIGUATION_CACHE_DIR / f"{subject_key}.json"
+        primary_by_key = {}
+        for key, group in dirs_by_key.items():
+            dirs = [d.path for d in group]
+            if len(dirs) < 2:
+                continue
+            primary = self._resolve_primary_dir(key, dirs, {})
+            primary_by_key[key] = {"candidates": sorted(d.name for d in dirs), "primary": primary.name}
 
-    def _load_disambiguation_cache(self, subject_key: str) -> dict:
-        path = self._cache_path(subject_key)
-        if not path.exists():
-            return {}
-        try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+        series = [
+            SeriesLabel(d.path.relative_to(folder_path).as_posix(), d.sequence_name, d.plane_name, d.key)
+            for d in descriptors
+        ]
+        return SubjectLabels(series=series, primary_by_key=primary_by_key)
 
-    def _save_disambiguation_cache(self, subject_key: str, cache: dict):
-        try:
-            DISAMBIGUATION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            with open(self._cache_path(subject_key), "w", encoding="utf-8") as f:
-                json.dump(cache, f, indent=2)
-        except Exception as e:
-            logging.warning(f"Failed to write disambiguation cache for {subject_key}: {e}")
+    def update_cached_label(self, folder_path, key: str, candidate_names: list[str], primary_name: str):
+        """Keeps a manual reclassification (reassign_series) from being reverted by a stale sidecar entry."""
+        update_primary(Path(folder_path), key, candidate_names, primary_name)
 
-    def update_disambiguation_cache(self, folder_path, key: str, candidate_names: list[str], primary_name: str):
-        """Called from manual reclassification (reassign_series) so a later
-        load doesn't silently revert the user's choice via a stale cache entry."""
-        if not self.use_disambiguation_cache:
-            return
-        subject_key = self._cache_subject_key(folder_path)
-        cache = self._load_disambiguation_cache(subject_key)
-        cache[key] = {"candidates": sorted(candidate_names), "primary": primary_name}
-        self._save_disambiguation_cache(subject_key, cache)
-
-    def _resolve_primary_dir(self, key: str, dirs: list[Path], cache: dict) -> tuple[Path, bool]:
-        """Returns (primary_dir, cache_was_written_to) — the cache dict is
-        mutated in place; the caller flushes it to disk once per patient
-        load instead of once per ambiguous key."""
+    def _resolve_primary_dir(self, key: str, dirs: list[Path], primary_by_key: dict) -> Path:
         if len(dirs) == 1:
-            return dirs[0], False
+            return dirs[0]
 
         signature = sorted(d.name for d in dirs)
-
-        if self.use_disambiguation_cache:
-            entry = cache.get(key)
-            if entry is not None and entry.get("candidates") == signature:
-                cached = next((d for d in dirs if d.name == entry.get("primary")), None)
-                if cached is not None:
-                    return cached, False
-                logging.warning(f"Disambiguation cache for {key} pointed at a missing dir, recomputing")
+        entry = primary_by_key.get(key)
+        if entry is not None and entry.get("candidates") == signature:
+            cached = next((d for d in dirs if d.name == entry.get("primary")), None)
+            if cached is not None:
+                return cached
+            logging.warning(f"Cached primary for {key} points at a missing dir, recomputing")
 
         prefix, _, plane_name = key.partition("_")
         try:
-            candidates = [
-                summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
-            ]
+            candidates = [summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs]
             result = disambiguate_duplicates((prefix, plane_name), candidates)
-            primary = next(d for d in dirs if d.name == result["primary_series"])
+            return next(d for d in dirs if d.name == result["primary_series"])
         except Exception as e:
             logging.warning(
                 f"Disambiguation failed for {key} ({[d.name for d in dirs]}): {e}; "
                 "falling back to largest series"
             )
-            primary = max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
-
-        if not self.use_disambiguation_cache:
-            return primary, False
-        cache[key] = {"candidates": signature, "primary": primary.name}
-        return primary, True
+            return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
 
     def load_series_for_key(self, seq_dir: Path, key: str) -> dict:
         if key.startswith("CINE_"):

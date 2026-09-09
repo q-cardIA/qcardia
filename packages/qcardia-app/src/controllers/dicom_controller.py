@@ -124,7 +124,7 @@ class DICOMController:
 
         if self._current_subject_folder is not None:
             candidate_names = [e.path.name for e in self._last_result.entries if e.key == new_key]
-            self.model.update_disambiguation_cache(
+            self.model.update_cached_label(
                 self._current_subject_folder, new_key, candidate_names, card_info.path.name
             )
 
