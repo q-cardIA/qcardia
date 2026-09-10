@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPalette, QPen
+from PySide6.QtGui import QPainter, QPalette, QPen, QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -38,6 +38,9 @@ from utils.app_config import (
 from view.theme import PopupComboBox, thin_loading_bar
 
 _USER_BUBBLE_WIDTH_FRACTION = 0.7  # user bubbles can grow up to 70% of the panel width
+
+# Indent per bullet level; Qt's 40px default is a ~5-character jump, this is about two.
+_LIST_INDENT = 18
 
 # Result strings that just restate what the tool call's own summary line
 # already says (e.g. "Apply viability preset" -> "Applied 'viability'
@@ -73,6 +76,11 @@ def _tool_call_summary(name: str, arguments: dict) -> str:
         return name.replace("_", " ").capitalize()
 
 
+def _as_markdown(text: str) -> str:
+    """Assistant text for QLabel's markdown renderer, with inline HTML neutralised."""
+    return text.replace("&", "&amp;").replace("<", "&lt;")
+
+
 class _Bubble(QFrame):
     """A single chat message: user (right-aligned, accent, capped at a
     fraction of the panel width), assistant/system (fill the panel width)."""
@@ -88,10 +96,24 @@ class _Bubble(QFrame):
         self._label = QLabel()
         self._label.setWordWrap(True)
         self._label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # Only the assistant formats its text; user and system lines are shown verbatim.
+        self._markdown = role == "assistant"
+        # Explicit: QLabel's AutoText default sniffs its input and would render stray markup.
+        self._label.setTextFormat(
+            Qt.TextFormat.MarkdownText if self._markdown else Qt.TextFormat.PlainText
+        )
         layout.addWidget(self._label)
 
     def set_text(self, text: str):
-        self._label.setText(text)
+        self._label.setText(_as_markdown(text) if self._markdown else text)
+        if self._markdown:
+            self._compact_list_indent()
+
+    def _compact_list_indent(self):
+        """Shrink Qt's 40px list indent, via the document QLabel parents to itself (undocumented)."""
+        for doc in self._label.findChildren(QTextDocument):
+            if doc.indentWidth() != _LIST_INDENT:
+                doc.setIndentWidth(_LIST_INDENT)
 
     def natural_width(self) -> int:
         """Width needed to render the current text on one line — QLabel's own
@@ -133,6 +155,7 @@ class _ToolCallBubble(QFrame):
         self._detail.setProperty("role", "toolCallDetail")
         self._detail.setWordWrap(True)
         self._detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._detail.setTextFormat(Qt.TextFormat.PlainText)  # arguments and paths, verbatim
         self._detail.setText(f"{name}({json.dumps(arguments)})")
         self._detail.setVisible(False)
         layout.addWidget(self._detail)
@@ -141,6 +164,7 @@ class _ToolCallBubble(QFrame):
         self._result_label.setProperty("role", "toolCallResult")
         self._result_label.setWordWrap(True)
         self._result_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._result_label.setTextFormat(Qt.TextFormat.PlainText)
         self._result_label.setVisible(False)
         layout.addWidget(self._result_label)
 
