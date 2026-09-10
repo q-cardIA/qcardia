@@ -593,13 +593,19 @@ class ChatWidget(QFrame):
 
     def append_assistant_chunk(self, chunk: str):
         self._assistant_buffer += chunk
+        # Models pad replies with trailing newlines, which would draw an empty bubble.
+        text = self._assistant_buffer.strip()
+        if not text:
+            return
         if self._assistant_bubble is None:
             self._assistant_bubble = self._add_bubble("assistant", "")
-        self._assistant_bubble.set_text(self._assistant_buffer)
+        self._assistant_bubble.set_text(text)
         self._scroll_to_bottom()
 
     def finalize_assistant_message(self) -> str:
-        text = self._assistant_buffer
+        self._seal_thinking()
+        # Stripped, so a whitespace-only reply never reaches history.
+        text = self._assistant_buffer.strip()
         self._assistant_buffer = ""
         self._assistant_bubble = None
         return text
