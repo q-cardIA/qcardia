@@ -62,6 +62,7 @@ def discover_subject_numbers() -> list[int]:
 OLLAMA_URL: str = "http://localhost:11434/api/chat"
 OLLAMA_GENERATE_URL: str = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL: str = "http://localhost:11434/api/tags"
+OLLAMA_SHOW_URL: str = "http://localhost:11434/api/show"
 OLLAMA_MODEL: str = "qwen3:8b"
 
 # Explicit context window — Ollama silently truncates from the front of the

@@ -24,7 +24,7 @@ class OllamaWorker(ChatWorker):
             "model": self._model,
             "messages": self._messages,
             "stream": True,
-            "think": False,
+            "think": self._think,
             "keep_alive": KEEP_ALIVE,
             "options": {"num_ctx": OLLAMA_NUM_CTX, "temperature": 0.2},
         }
@@ -35,7 +35,17 @@ class OllamaWorker(ChatWorker):
             response = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=120)
             response.raise_for_status()
         except requests.RequestException as e:
-            self.error.emit(f"Could not reach Ollama at {OLLAMA_URL}: {e}")
+            # Ollama refuses think:true without the capability and says why in the body, not the status.
+            detail = ""
+            if getattr(e, "response", None) is not None:
+                try:
+                    detail = e.response.json().get("error", "")
+                except ValueError:
+                    detail = ""
+            if detail:
+                self.error.emit(detail[:1].upper() + detail[1:] + ".")
+            else:
+                self.error.emit(f"Could not reach Ollama at {OLLAMA_URL}: {e}")
             return
 
         try:
@@ -56,6 +66,10 @@ class OllamaWorker(ChatWorker):
                     ]
                     self.tool_calls_ready.emit(calls)
                     return
+
+                thinking = message.get("thinking")
+                if thinking:
+                    self.thinking_received.emit(thinking)
 
                 content = message.get("content")
                 if content:

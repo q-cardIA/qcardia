@@ -89,8 +89,15 @@ class OpenAIWorker(ChatWorker):
             "stream": True,
             "max_tokens": MAX_TOKENS,
             "temperature": 0.2,
+            # vLLM's way of asking for reasoning; ignored where it does not apply.
+            "chat_template_kwargs": {"enable_thinking": self._think},
         }
-        payload.update(EXTRA_BODY)
+        # A live user choice, so it overrides only the device's pinned enable_thinking.
+        for key, value in EXTRA_BODY.items():
+            if key == "chat_template_kwargs" and isinstance(value, dict):
+                payload["chat_template_kwargs"] = {**value, **payload["chat_template_kwargs"]}
+            else:
+                payload[key] = value
         if self._tools:
             payload["tools"] = self._tools
 
@@ -139,6 +146,10 @@ class OpenAIWorker(ChatWorker):
                         fn = call.get("function") or {}
                         slot["name"] = fn.get("name") or slot["name"]
                         slot["arguments"] += fn.get("arguments") or ""
+                    # vLLM calls it reasoning_content, SPIKE plain "reasoning"; read both.
+                    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                    if reasoning:
+                        self.thinking_received.emit(reasoning)
                     if delta.get("content"):
                         self.token_received.emit(delta["content"])
         except requests.Timeout:

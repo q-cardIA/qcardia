@@ -304,6 +304,7 @@ class ChatController:
         # exists (see MainWindow.build_analysis_interface), so read its actual
         # selection here rather than a default: the two must not silently disagree.
         self._llm_model = self.view.chat_widget.current_tag() or llm_devices.default_model()
+        self._think = self.view.chat_widget.think_enabled()
         self._available_subjects_cache: list[int] | None = None
         self._warmup_worker: CallableWorker | None = None  # see _warm_model_in_background
         self._model_load_worker: CallableWorker | None = None  # see _preload_selected_model
@@ -312,10 +313,14 @@ class ChatController:
         self.view.chat_widget.message_submitted.connect(self.send_message)
         self.view.chat_widget.model_changed.connect(self._on_model_changed)
         self.view.chat_widget.device_changed.connect(self._on_device_changed)
+        self.view.chat_widget.think_changed.connect(self._on_think_changed)
 
     def _on_model_changed(self, model_name: str):
         self._llm_model = model_name
         self._preload_selected_model()
+
+    def _on_think_changed(self, enabled: bool):
+        self._think = enabled
 
     def _on_device_changed(self, device):
         """Detach, not stop, a request still running on the device we just left.
@@ -330,7 +335,8 @@ class ChatController:
             # input would let the next send race its follow-up request.
             return
         self._worker = None
-        for signal in (worker.token_received, worker.tool_calls_ready,
+        for signal in (worker.token_received, worker.thinking_received,
+                       worker.tool_calls_ready,
                        worker.finished_ok, worker.error, worker.finished):
             with suppress(RuntimeError, TypeError):
                 signal.disconnect()  # no args = drop every slot on that signal
@@ -484,8 +490,10 @@ class ChatController:
 
     def _start_worker(self, messages: list[dict]):
         worker_cls = llm_devices.worker_class()
-        self._worker = worker_cls(messages, tools=self._build_tools(), model=self._llm_model)
+        self._worker = worker_cls(messages, tools=self._build_tools(), model=self._llm_model,
+                                  think=self._think)
         self._worker.token_received.connect(self.view.chat_widget.append_assistant_chunk)
+        self._worker.thinking_received.connect(self.view.chat_widget.append_thinking_chunk)
         self._worker.tool_calls_ready.connect(self._on_tool_calls)
         self._worker.finished_ok.connect(self._on_finished)
         self._worker.error.connect(self._on_error)

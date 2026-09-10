@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
@@ -161,6 +162,91 @@ class _ToolCallBubble(QFrame):
         self.style().polish(self)
 
 
+class _ThinkingBubble(QFrame):
+    """Collapsed-by-default reasoning, folded the way tool calls are."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "chatBubbleThinking")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setSpacing(2)
+
+        self._header = QPushButton("Thinking…")
+        self._header.setProperty("role", "toolCallHeader")
+        self._header.setCursor(Qt.PointingHandCursor)
+        self._header.clicked.connect(self._toggle)
+        layout.addWidget(self._header)
+
+        self._detail = QLabel()
+        self._detail.setProperty("role", "toolCallDetail")
+        self._detail.setWordWrap(True)
+        self._detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._detail.setTextFormat(Qt.TextFormat.PlainText)  # raw thought, not a formatted answer
+        self._detail.setVisible(False)
+        layout.addWidget(self._detail)
+
+        self._expanded = False
+        self._buffer = ""
+        self._started = time.monotonic()
+
+    def append(self, text: str):
+        self._buffer += text
+        self._detail.setText(self._buffer.strip())
+
+    def seal(self):
+        """Swap the live label for how long it took, so a finished turn reads as finished."""
+        self._header.setText(f"Thought for {time.monotonic() - self._started:.1f}s")
+
+    def _toggle(self):
+        self._expanded = not self._expanded
+        self._detail.setVisible(self._expanded)
+
+
+class _ThinkToggle(QPushButton):
+    """Ask the model to reason first. Off by default; sized so its label never clips."""
+
+    _LABEL = "Think"
+    _H_PADDING = 24  # the stylesheet's horizontal padding plus both borders
+
+    def __init__(self, parent=None):
+        super().__init__(self._LABEL, parent)
+        self.setProperty("role", "chatThinkToggle")
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._fitting = False
+        self._fit()
+
+    def _fit(self):
+        if self._fitting:
+            return  # setFixedWidth re-enters changeEvent
+        self._fitting = True
+        try:
+            self.ensurePolished()  # else we measure the default font, not the themed one
+            self.setFixedWidth(self.fontMetrics().horizontalAdvance(self._LABEL) + self._H_PADDING)
+        finally:
+            self._fitting = False
+
+    def match_height(self, other: QWidget):
+        """Adopt the combo's height; the base QPushButton min-height would leave this taller."""
+        other.ensurePolished()
+        self.setFixedHeight(other.sizeHint().height())
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._fit()
+
+    def set_supported(self, supported: bool, reason: str = ""):
+        """Grey out for a model that cannot reason; Ollama rejects the request outright."""
+        if not supported and self.isChecked():
+            self.setChecked(False)
+        self.setEnabled(supported)
+        self.setToolTip(reason or ("Ask the model to reason before answering"
+                                   if supported else "This model cannot reason"))
+
+
 class _SendButton(QPushButton):
     """Send button that grows a spinning arc around its border while a
     request is in flight — a lightweight stand-in for a busy indicator that
@@ -216,6 +302,7 @@ class ChatWidget(QFrame):
 
     message_submitted = Signal(str)
     model_changed = Signal(str)
+    think_changed = Signal(bool)
     device_changed = Signal(object)  # the new Device, once it is actually serving
 
     def __init__(self, parent=None):
@@ -226,6 +313,7 @@ class ChatWidget(QFrame):
         self.setMinimumWidth(280)
 
         self._assistant_bubble: _Bubble | None = None
+        self._thinking_bubble: _ThinkingBubble | None = None
         self._assistant_buffer = ""
         self._import_worker: CallableWorker | None = None
         self._user_bubbles: list[_Bubble] = []
@@ -293,11 +381,21 @@ class ChatWidget(QFrame):
         self._device_bar = thin_loading_bar()
         outer.addWidget(self._device_bar)
 
+        # The combo takes the leftover width, the toggle only what its label needs.
+        model_row = QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.setSpacing(6)
         self._model_combo = PopupComboBox()
         self._model_combo.setProperty("role", "chatCombo")
+        self._model_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self._model_combo.setMinimumWidth(80)
+        self._think_btn = _ThinkToggle()
+        self._think_btn.toggled.connect(self.think_changed.emit)
         self._populate_model_combo()
         self._model_combo.currentIndexChanged.connect(self._on_model_selected)
-        outer.addWidget(self._model_combo)
+        model_row.addWidget(self._model_combo, 1)
+        model_row.addWidget(self._think_btn, 0)
+        outer.addLayout(model_row)
         # Driven by ChatController, which knows when the model is actually loaded.
         self._model_bar = thin_loading_bar()
         outer.addWidget(self._model_bar)
@@ -393,8 +491,22 @@ class ChatWidget(QFrame):
             if idx >= 0:
                 self._model_combo.setCurrentIndex(idx)
         self._model_combo.blockSignals(False)
+        self._sync_think_toggle()
         if self._model_combo.count():
             self.model_changed.emit(self._model_combo.currentData())
+
+    def _sync_think_toggle(self):
+        """Only offer Think where the model can do it; an always-on button would just error."""
+        if not hasattr(self, "_think_btn"):
+            return  # populate runs once during construction, before the toggle exists
+        if not llm_devices.chat_available():
+            self._think_btn.set_supported(False, "Select a working device first")
+            return
+        tag = self.current_tag()
+        self._think_btn.set_supported(llm_devices.supports_thinking(tag))
+
+    def think_enabled(self) -> bool:
+        return self._think_btn.isChecked() and self._think_btn.isEnabled()
 
     def current_tag(self) -> str | None:
         return self._model_combo.currentData() if self._model_combo.count() else None
@@ -406,6 +518,8 @@ class ChatWidget(QFrame):
         if data.lower().endswith(".gguf"):
             self._start_import(data)
             return
+        # Thinking is per-model, so re-check on every change, not only on rebuild.
+        self._sync_think_toggle()
         self.model_changed.emit(data)
 
     def _start_import(self, gguf_path_str: str):
@@ -575,6 +689,11 @@ class ChatWidget(QFrame):
         available = self._scroll.viewport().width() - margins.left() - margins.right()
         return max(120, int(available * _USER_BUBBLE_WIDTH_FRACTION))
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Deferred to first show: the stylesheet may be applied after this widget is built.
+        self._think_btn.match_height(self._model_combo)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         cap = self._user_bubble_max_width()
@@ -588,8 +707,15 @@ class ChatWidget(QFrame):
     def begin_assistant_message(self):
         self._assistant_buffer = ""
         self._assistant_bubble = None  # created lazily on the first chunk, so a
-        # response that goes straight to a tool call (no streamed text) never
-        # leaves an empty placeholder bubble behind.
+        # A turn ending in a tool call is never finalized, so close its reasoning here.
+        self._seal_thinking()
+
+    def append_thinking_chunk(self, chunk: str):
+        if self._thinking_bubble is None:
+            self._thinking_bubble = _ThinkingBubble()
+            self._add_row(self._thinking_bubble, "thinking")
+        self._thinking_bubble.append(chunk)
+        self._scroll_to_bottom()
 
     def append_assistant_chunk(self, chunk: str):
         self._assistant_buffer += chunk
@@ -601,6 +727,11 @@ class ChatWidget(QFrame):
             self._assistant_bubble = self._add_bubble("assistant", "")
         self._assistant_bubble.set_text(text)
         self._scroll_to_bottom()
+
+    def _seal_thinking(self):
+        if self._thinking_bubble is not None:
+            self._thinking_bubble.seal()
+            self._thinking_bubble = None
 
     def finalize_assistant_message(self) -> str:
         self._seal_thinking()

@@ -329,6 +329,7 @@ def apply(device: Device) -> None:
         module.OLLAMA_URL = f"{ollama}/api/chat"
         module.OLLAMA_GENERATE_URL = f"{ollama}/api/generate"
     app_config.OLLAMA_TAGS_URL = f"{ollama}/api/tags"
+    app_config.OLLAMA_SHOW_URL = f"{ollama}/api/show"
 
     if device.protocol == "openai":
         from model import openai_client
@@ -388,6 +389,22 @@ def default_model() -> str:
     from utils.app_config import OLLAMA_MODEL
 
     return _current.model or OLLAMA_MODEL
+
+
+def supports_thinking(tag: str) -> bool:
+    """Whether this model can be asked to reason: Ollama answers via /api/show, a gateway always can."""
+    if not tag:
+        return False
+    if _current.protocol != "ollama":
+        return True
+    try:
+        from utils.app_config import OLLAMA_SHOW_URL
+
+        response = requests.post(OLLAMA_SHOW_URL, json={"model": tag}, timeout=2.0)
+        response.raise_for_status()
+        return "thinking" in (response.json().get("capabilities") or [])
+    except (requests.RequestException, ValueError):
+        return False  # unknown: better a disabled button than a request Ollama will reject
 
 
 def supports_warmup() -> bool:

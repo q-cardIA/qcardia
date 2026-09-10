@@ -31,12 +31,16 @@ class ChatWorker(QThread):
     """
 
     token_received = Signal(str)
+    # Reasoning text; both formats keep it out of the reply, so the view can fold it away.
+    thinking_received = Signal(str)
     tool_calls_ready = Signal(list)  # list of (tool_name, arguments) tuples
     finished_ok = Signal()
     error = Signal(str)
 
-    def __init__(self, messages: list[dict], tools: list[dict] | None = None, model: str = ""):
+    def __init__(self, messages: list[dict], tools: list[dict] | None = None, model: str = "",
+                 think: bool = False):
         super().__init__()
         self._messages = messages
         self._tools = tools
         self._model = model
+        self._think = think
