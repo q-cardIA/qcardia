@@ -19,6 +19,8 @@ CHAT_URL: str = ""  # rebound by utils.llm_devices.apply(); empty until a device
 API_KEY: str = ""
 EXTRA_BODY: dict = {}  # the device's non-standard request fields, if it needs any
 
+MAX_TOKENS = 4096  # reply cap; quoted back to the user when a reply hits it
+
 _COLD_START = (
     "{model} did not start answering in time. It is most likely still loading onto a "
     "GPU, so try a model shown as running."
@@ -64,6 +66,19 @@ def _to_openai(messages: list[dict]) -> list[dict]:
     return out
 
 
+def _unreachable(exc: requests.RequestException, model: str) -> str:
+    """Name the real cause: 401 is the key and 404 the model, not the network."""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return f"Could not reach the gateway — is the VPN it needs connected? ({exc})"
+    if response.status_code in (401, 403):
+        return (f"The gateway rejected the API key (HTTP {response.status_code}). Check the "
+                f"variable named by this device's api_key_env.")
+    if response.status_code == 404:
+        return f"'{model}' is not available on this gateway — pick another in the model list."
+    return f"The gateway answered HTTP {response.status_code}."
+
+
 class OpenAIWorker(ChatWorker):
     """Streams one /chat/completions request."""
 
@@ -72,7 +87,7 @@ class OpenAIWorker(ChatWorker):
             "model": self._model,
             "messages": _to_openai(self._messages),
             "stream": True,
-            "max_tokens": 4096,
+            "max_tokens": MAX_TOKENS,
             "temperature": 0.2,
         }
         payload.update(EXTRA_BODY)
@@ -90,7 +105,7 @@ class OpenAIWorker(ChatWorker):
             self.error.emit(_COLD_START.format(model=self._model))
             return
         except requests.RequestException as e:
-            self.error.emit(f"Could not reach {CHAT_URL}: {e}")
+            self.error.emit(_unreachable(e, self._model))
             return
 
         # SSE carries no charset, so requests leaves encoding unset and would hand back
@@ -99,6 +114,7 @@ class OpenAIWorker(ChatWorker):
 
         # Arguments stream in fragments, so collect per index: one turn can request several tools.
         partial: dict[int, dict] = {}
+        finish = ""  # last finish_reason seen; "length" means the reply was cut off
         try:
             for line in response.iter_lines(decode_unicode=True):
                 if not line or not line.startswith("data:"):
@@ -116,6 +132,7 @@ class OpenAIWorker(ChatWorker):
                     return
 
                 for choice in chunk.get("choices") or []:
+                    finish = choice.get("finish_reason") or finish
                     delta = choice.get("delta") or {}
                     for call in delta.get("tool_calls") or []:
                         slot = partial.setdefault(call.get("index", 0), {"name": "", "arguments": ""})
@@ -131,6 +148,16 @@ class OpenAIWorker(ChatWorker):
             self.error.emit(f"Stream interrupted: {e}")
             return
 
+        # Truncated arguments parse to {} and would run the tool with none, so refuse instead.
+        if finish == "length":
+            if partial:
+                self.error.emit(
+                    f"{self._model} hit the {MAX_TOKENS}-token reply limit while requesting a "
+                    f"tool, so nothing was run. Try asking for one step at a time."
+                )
+                return
+            self.token_received.emit(f" […truncated at the {MAX_TOKENS}-token limit]")
+
         if not partial:
             self.finished_ok.emit()
             return
@@ -138,9 +165,8 @@ class OpenAIWorker(ChatWorker):
         calls = []
         for index in sorted(partial):
             try:
-                # A truncated argument string shouldn't kill the turn; the tool layer validates anyway.
                 arguments = json.loads(partial[index]["arguments"] or "{}")
             except json.JSONDecodeError:
-                arguments = {}
+                arguments = {}  # unreachable for a complete reply; guarded above otherwise
             calls.append((partial[index]["name"], arguments))
         self.tool_calls_ready.emit(calls)
