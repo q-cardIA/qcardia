@@ -10,6 +10,7 @@ Classes:
     BaseSeries: A base class for handling sequences of DICOM images.
 """
 
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import List
@@ -181,13 +182,44 @@ class BaseSeries:
         # Read DICOM files and extract relevant information
         for file in files:
             the_ds = pydicom.dcmread(file)
+
+            if "PixelData" not in the_ds:
+                continue
+
             all_dicom_data.append(the_ds)
             slice_position.append(the_ds.ImagePositionPatient)
             slice_orientation.append(the_ds.ImageOrientationPatient)
-            if int(the_ds.NumberOfTemporalPositions) == 1:
+
+            # TemporalPositionIdentifier is absent in many cine exports. Within a
+            # slice, InstanceNumber increases with time for both slice-major and
+            # frame-major storage orders, and these values are only ever used as a
+            # per-slice sort key below, so it is an exact substitute here.
+            if int(getattr(the_ds, "NumberOfTemporalPositions", 0)) == 1:
                 temporal_positions.append(int(the_ds.InstanceNumber))
-            else:
+            elif hasattr(the_ds, "TemporalPositionIdentifier"):
                 temporal_positions.append(int(the_ds.TemporalPositionIdentifier))
+            else:
+                temporal_positions.append(int(the_ds.InstanceNumber))
+
+        if not all_dicom_data:
+            raise FileNotFoundError(f"No DICOM images with pixel data in {self.folder}")
+
+        # Scout/localiser images occasionally share a folder with the acquisition.
+        # They cannot be part of the same volume, and Rows/Columns below is taken
+        # from the first dataset, so keep a single image size.
+        all_shapes = [(ds.Rows, ds.Columns) for ds in all_dicom_data]
+        if len(set(all_shapes)) > 1:
+            dominant_shape = Counter(all_shapes).most_common(1)[0][0]
+            n_dropped = sum(1 for s in all_shapes if s != dominant_shape)
+            print(
+                f"    Warning: mixed image sizes in {self.folder}; keeping "
+                f"{dominant_shape[0]}x{dominant_shape[1]} and dropping {n_dropped} file(s)."
+            )
+            keep = [s == dominant_shape for s in all_shapes]
+            all_dicom_data = [d for d, k in zip(all_dicom_data, keep) if k]
+            slice_position = [p for p, k in zip(slice_position, keep) if k]
+            slice_orientation = [o for o, k in zip(slice_orientation, keep) if k]
+            temporal_positions = [t for t, k in zip(temporal_positions, keep) if k]
 
         # Gets unique positions from given positions and orientations.
         # assigns a slice index to each image based on its position.
@@ -314,12 +346,21 @@ class BaseSeries:
             ndarray: The pixel array for all slices/times.
         """
 
-        return np.asarray(
-            [
-                self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
-                for i in range(self.number_of_slices)
-            ]
-        )
+        arrays = [
+            self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
+            for i in range(self.number_of_slices)
+        ]
+        # Slices can end up with different frame counts (dropped or extra images);
+        # np.asarray would then build a ragged object array that fails downstream.
+        frame_counts = [len(a) for a in arrays]
+        if len(set(frame_counts)) > 1:
+            dominant_n = Counter(frame_counts).most_common(1)[0][0]
+            print(
+                f"    Warning: inconsistent frame counts across slices "
+                f"{sorted(set(frame_counts))}; trimming to {dominant_n} frames."
+            )
+            arrays = [a[:dominant_n] for a in arrays if len(a) >= dominant_n]
+        return np.asarray(arrays)
 
     def _reshape_array(self, pa: np.ndarray):
         """
@@ -373,8 +414,17 @@ class BaseSeries:
             dict: The configuration loaded from the specified path.
         """
 
-        config_path = wandb_run_path / "files" / "config-copy.yaml"
-        return yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+        for config_path in (
+            wandb_run_path / "config-copy.yaml",
+            wandb_run_path / "config.yaml",
+            wandb_run_path / "files" / "config-copy.yaml",
+            wandb_run_path / "files" / "config.yaml",
+        ):
+            if config_path.exists():
+                return yaml.load(config_path.open(), Loader=yaml.FullLoader)
+        raise FileNotFoundError(
+            f"No config-copy.yaml or config.yaml found in {wandb_run_path}"
+        )
 
     def _get_pixel_spacing(self):
         """
@@ -383,11 +433,18 @@ class BaseSeries:
         Returns:
             torch.Tensor: A tensor containing the pixel spacing values.
         """
+        meta = self.slice_data["slice01"]["meta_data"][0]
+        # SpacingBetweenSlices is the centre-to-centre distance, which is what a
+        # voxel volume needs; SliceThickness is the acquired slab and differs from
+        # it whenever there is a slice gap or overlap.
+        slice_spacing = getattr(meta, "SpacingBetweenSlices", None)
+        if slice_spacing is None:
+            slice_spacing = meta.SliceThickness
         return torch.tensor(
             [
-                float(self.slice_data["slice01"]["meta_data"][0].PixelSpacing[0]),
-                float(self.slice_data["slice01"]["meta_data"][0].PixelSpacing[1]),
-                float(self.slice_data["slice01"]["meta_data"][0].SliceThickness),
+                float(meta.PixelSpacing[0]),
+                float(meta.PixelSpacing[1]),
+                float(slice_spacing),
             ],
             dtype=torch.float32,
         )
