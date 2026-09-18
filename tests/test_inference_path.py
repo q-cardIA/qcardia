@@ -132,14 +132,29 @@ def test_la_vector_count_mismatch_is_rejected():
 
 @pytest.mark.parametrize("window", [2, 4, 6])
 @pytest.mark.parametrize("stride", [1, 2, 3])
-@pytest.mark.parametrize("max_range", [1, 2, 5, 12, 25, 30])
+@pytest.mark.parametrize("max_range", [2, 5, 12, 25, 30])
 def test_neighbour_indices_match_training(window, stride, max_range):
-    """Inference must pick the same context positions the DataModule picked."""
+    """Inference must pick the same context positions the DataModule picked.
+
+    max_range=1 is deliberately excluded: DataModule._get_neighbor_indices has
+    no bound on that case, and with max_range=1 every candidate index is 0 (%
+    1), always equal to a center_idx of 0 — so calling it here would hang the
+    test suite rather than fail it. See
+    test_neighbour_indices_terminate_when_every_candidate_is_the_centre and
+    ContextBuilder.get_neighbor_indices's own max_range <= 1 special case.
+    """
     builder = ContextBuilder()
     data_module = DataModule.__new__(DataModule)
     for center in range(max_range):
         assert builder.get_neighbor_indices(center, window, stride, max_range) == \
             data_module._get_neighbor_indices(center, window, stride, max_range)
+
+
+@pytest.mark.parametrize("window", [2, 4, 6])
+def test_neighbour_indices_max_range_one_returns_center_padding(window):
+    """DataModule hangs on max_range=1 (see above); assert our own contract."""
+    builder = ContextBuilder()
+    assert builder.get_neighbor_indices(0, window, stride=1, max_range=1) == [0] * window
 
 
 def test_neighbour_indices_terminate_when_every_candidate_is_the_centre():
