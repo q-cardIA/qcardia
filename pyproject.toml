@@ -6,6 +6,7 @@ dependencies = [
     "scikit-image==0.22.0",
     "opencv-python==4.10.0.84",
     "requests>=2.31.0",
+    "tqdm>=4.66.0",
     "qcardia-models@git+https://github.com/q-cardIA/qcardia-models",
     "qcardia-data@git+https://github.com/q-cardIA/qcardia-data"
 ]
