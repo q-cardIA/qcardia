@@ -1,8 +1,44 @@
 """Context window extraction for the spatiotemporal-context models."""
 
-from typing import List
+from typing import List, Tuple
 
 import torch
+
+
+def to_slice_major_layout(
+    flat_tensor: torch.Tensor, n_slices: int, n_frames: int
+) -> torch.Tensor:
+    """(Z*T, C, H, W) slice-major -> (1, C, H, W, Z, T), what context models need.
+
+    `_reshape_array` flattens a (Z, T, H, W) DICOM volume slice-major, i.e.
+    position `z * n_frames + t` is (slice z, frame t). `.view` only reinterprets
+    that layout correctly if the flattening was actually slice-major - reversed
+    (round-tripped by `from_slice_major_layout`) in
+    `test_reshape_round_trip_preserves_slice_major_order`.
+    """
+    _, channels, height, width = flat_tensor.shape
+    return (
+        flat_tensor.view(n_slices, n_frames, channels, height, width)
+        .permute(2, 3, 4, 0, 1)
+        .unsqueeze(0)
+    )
+
+
+def from_slice_major_layout(
+    context_tensor: torch.Tensor,
+) -> Tuple[torch.Tensor, int, int]:
+    """Inverse of `to_slice_major_layout`: (1, C, H, W, Z, T) -> (Z*T, C, H, W).
+
+    Returns the flattened tensor along with (n_slices, n_frames), since the
+    caller (`BaseSeries._run_model`) needs both to rebuild `original_shape`.
+    """
+    _, channels, height, width, n_slices, n_frames = context_tensor.shape
+    flat = (
+        context_tensor[0]
+        .permute(3, 4, 0, 1, 2)
+        .reshape(n_slices * n_frames, channels, height, width)
+    )
+    return flat, n_slices, n_frames
 
 
 class ContextBuilder:

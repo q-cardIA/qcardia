@@ -33,7 +33,9 @@ from qcardia.inference import (
     InferencePredictor,
     compute_la_vectors,
     load_model_from_config,
+    resolve_lax_model_path,
 )
+from qcardia.inference.context_builder import from_slice_major_layout, to_slice_major_layout
 
 
 class BaseSeries:
@@ -155,14 +157,10 @@ class BaseSeries:
 
         # (Z, T, H, W) as actually loaded — _get_array may trim frames, so this is
         # the authoritative shape, not self.number_of_slices/_temporal_positions.
-        # _reshape_array flattens it to (Z*T, 1, H, W), i.e. slice-major.
         n_slices, n_frames = (int(x) for x in self.inference_dict["original_shape"][:2])
         if config.needs_context():
-            _, channels, height, width = standardised_tensor.shape
-            standardised_tensor = (
-                standardised_tensor.view(n_slices, n_frames, channels, height, width)
-                .permute(2, 3, 4, 0, 1)
-                .unsqueeze(0)
+            standardised_tensor = to_slice_major_layout(
+                standardised_tensor, n_slices, n_frames
             )
 
         la_vectors = None
@@ -178,7 +176,7 @@ class BaseSeries:
             la_vectors = compute_la_vectors(
                 sax_dicom_dir=self.folder,
                 lax_dicom_dir=Path(lax_dicom_dir),
-                lax_model_path=self._resolve_lax_model_path(
+                lax_model_path=resolve_lax_model_path(
                     lax_model_path, raw_config, wandb_run_path
                 ),
                 n_samples=config.la_vector_dim,
@@ -192,12 +190,7 @@ class BaseSeries:
         model_output = predictor.predict(standardised_tensor, la_vectors=la_vectors)
 
         if config.needs_context():
-            _, nr_classes, height, width, n_slices, n_frames = model_output.shape
-            model_output = (
-                model_output[0]
-                .permute(3, 4, 0, 1, 2)
-                .reshape(n_slices * n_frames, nr_classes, height, width)
-            )
+            model_output, _, _ = from_slice_major_layout(model_output)
 
         rescale_model_output = self._invert_rescale_tensor(model_output)
         model_prediction = torch.argmax(
@@ -488,33 +481,6 @@ class BaseSeries:
                 return yaml.load(config_path.open(), Loader=yaml.FullLoader)
         raise FileNotFoundError(
             f"No config-copy.yaml or config.yaml found in {wandb_run_path}"
-        )
-
-    @staticmethod
-    def _resolve_lax_model_path(lax_model_path, raw_config, wandb_run_path: Path) -> Path:
-        """
-        Resolve the weights used to pre-segment the long-axis view.
-
-        Falls back to the conditioned model's own `weights_path`, the
-        unconditioned checkpoint it was initialised from. Configs written by a
-        run that started from scratch record that field as the string "none",
-        so an unset value arrives here as text rather than as None.
-        """
-        if lax_model_path is not None:
-            return Path(lax_model_path)
-
-        model_config = raw_config.get("model", {})
-        if isinstance(model_config, dict) and "value" in model_config:
-            model_config = model_config["value"]
-        weights_path = (
-            model_config.get("weights_path") if isinstance(model_config, dict) else None
-        )
-        if weights_path and str(weights_path).lower() not in ("none", "null", ""):
-            return Path(weights_path)
-        raise ValueError(
-            f"No long-axis segmentation model given, and the model at "
-            f"{wandb_run_path} records model.weights_path as {weights_path!r}, so "
-            f"there is nothing to fall back on. Pass lax_model_path explicitly."
         )
 
     def _get_pixel_spacing(self):
