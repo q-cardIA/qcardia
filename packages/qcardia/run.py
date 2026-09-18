@@ -10,10 +10,11 @@ from qcardia.cardisort import (
     load_series_datasets,
 )
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
-from qcardia.series import LGESeries
+from qcardia.series import CineSeries, LGESeries
 
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cardisort"
 LGE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-seg"
+CINE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cine-seg"
 PATH_TO_DATASET = Path.cwd() / "data copy"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
@@ -69,6 +70,25 @@ for patient in patient_list[:]:
         for sequence_dir, (sequence_name, _) in primary_dirs.items()
         if sequence_name == "CINE"
     ]
+
+    # LA-conditioned cine models read the 4CH view alongside the short axis.
+    cine_4ch_dir = next(
+        (
+            sequence_dir
+            for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
+            if sequence_name == "CINE" and plane_name == "4CH"
+        ),
+        None,
+    )
+    for cine_dir in cine_dirs:
+        _, plane_name = primary_dirs[cine_dir]
+        cine_seq = CineSeries(cine_dir)
+        cine_segmentation = cine_seq.predict_segmentation(
+            CINE_SEG_WANDB_RUN_PATH,
+            lax_dicom_dir=cine_4ch_dir if plane_name == "SAX" else None,
+        )
+        cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
+        print(f"  {cine_dir} -> {cine_segmentation.shape}")
 
     db_lge_sax_dirs = [
         sequence_dir
