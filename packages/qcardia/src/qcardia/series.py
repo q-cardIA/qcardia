@@ -71,6 +71,13 @@ class BaseSeries:
         self.apex_slice_num = 3
         self.rv_insertion_points = [[0, 0], [self.rows, 0]]
         self.lv_center_point = [[self.rows // 2, self.columns // 2]]
+        self._la_vectors = None
+
+    @property
+    def la_vectors(self) -> torch.Tensor | None:
+        """LA conditioning vectors computed by the last `predict_segmentation`
+        call, or None if that model wasn't LA-conditioned (or hasn't run yet)."""
+        return self._la_vectors
 
     def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
         """
