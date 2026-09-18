@@ -28,6 +28,12 @@ from skimage.measure import find_contours
 from torch.nn import functional as F
 
 import qcardia.utils as utils
+from qcardia.inference import (
+    InferenceConfig,
+    InferencePredictor,
+    compute_la_vectors,
+    load_model_from_config,
+)
 
 
 class BaseSeries:
@@ -99,41 +105,92 @@ class BaseSeries:
             seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
             nib.save(seg_nib, output_path / "segmentation.nii")
 
-    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
+    def _run_model(
+        self,
+        wandb_run_path: Path,
+        image_type: str = "pixel",
+        lax_dicom_dir: Path = None,
+        lax_model_path: Path = None,
+        withhold_la_conditioning: bool = False,
+    ) -> None:
         """
         Runs the model inference on preprocessed slices.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            image_type (str): Which cached array to segment ("pixel", "psir", ...).
+            lax_dicom_dir (Path): Long-axis (4CH) DICOM directory, required by
+                models trained with LA vector conditioning.
+            lax_model_path (Path): Weights used to pre-segment the long-axis view.
+                Defaults to the conditioned model's own `weights_path`.
+            withhold_la_conditioning (bool): Run a conditioned model without its
+                LA vectors on purpose, to measure how much they contribute.
+                Without this, doing so by omission raises.
         """
         preprocessed_slices = self._preproccess_slices(
             self._get_array(image_type=image_type)
         )
-        config = self._get_config(wandb_run_path)
+        raw_config = self._get_config(wandb_run_path)
+        config = InferenceConfig(raw_config)
 
-        self.inference_dict["target_pixdim"] = torch.tensor(
-            config["data"]["target_pixdim"]
-        )
-        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+        self.inference_dict["target_pixdim"] = torch.tensor(config.target_pixdim)
+        self.inference_dict["target_size"] = torch.tensor(config.target_size)
+        self.inference_dict["grid_sample_modes"] = [config.image_grid_sample_mode]
+        self.inference_dict["nr_output_classes"] = config.nr_classes
 
-        self.inference_dict["grid_sample_modes"] = [
-            config["data"]["image_grid_sample_mode"]
-        ]
-        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
-        the_model = UNet2d(
-            nr_input_channels=config["unet"]["nr_image_channels"],
-            channels_list=config["unet"]["channels_list"],
-            nr_output_classes=config["unet"]["nr_output_classes"],
-            nr_output_scales=config["unet"]["nr_output_scales"],
-        ).to("cpu")
-        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
-        the_model.load_state_dict(model_weights)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        the_model = load_model_from_config(raw_config, wandb_run_path, device=device)
 
         self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
             self._rescale_tensor(preprocessed_slices)
         )
         standardised_tensor = utils.standardise(rescaled_tensor)
-        model_output = self._forward_model(the_model, standardised_tensor)
+
+        # (Z, T, H, W) as actually loaded — _get_array may trim frames, so this is
+        # the authoritative shape, not self.number_of_slices/_temporal_positions.
+        # _reshape_array flattens it to (Z*T, 1, H, W), i.e. slice-major.
+        n_slices, n_frames = (int(x) for x in self.inference_dict["original_shape"][:2])
+        if config.needs_context():
+            _, channels, height, width = standardised_tensor.shape
+            standardised_tensor = (
+                standardised_tensor.view(n_slices, n_frames, channels, height, width)
+                .permute(2, 3, 4, 0, 1)
+                .unsqueeze(0)
+            )
+
+        la_vectors = None
+        self._la_vectors = None
+        if config.la_vector_integration and not withhold_la_conditioning:
+            if lax_dicom_dir is None:
+                raise ValueError(
+                    f"Model at {wandb_run_path} was trained with "
+                    f"la_vector_integration='{config.la_vector_integration}' but no "
+                    f"lax_dicom_dir was given. Pass the long-axis DICOM directory, or "
+                    f"use a model without LA conditioning."
+                )
+            la_vectors = compute_la_vectors(
+                sax_dicom_dir=self.folder,
+                lax_dicom_dir=Path(lax_dicom_dir),
+                lax_model_path=self._resolve_lax_model_path(
+                    lax_model_path, raw_config, wandb_run_path
+                ),
+                n_samples=config.la_vector_dim,
+                device=device,
+            )
+            self._la_vectors = la_vectors
+
+        predictor = InferencePredictor(
+            the_model, config, device=device, batch_size=self.batch_size
+        )
+        model_output = predictor.predict(standardised_tensor, la_vectors=la_vectors)
+
+        if config.needs_context():
+            _, nr_classes, height, width, n_slices, n_frames = model_output.shape
+            model_output = (
+                model_output[0]
+                .permute(3, 4, 0, 1, 2)
+                .reshape(n_slices * n_frames, nr_classes, height, width)
+            )
 
         rescale_model_output = self._invert_rescale_tensor(model_output)
         model_prediction = torch.argmax(
@@ -426,6 +483,33 @@ class BaseSeries:
             f"No config-copy.yaml or config.yaml found in {wandb_run_path}"
         )
 
+    @staticmethod
+    def _resolve_lax_model_path(lax_model_path, raw_config, wandb_run_path: Path) -> Path:
+        """
+        Resolve the weights used to pre-segment the long-axis view.
+
+        Falls back to the conditioned model's own `weights_path`, the
+        unconditioned checkpoint it was initialised from. Configs written by a
+        run that started from scratch record that field as the string "none",
+        so an unset value arrives here as text rather than as None.
+        """
+        if lax_model_path is not None:
+            return Path(lax_model_path)
+
+        model_config = raw_config.get("model", {})
+        if isinstance(model_config, dict) and "value" in model_config:
+            model_config = model_config["value"]
+        weights_path = (
+            model_config.get("weights_path") if isinstance(model_config, dict) else None
+        )
+        if weights_path and str(weights_path).lower() not in ("none", "null", ""):
+            return Path(weights_path)
+        raise ValueError(
+            f"No long-axis segmentation model given, and the model at "
+            f"{wandb_run_path} records model.weights_path as {weights_path!r}, so "
+            f"there is nothing to fall back on. Pass lax_model_path explicitly."
+        )
+
     def _get_pixel_spacing(self):
         """
         Get the pixel spacing of the slice data.
@@ -613,17 +697,33 @@ class CineSeries(BaseSeries):
     def __init__(self, folder: Path, batch_size: int = 50):
         super().__init__(folder, batch_size)
 
-    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+    def predict_segmentation(
+        self,
+        wandb_run_path: Path,
+        lax_dicom_dir: Path = None,
+        lax_model_path: Path = None,
+        withhold_la_conditioning: bool = False,
+    ) -> np.ndarray:
         """
         Predict the segmentation for the DICOM data using the specified model.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            lax_dicom_dir (Path): Long-axis (4CH) DICOM directory, required by
+                models trained with LA vector conditioning.
+            lax_model_path (Path): Weights used to pre-segment the long-axis view.
+            withhold_la_conditioning (bool): Deliberately run a conditioned model
+                without its LA vectors, to measure their contribution.
 
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path)
+        self._run_model(
+            wandb_run_path,
+            lax_dicom_dir=lax_dicom_dir,
+            lax_model_path=lax_model_path,
+            withhold_la_conditioning=withhold_la_conditioning,
+        )
         self._lv = 1.0 * (self._segmentation_prediction == 1)
         self._myo = 1.0 * (self._segmentation_prediction == 2)
         self._rv = 1.0 * (self._segmentation_prediction == 3)
