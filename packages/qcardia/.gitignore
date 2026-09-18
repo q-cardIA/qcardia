@@ -137,3 +137,4 @@ dmypy.json
 wandb/
 *output*/
 *result*/
+weights/
