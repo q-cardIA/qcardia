@@ -7,8 +7,13 @@ dependencies = [
     "opencv-python==4.10.0.84",
     "requests>=2.31.0",
     "tqdm>=4.66.0",
-    "qcardia-models@git+https://github.com/q-cardIA/qcardia-models",
-    "qcardia-data@git+https://github.com/q-cardIA/qcardia-data"
+    # ContextUNet2d/is_transformer_model (context-unet) and the LA-SAx intersection
+    # geometry (context-la-sampling) haven't landed on either package's main branch
+    # yet. Both imports are lazy (see qcardia.inference), so a plain-UNet install
+    # against main still works, but LA-conditioned/context-aware inference needs
+    # these refs until the branches are merged upstream.
+    "qcardia-models@git+https://github.com/q-cardIA/qcardia-models@context-unet",
+    "qcardia-data@git+https://github.com/q-cardIA/qcardia-data@context-la-sampling"
 ]
 
 [build-system]

@@ -16,6 +16,7 @@ Entry point:
     # would look like a successful run of a different model.
 """
 
+import logging
 import numpy as np
 import torch
 import pydicom
@@ -23,13 +24,7 @@ from pathlib import Path
 from natsort import natsorted
 from typing import Tuple
 
-
-from qcardia_data.pipeline.la_sa_intersection.geometry_utils import (
-    calculate_intersection_line,
-    find_line_segment_bounds,
-    create_intersection_mask,
-    get_slice_plane_parameters,
-)
+logger = logging.getLogger(__name__)
 
 
 # ── public entry point ───────────────────────────────────────────────────────
@@ -74,11 +69,10 @@ def compute_la_vectors(
     if not lax_dicom_dir.exists():
         raise FileNotFoundError(f"4CH folder not found: {lax_dicom_dir}")
 
-    print(f"[la_conditioning] Computing LA vectors")
-    print(f"  SAx dir : {sax_dicom_dir}")
-    print(f"  4CH dir : {lax_dicom_dir}")
-    print(f"  Model   : {lax_model_path}")
-    print(f"  Samples : {n_samples}")
+    logger.info(
+        "Computing LA vectors: sax=%s lax=%s model=%s samples=%d",
+        sax_dicom_dir, lax_dicom_dir, lax_model_path, n_samples,
+    )
 
     # Resolve the actual DICOM folders (CINE_4CH/ may contain a subdirectory).
     # sax_dicom_dir is already the resolved DICOM folder (set from CineSeries.folder).
@@ -88,15 +82,17 @@ def compute_la_vectors(
     if resolved_lax is None:
         raise FileNotFoundError(f"No DICOM files found under {lax_dicom_dir}")
     if resolved_lax != lax_dicom_dir:
-        print(f"  4CH resolved: {resolved_lax}")
+        logger.debug("4CH resolved to %s", resolved_lax)
     lax_dicom_dir = resolved_lax
 
     # Step 1 — build affines
     sax_affine, sax_shape, sax_frames = _build_volume_affine(sax_dicom_dir)
     lax_affine, lax_shape, lax_frames = _build_volume_affine(lax_dicom_dir)
     Z, T = sax_shape[2], sax_frames
-    print(f"  SAx geometry: shape={sax_shape}, frames={sax_frames}")
-    print(f"  4CH geometry: shape={lax_shape}, frames={lax_frames}")
+    logger.debug(
+        "SAx geometry: shape=%s frames=%d | 4CH geometry: shape=%s frames=%d",
+        sax_shape, sax_frames, lax_shape, lax_frames,
+    )
 
     # Step 2 — segment 4CH
     lax_seg = _segment_lax(lax_dicom_dir, lax_model_path, device)
@@ -107,7 +103,9 @@ def compute_la_vectors(
     # Fallback: if still only one frame, broadcast to match SAx frame count
     if lax_seg.shape[0] == 1 and T > 1:
         lax_seg = np.repeat(lax_seg, T, axis=0)
-    print(f"  4CH seg shape: {lax_seg.shape}  labels: {np.unique(lax_seg).tolist()}")
+    logger.debug(
+        "4CH segmentation shape=%s labels=%s", lax_seg.shape, np.unique(lax_seg).tolist()
+    )
 
     # Step 3 — intersection masks
     H_lax, W_lax = lax_shape[0], lax_shape[1]
@@ -115,12 +113,18 @@ def compute_la_vectors(
         sax_affine, sax_shape, lax_affine, (H_lax, W_lax, lax_shape[2])
     )
     n_valid = int((intersection_masks.sum(axis=(1, 2)) > 0).sum())
-    print(f"  Intersection masks: {Z} slices, {n_valid} with valid intersection")
+    logger.info("Intersection masks: %d/%d SAx slices have a valid intersection", n_valid, Z)
+    if n_valid == 0:
+        logger.warning(
+            "No SAx slice intersects the 4CH plane; every LA vector will be all-zero."
+        )
 
     # Step 4 — sample vectors
     la_vectors = _sample_vectors(lax_seg, intersection_masks, n_samples)
-    print(f"  LA vectors tensor: {la_vectors.shape}  "
-          f"non-zero: {(la_vectors != 0).float().mean():.1%}")
+    logger.debug(
+        "LA vectors tensor=%s non-zero=%.1f%%",
+        tuple(la_vectors.shape), 100 * (la_vectors != 0).float().mean().item(),
+    )
 
     return la_vectors
 
@@ -218,7 +222,7 @@ def _segment_lax(
     if actual_dir is None:
         raise FileNotFoundError(f"No DICOM data found under {lax_dicom_dir}")
 
-    print(f"  [la_conditioning] Segmenting 4CH from: {actual_dir}")
+    logger.debug("Segmenting 4CH from %s", actual_dir)
     series = CineSeries(actual_dir)
     seg = series.predict_segmentation(model_path)
     # seg: (Z_lax, T, H, W)  — for 4CH, Z_lax == 1
@@ -240,6 +244,18 @@ def _compute_intersection_masks(
     Returns:
         masks: (Z_sax, H_lax, W_lax) uint8  — 1 = on intersection line
     """
+    # Lazy: only LA-conditioned inference needs qcardia-data's LA/SAx intersection
+    # geometry, which (as of this writing) lives on its `context-la-sampling`
+    # branch, not on qcardia-data's main. Importing here, rather than at module
+    # load, keeps plain and context-aware-without-LA inference working even when
+    # only the published qcardia-data is installed.
+    from qcardia_data.pipeline.la_sa_intersection.geometry_utils import (
+        calculate_intersection_line,
+        create_intersection_mask,
+        find_line_segment_bounds,
+        get_slice_plane_parameters,
+    )
+
     H_lax, W_lax, _ = lax_shape
     Z_sax = sax_shape[2]
 
