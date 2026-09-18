@@ -22,7 +22,6 @@ from pathlib import Path
 from qcardia.series import CineSeries
 from qcardia.utils import get_data_directory
 
-LA_CHAMBERS = ("CINE_2CH", "CINE_3CH", "CINE_4CH")
 SAX_CHAMBERS = ("CINE_SAX",)
 
 
@@ -46,7 +45,7 @@ def parse_args():
     parser.add_argument("--lax-model", type=Path, default=None,
                         help="Weights used to pre-segment the long-axis view. "
                              "Defaults to the conditioned model's weights_path.")
-    parser.add_argument("--lvis", action="store_true",
+    parser.add_argument("--la-ablation", action="store_true",
                         help="Also segment without LA conditioning, to measure "
                              "how much the LA vectors change the result.")
     parser.add_argument("--batch-size", type=int, default=50)
@@ -92,8 +91,8 @@ def segment_view(args, chamber: str, output_base: Path) -> Path:
     }, indent=2))
     print(f"  masks    : {seg_dir}")
 
-    if args.lvis and is_sax and series._la_vectors is not None:
-        print("  lvis     : re-segmenting with LA conditioning withheld")
+    if args.la_ablation and is_sax and series.la_vectors is not None:
+        print("  ablation : re-segmenting with LA conditioning withheld")
         series.predict_segmentation(args.model, withhold_la_conditioning=True)
         series.save_predictions(output_base / f"{chamber}_no_la_segmentation")
         series._segmentation_prediction = segmentation
