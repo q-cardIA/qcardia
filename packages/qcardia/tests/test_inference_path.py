@@ -14,8 +14,12 @@ import pytest
 import torch
 
 from qcardia.inference.config_handler import InferenceConfig
-from qcardia.inference.context_builder import ContextBuilder
-from qcardia.inference.model_loader import determine_model_type
+from qcardia.inference.context_builder import (
+    ContextBuilder,
+    from_slice_major_layout,
+    to_slice_major_layout,
+)
+from qcardia.inference.model_loader import determine_model_type, resolve_lax_model_path
 from qcardia.inference.predictor import InferencePredictor
 
 from qcardia_data.pipeline.data_module import DataModule
@@ -186,21 +190,24 @@ def test_context_order_is_target_then_spatial_then_temporal():
 # --- (slice, frame) ordering through the reshape ----------------------------
 
 def test_reshape_round_trip_preserves_slice_major_order():
-    """series._run_model flattens (Z,T,H,W) slice-major and must invert exactly."""
+    """series._run_model's to_/from_slice_major_layout must invert exactly.
+
+    Calls the real functions rather than reimplementing the reshape math, so a
+    change to either one is actually caught here.
+    """
     n_slices, n_frames, channels, height, width = 5, 7, 1, 4, 3
     flat = torch.arange(
         n_slices * n_frames * channels * height * width, dtype=torch.float32
     ).reshape(n_slices * n_frames, channels, height, width)
 
-    six = (flat.view(n_slices, n_frames, channels, height, width)
-               .permute(2, 3, 4, 0, 1).unsqueeze(0))
+    six = to_slice_major_layout(flat, n_slices, n_frames)
     assert six.shape == (1, channels, height, width, n_slices, n_frames)
     for z in range(n_slices):
         for t in range(n_frames):
             assert torch.equal(six[0, :, :, :, z, t], flat[z * n_frames + t])
 
-    back = six[0].permute(3, 4, 0, 1, 2).reshape(
-        n_slices * n_frames, channels, height, width)
+    back, back_n_slices, back_n_frames = from_slice_major_layout(six)
+    assert (back_n_slices, back_n_frames) == (n_slices, n_frames)
     assert torch.equal(back, flat)
 
 
@@ -224,16 +231,12 @@ def test_unset_lax_weights_path_is_rejected(recorded):
     Treating that as a path makes the long-axis segmentation fail deeper in,
     where the original code swallowed it and ran without conditioning.
     """
-    from qcardia.series import BaseSeries
-
     config = {"model": {"weights_path": recorded}}
     with pytest.raises(ValueError, match="nothing to fall back on"):
-        BaseSeries._resolve_lax_model_path(None, config, Path("run"))
+        resolve_lax_model_path(None, config, Path("run"))
 
 
 def test_lax_weights_path_is_used_when_set():
-    from qcardia.series import BaseSeries
-
     config = {"model": {"value": {"weights_path": "/weights/best_model.pt"}}}
-    assert BaseSeries._resolve_lax_model_path(None, config, Path("run")) == \
+    assert resolve_lax_model_path(None, config, Path("run")) == \
         Path("/weights/best_model.pt")

@@ -1,7 +1,7 @@
 """Model instantiation from a run config."""
 
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -82,3 +82,31 @@ def load_model_from_config(
         torch.load(weights_path, map_location=device, weights_only=False)
     )
     return model.to(device).eval()
+
+
+def resolve_lax_model_path(
+    lax_model_path: Optional[Path], raw_config: Dict[str, Any], wandb_run_path: Path
+) -> Path:
+    """Resolve the weights used to pre-segment the long-axis view.
+
+    Falls back to the conditioned model's own `weights_path`, the
+    unconditioned checkpoint it was initialised from. Configs written by a
+    run that started from scratch record that field as the string "none",
+    so an unset value arrives here as text rather than as None.
+    """
+    if lax_model_path is not None:
+        return Path(lax_model_path)
+
+    model_config = raw_config.get("model", {})
+    if isinstance(model_config, dict) and "value" in model_config:
+        model_config = model_config["value"]
+    weights_path = (
+        model_config.get("weights_path") if isinstance(model_config, dict) else None
+    )
+    if weights_path and str(weights_path).lower() not in ("none", "null", ""):
+        return Path(weights_path)
+    raise ValueError(
+        f"No long-axis segmentation model given, and the model at "
+        f"{wandb_run_path} records model.weights_path as {weights_path!r}, so "
+        f"there is nothing to fall back on. Pass lax_model_path explicitly."
+    )
