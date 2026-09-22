@@ -22,7 +22,7 @@ import torch
 import yaml
 from natsort import natsorted
 from qcardia_models.models import UNet2d
-from scipy.ndimage import binary_fill_holes, distance_transform_edt
+from scipy.ndimage import label as connected_components
 from skimage.measure import find_contours
 from torch.nn import functional as F
 
@@ -75,21 +75,25 @@ class BaseSeries:
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path)
+        self._segmentation_prediction, self._segmentation_logits = self._run_model(
+            wandb_run_path
+        )
         return self._segmentation_prediction
 
-    def save_predictions(self, output_path: Path) -> None:
+    def save_predictions(self, output_path: Path, prediction: np.ndarray = None) -> None:
         """
         Saves the segmentation predictions to the specified path.
 
         Args:
             output_path (Path): The path to save the segmentation predictions.
+            prediction (np.ndarray): The array to save. Defaults to the most
+                recent `_segmentation_prediction`.
         """
         output_path.mkdir(parents=True, exist_ok=True)
+        if prediction is None:
+            prediction = self._segmentation_prediction
 
-        seg_prediction = np.transpose(self._segmentation_prediction).astype(np.uint8)[
-            ..., ::-1
-        ]
+        seg_prediction = np.transpose(prediction).astype(np.uint8)[..., ::-1]
         if len(seg_prediction.shape) == 4:
             for i in range(seg_prediction.shape[-2]):
                 seg_nib = nib.Nifti1Image(seg_prediction[..., i, :], np.eye(4))
@@ -98,12 +102,17 @@ class BaseSeries:
             seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
             nib.save(seg_nib, output_path / "segmentation.nii")
 
-    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
+    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel"):
         """
         Runs the model inference on preprocessed slices.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: The hard-labeled segmentation
+                prediction, and the per-class logits, both in original image
+                space.
         """
         preprocessed_slices = self._preproccess_slices(
             self._get_array(image_type=image_type)
@@ -139,7 +148,9 @@ class BaseSeries:
             rescale_model_output, dim=1, keepdim=True
         ).float()
 
-        self._segmentation_prediction = self._postprocess_output(model_prediction)
+        segmentation_prediction = self._postprocess_output(model_prediction)
+        segmentation_logits = self._pad_to_original_shape(rescale_model_output)
+        return segmentation_prediction, segmentation_logits
 
     def _load_data(self):
         """
@@ -559,6 +570,39 @@ class BaseSeries:
             self.inference_dict["original_shape"].tolist()
         )
 
+    def _pad_to_original_shape(self, tensor: torch.Tensor) -> np.ndarray:
+        """
+        Places a (number_of_slices, nr_classes, source_H, source_W) tensor
+        into a zero-padded array at the original (pre-border-stripped) image
+        shape, using the border offsets recorded during preprocessing.
+
+        Args:
+            tensor (torch.Tensor): Per-class model output at source resolution.
+
+        Returns:
+            np.ndarray: The tensor placed in the original image shape.
+        """
+        original_shape_output = np.zeros(
+            (
+                self.inference_dict["number_of_slices"],
+                tensor.shape[1],
+                int(self.inference_dict["original_shape"][-2]),
+                int(self.inference_dict["original_shape"][-1]),
+            ),
+            dtype=np.float32,
+        )
+        original_shape_output[
+            ...,
+            self.inference_dict["border_indices"][0] : self.inference_dict[
+                "border_indices"
+            ][1],
+            self.inference_dict["border_indices"][2] : self.inference_dict[
+                "border_indices"
+            ][3],
+        ] = tensor.numpy().astype(np.float32)
+
+        return original_shape_output
+
 
 class CineSeries(BaseSeries):
 
@@ -575,7 +619,9 @@ class CineSeries(BaseSeries):
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path)
+        self._segmentation_prediction, self._segmentation_logits = self._run_model(
+            wandb_run_path
+        )
         self._lv = 1.0 * (self._segmentation_prediction == 1)
         self._myo = 1.0 * (self._segmentation_prediction == 2)
         self._rv = 1.0 * (self._segmentation_prediction == 3)
@@ -841,174 +887,7 @@ class LGESeries(BaseSeries):
                         f"slice{i+1:02}"
                     ]["pixel_array"][j]
 
-    def _rescale_image(self, image, dimension_scale_factor):
-
-        scale_t = utils.t_2d_scale(dimension_scale_factor)
-        grid_size = [
-            1,
-            1,
-            int(self.inference_dict["target_size"][0]),
-            int(self.inference_dict["target_size"][1]),
-        ]
-
-        grid = F.affine_grid(
-            theta=torch.repeat_interleave(
-                scale_t[:-1, :].unsqueeze(0),
-                1,
-                dim=0,
-            ),
-            size=grid_size,
-            align_corners=False,
-        )
-        return F.grid_sample(
-            image,
-            grid,
-            align_corners=False,
-            mode="nearest",
-            padding_mode="border",
-        )[0, 0, ...]
-
-    def _find_landmark(self, quadrant_image):
-
-        pred_r = (quadrant_image == 1) + (quadrant_image == 2)
-        pred_r = binary_fill_holes(pred_r)
-        distance_r = distance_transform_edt(pred_r)
-        distance_r[distance_r != 1] = 0
-
-        pred_l = (quadrant_image == 2) + (quadrant_image == 3)
-        pred_l = binary_fill_holes(pred_l)
-        distance_l = distance_transform_edt(pred_l)
-        distance_l[distance_l != 1] = 0
-
-        # Find the intersection of the two lines to find the center of the label
-        list_l = np.where(distance_l == 1)
-        list_r = np.where(distance_r == 1)
-
-        skip_l = int(len(list_l[0]) / 5)
-        skip_r = int(len(list_r[0]) / 5)
-
-        b_l = 1
-        b_r = -1
-        a_l = np.mean(list_l[0][skip_l:-skip_l]) - b_l * np.mean(
-            list_l[1][skip_l:-skip_l]
-        )
-        a_r = np.mean(list_r[0][skip_r:-skip_r]) - b_r * np.mean(
-            list_r[1][skip_r:-skip_r]
-        )
-
-        inter_r = int((a_l - a_r) / (b_r - b_l))
-        inter_c = int(a_l + b_l * inter_r)
-
-        return [inter_r, inter_c]
-
-    def _run_crop_model(
-        self, wandb_run_path: Path, center_image: np.ndarray, image_type: str = "pixel"
-    ) -> None:
-        """
-        Runs the model inference on preprocessed slices.
-
-        This method loads the model weights, preprocesses the input data, runs the model and
-        postprocesses the output.
-
-        Args:
-            wandb_run_path (Path): The path to the WandB run directory.
-        """
-        preprocessed_slices = self._preproccess_slices(
-            self._get_array(image_type=image_type)
-        )
-
-        preprocessed_center_image = center_image[
-            self.inference_dict["border_indices"][0] : self.inference_dict[
-                "border_indices"
-            ][1],
-            self.inference_dict["border_indices"][2] : self.inference_dict[
-                "border_indices"
-            ][3],
-        ]
-        config = self._get_config(wandb_run_path)
-
-        # Load the model weights
-        self.inference_dict["target_pixdim"] = torch.tensor(
-            config["data"]["target_pixdim"]
-        )
-        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
-        self.inference_dict["original_target_size"] = torch.tensor(
-            config["data"]["target_size"]
-        )
-        self.inference_dict["grid_sample_modes"] = [
-            config["data"]["image_grid_sample_mode"]
-        ]
-        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
-        the_model = UNet2d(
-            nr_input_channels=config["unet"]["nr_image_channels"],
-            channels_list=config["unet"]["channels_list"],
-            nr_output_classes=config["unet"]["nr_output_classes"],
-            nr_output_scales=config["unet"]["nr_output_scales"],
-        ).to("cpu")
-        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
-        the_model.load_state_dict(model_weights)
-
-        self.inference_dict["target_size"] = torch.tensor([480, 480]).to(torch.int32)
-
-        # Preprocess the input data
-        self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
-            self._rescale_tensor(preprocessed_slices)
-        )
-
-        rescale_center_image = self._rescale_image(
-            torch.Tensor(preprocessed_center_image[np.newaxis, np.newaxis, ...]),
-            self.inference_dict["dimension_scale_factor"],
-        )
-        center_point = self._find_landmark(rescale_center_image)
-
-        standardised_tensor = utils.standardise(rescaled_tensor)
-        # Crop the input data
-        standardised_tensor = standardised_tensor[
-            :,
-            :,
-            center_point[1]
-            - self.inference_dict["original_target_size"][0] // 2 : center_point[1]
-            + self.inference_dict["original_target_size"][0] // 2,
-            center_point[0]
-            - self.inference_dict["original_target_size"][1] // 2 : center_point[0]
-            + self.inference_dict["original_target_size"][1] // 2,
-        ]
-
-        # Run the model
-        model_output = self._forward_model(the_model, standardised_tensor)
-
-        model_prediction = torch.argmax(model_output, dim=1, keepdim=True).float()
-
-        full_size_prediction = torch.zeros(
-            self.inference_dict["number_of_slices"],
-            1,
-            self.inference_dict["target_size"][0],
-            self.inference_dict["target_size"][1],
-        )
-
-        full_size_prediction[
-            :,
-            :,
-            center_point[1]
-            - self.inference_dict["original_target_size"][0] // 2 : center_point[1]
-            + self.inference_dict["original_target_size"][0] // 2,
-            center_point[0]
-            - self.inference_dict["original_target_size"][1] // 2 : center_point[0]
-            + self.inference_dict["original_target_size"][1] // 2,
-        ] = model_prediction
-
-        # Postprocess the output
-        rescale_model_prediction = self._invert_rescale_tensor(
-            full_size_prediction, mode="nearest"
-        )
-
-        self._segmentation_prediction = self._postprocess_output(
-            rescale_model_prediction
-        )
-
-    def predict_segmentation(
-        self, wandb_run_path: Path, center_image: np.ndarray = None
-    ) -> np.ndarray:
+    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
         """
         Predict the segmentation for the DICOM data using the specified model.
 
@@ -1018,9 +897,103 @@ class LGESeries(BaseSeries):
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        if center_image is not None:
-            self._run_crop_model(wandb_run_path, center_image, image_type="psir")
-        else:
-            self._run_model(wandb_run_path, image_type="psir")
-
+        self._segmentation_prediction, self._segmentation_logits = self._run_model(
+            wandb_run_path, image_type="psir"
+        )
         return self._segmentation_prediction
+
+    def predict_rv_insertion_points(self, wandb_run_path: Path) -> None:
+        """
+        Run the RV insertion point model. Stored separately from
+        `_segmentation_prediction`/`_segmentation_logits` so it can coexist
+        with a scar segmentation already predicted on this instance, rather
+        than overwriting it.
+
+        Args:
+            wandb_run_path (Path): The path to the WandB run directory.
+        """
+        self._rv_insertion_prediction, self._rv_insertion_logits = self._run_model(
+            wandb_run_path, image_type="psir"
+        )
+
+    def get_rv_insertion_points(self) -> List[List]:
+        """
+        Extract RV insertion point landmarks from the most recent RV insertion
+        point prediction. Intended to be called after
+        `predict_rv_insertion_points`, whose foreground classes (1, 2, 3)
+        each mark a distinct landmark rather than an anatomical region.
+
+        Each landmark is located as a soft-argmax restricted to that class's
+        primary connected component: the hard-labeled region picks out which
+        blob is the real detection (discarding smaller, disconnected stray
+        regions elsewhere in the slice), and the per-pixel class
+        probabilities (softmax of the model's logits) weight a mean over
+        that component's pixel coordinates, giving sub-pixel precision and
+        downweighting low-confidence pixels within it.
+
+        Returns:
+            List[List]: One entry per slice, each a list of 3 points (one per
+                foreground class) as [row, col] pixel coordinates in the
+                segmentation array, or None for a slice where that class
+                wasn't predicted anywhere.
+        """
+        probabilities = torch.softmax(
+            torch.from_numpy(self._rv_insertion_logits), dim=1
+        ).numpy()
+
+        landmark_points = []
+        for slice_idx, slice_probabilities in enumerate(probabilities):
+            height, width = slice_probabilities.shape[-2:]
+            rows = np.arange(height)[:, None]
+            cols = np.arange(width)[None, :]
+            slice_labels = self._rv_insertion_prediction[slice_idx]
+
+            slice_points = []
+            for class_idx in (1, 2, 3):
+                class_probabilities = slice_probabilities[class_idx]
+                class_mask = slice_labels == class_idx
+                if not class_mask.any():
+                    slice_points.append(None)
+                    continue
+
+                components, nr_components = connected_components(class_mask)
+                if nr_components > 1:
+                    component_weights = [
+                        class_probabilities[components == component].sum()
+                        for component in range(1, nr_components + 1)
+                    ]
+                    primary_component = np.argmax(component_weights) + 1
+                    class_mask = components == primary_component
+
+                weights = np.where(class_mask, class_probabilities, 0)
+                total_weight = weights.sum()
+                row = float((weights * rows).sum() / total_weight)
+                col = float((weights * cols).sum() / total_weight)
+                slice_points.append([row, col])
+            landmark_points.append(slice_points)
+        return landmark_points
+
+    def save_rv_insertion_points(
+        self, output_path: Path, points: List[List] = None
+    ) -> None:
+        """
+        Save the RV insertion landmark points as a sparse label volume (each
+        landmark marked at a single voxel by its class index), in the same
+        image space as the segmentation prediction.
+
+        Args:
+            output_path (Path): The path to save the landmark points to.
+            points (List[List]): Precomputed landmark points, as returned by
+                `get_rv_insertion_points`. Defaults to computing them fresh.
+        """
+        if points is None:
+            points = self.get_rv_insertion_points()
+
+        points_array = np.zeros_like(self._rv_insertion_prediction)
+        for slice_idx, slice_points in enumerate(points):
+            for class_idx, point in zip((1, 2, 3), slice_points):
+                if point is not None:
+                    row, col = point
+                    points_array[slice_idx, int(round(row)), int(round(col))] = class_idx
+
+        self.save_predictions(output_path, points_array)

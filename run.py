@@ -20,30 +20,16 @@ from qcardia.series import CineSeries, LGESeries
 
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cardisort"
 LGE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-seg"
+LGE_RV_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-insertion"
 CINE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cine-seg"
-PATH_TO_DATASET = Path.cwd() / "job-test"
+PATH_TO_DATASET = Path.cwd() / "lge-data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
-
-_last_line100_time = None
 
 cardisort_model, cardisort_config = load_cardisort_model(CARDISORT_WANDB_RUN_PATH)
 
 for patient in patient_list[:]:
     sequence_dirs = get_sequence_dirs(patient)
-
-    print(f"  available series for {patient.name}:")
-    for sequence_dir in sequence_dirs:
-        datasets = load_series_datasets(sequence_dir)
-        series_description = str(getattr(datasets[0], "SeriesDescription", "")) if datasets else ""
-        print(f"    {sequence_dir.name} -> {series_description!r}")
-
-    # Some scanners (seen: Siemens) export several reconstructions of the
-    # same acquisition as separate directories (magnitude/PSIR, or a
-    # perfusion acquisition's AIF/MOCO/LR/HR/SEG/MAP variants). Group those
-    # together first so each acquisition is classified once, from frames
-    # pooled across its variants, rather than as several separate
-    # (and possibly inconsistent) candidates.
     groups = group_reconstruction_variants(sequence_dirs)
 
     group_classifications = {}
@@ -87,7 +73,7 @@ for patient in patient_list[:]:
             continue
 
         sequence_name, plane_name = class_label
-        if not (sequence_name == "CINE" or "LGE" in sequence_name or sequence_name == "PERF"):
+        if not (sequence_name == "CINE" or sequence_name == "DBLGE"  or sequence_name == "PERF"):
             continue
 
         candidates = [
@@ -95,18 +81,7 @@ for patient in patient_list[:]:
             for representative in representative_by_name.values()
         ]
         result = disambiguate_duplicates(class_label, candidates)
-        # for assessment in result["assessments"]:
-        #     print(
-        #         f"  {class_label}: {assessment['series']} -> "
-        #         f"{assessment['role']} ({assessment['reasoning']})"
-        #     )
         primary_dirs[representative_by_name[result["primary_series"]]] = class_label
-
-    print(f"  primary dirs for {patient.name}:")
-    for sequence_dir, class_label in primary_dirs.items():
-        datasets = load_series_datasets(sequence_dir)
-        series_description = str(getattr(datasets[0], "SeriesDescription", "")) if datasets else ""
-        print(f"    {class_label}: {sequence_dir.name} -> {series_description!r}")
 
     # cine_dirs = [
     #     sequence_dir
@@ -120,11 +95,11 @@ for patient in patient_list[:]:
     # cine_segmentation = cine_seq.predict_segmentation(CINE_SEG_WANDB_RUN_PATH)
     # cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
 
-    # # db_lge_sax_dirs = [
-    # #     sequence_dir
-    # #     for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
-    # #     if sequence_name == "DBLGE" and plane_name == "SAX"
-    # # ]
+    db_lge_sax_dirs = [
+        sequence_dir
+        for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
+        if sequence_name == "DBLGE" and plane_name == "SAX"
+    ]
 
     # # perf_sax_dirs = [
     # #     sequence_dir
@@ -135,17 +110,26 @@ for patient in patient_list[:]:
     # #     print(f"{perf_dir}")
 
 
-    # # for lge_dir in db_lge_sax_dirs:
-    # #     try:
-    # #         lge_seq = LGESeries(lge_dir)
-    # #         lge_segmentation = lge_seq.predict_segmentation(
-    # #             LGE_SEG_WANDB_RUN_PATH
-    # #         )
-    # #         lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
-    # #         print(f"{lge_dir}")
-    # #     except Exception as e:
-    # #         print(f"  ! failed to segment {lge_dir}: {e!r}")
-    # #         continue
+    for lge_dir in db_lge_sax_dirs:
+        try:
+            lge_seq = LGESeries(lge_dir)
+            lge_segmentation = lge_seq.predict_segmentation(
+                LGE_SEG_WANDB_RUN_PATH
+            )
+
+            lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
+
+            lge_seq.predict_rv_insertion_points(LGE_RV_WANDB_RUN_PATH)
+            rv_insertion_points = lge_seq.get_rv_insertion_points()
+            lge_seq.save_rv_insertion_points(
+                Path(f"{lge_dir}_rv_insertion"), rv_insertion_points
+            )
+            print(f"  rv insertion points for {lge_dir.name}: {rv_insertion_points}")
+
+            print(f"{lge_dir}")
+        except Exception as e:
+            print(f"  ! failed to segment {lge_dir}: {e!r}")
+            continue
 
     # mid_slice = cine_seq.number_of_slices // 2 +2
     # time_phase = 7  # 5th time phase, 0-indexed
