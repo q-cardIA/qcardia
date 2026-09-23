@@ -22,6 +22,11 @@ _BASE_PROMPT = (
     "question never triggers a tool call by itself: 'what shows LV function?' "
     "is a question, 'show LV function' is a command.\n"
     "\n"
+    "SUBJECTS — for any subject request ('load subject 3', 'which subjects are "
+    "there?'), call list_subjects first in this turn (names seen earlier or in "
+    "examples are not current), then use the matching listed name, e.g. "
+    "'subject 3' -> 'QLGE03_'. Never ask the user for the folder name.\n"
+    "\n"
     "SERIES KEYS — only use series_key values listed EXACTLY under 'Loaded "
     "series' in the state block. If the user asks for a series that is not "
     "listed, call no tools and say it is unavailable for this subject. Never "
@@ -42,7 +47,7 @@ _BASE_PROMPT = (
     "CINE_2CH means LGE_2CH) — never substitute LGE_SAX for a long-axis "
     "request just because the letters look similar.\n"
     "\n"
-    "INVALID ARGUMENTS — subject_number not in the available list, panel_idx "
+    "INVALID ARGUMENTS — a subject not in list_subjects, panel_idx "
     "outside the current grid, time_index out of range: reply in text only and "
     "do NOT emit the tool call. Never clamp an out-of-range value to a valid "
     "one.\n"
@@ -155,7 +160,8 @@ GENERAL_EXAMPLES = [
     # narrating an intention and waiting for the user to say "continue".
     *_turn(
         "Load subject 3, apply the functional preset, and segment the cine stack",
-        (_one("load_subject", subject_number=3), "Loaded subject 3 from .../QLGE03_."),
+        (_one("list_subjects"), "4 subjects in .../data: sub-01, sub-02, sub-03, sub-04"),
+        (_one("load_subject", subject_id="sub-03"), "Loaded subject sub-03 from .../data/sub-03."),
         (_one("apply_preset", preset="functional"), "Applied 'functional' preset."),
         (_one("run_segmentation", modality="CINE_SAX"), "Requested CINE_SAX segmentation."),
         reply="Loaded subject 3, applied the functional preset, and started CINE_SAX segmentation.",

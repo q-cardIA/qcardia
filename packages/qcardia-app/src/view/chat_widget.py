@@ -40,7 +40,8 @@ _FAILURE_MARKERS = ("failed", "not found", "not loaded", "out of range", "unknow
 # available on click, mirroring how agentic coding UIs collapse tool calls
 # to a summary line with an expandable detail underneath.
 _TOOL_SUMMARY_FORMATTERS = {
-    "load_subject": lambda a: f"Load subject {a.get('subject_number')}",
+    "list_subjects": lambda a: "List subjects",
+    "load_subject": lambda a: f"Load subject {a.get('subject_id')}",
     "run_segmentation": lambda a: f"Run {a.get('modality')} segmentation",
     "apply_preset": lambda a: f"Apply {a.get('preset')} preset",
     "display_series": lambda a: (

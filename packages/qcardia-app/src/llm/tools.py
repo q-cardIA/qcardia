@@ -3,7 +3,7 @@
 Pure functions, no Qt: `build_tools()` takes a `ToolContext` snapshot of app
 state and returns exactly the tools valid for this turn — some are dropped
 entirely (their precondition isn't met), others get an enum narrowed to what
-actually exists right now (subjects on disk, loaded series, available
+actually exists right now (loaded series, available
 presets, current grid size), so the model can't request something that
 doesn't exist rather than relying on it reading prose correctly.
 """
@@ -18,21 +18,28 @@ TOOL_SPECS = [
     {
         "type": "function",
         "function": {
+            "name": "list_subjects",
+            "description": "List the subject folder names in the data folder.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "load_subject",
             "description": (
-                "Load a patient study by subject number. This replaces the current "
-                "patient and clears all panels. Only use numbers listed as "
-                "available in the state block."
+                "Load a patient study by subject folder name. This replaces the "
+                "current patient and clears all panels. Use a name from list_subjects."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "subject_number": {
-                        "type": "integer",
-                        "description": "Subject number as an integer, e.g. 5 for QLGE05_.",
+                    "subject_id": {
+                        "type": "string",
+                        "description": "Exact subject folder name from list_subjects.",
                     }
                 },
-                "required": ["subject_number"],
+                "required": ["subject_id"],
             },
         },
     },
@@ -167,17 +174,15 @@ TOOL_SPECS = [
 class ToolContext:
     series: dict
     cine_modalities: tuple[str, ...]
-    available_subjects: list[int]
     n_panels: int
     num_time_frames: int
     has_segmentation: bool
 
     @classmethod
-    def from_app(cls, model, view, available_subjects: list[int]) -> "ToolContext":
+    def from_app(cls, model, view) -> "ToolContext":
         return cls(
             series=model.series,
             cine_modalities=model.cine_modalities,
-            available_subjects=available_subjects,
             n_panels=view.display_area_widget.n_panels,
             num_time_frames=model.num_time_frames,
             has_segmentation=hasattr(model.series.get("CINE_SAX"), "_segmentation_prediction"),
@@ -188,12 +193,6 @@ def build_tools(ctx: ToolContext) -> list[dict]:
     tools = []
     for spec in TOOL_SPECS:
         name = spec["function"]["name"]
-
-        if name == "load_subject":
-            if not ctx.available_subjects:
-                continue
-            tools.append(_narrowed(spec, "subject_number", ctx.available_subjects))
-            continue
 
         if name == "run_segmentation":
             modalities = [k for k in (*ctx.cine_modalities, "LGE_SAX") if k in ctx.series]

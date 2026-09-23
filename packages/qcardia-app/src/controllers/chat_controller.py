@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from llm.context import build_state_block
 from llm.prompt import build_messages
 from llm.tools import ToolContext, build_tools
 from model.background_worker import CallableWorker
 from model.llm_client import OllamaWorker, warm_model
-from utils.app_config import OLLAMA_MODEL, discover_subject_numbers, subject_folder_path
+from utils.app_config import OLLAMA_MODEL, data_dir, list_subjects
 
 _MAX_HISTORY_TURNS = 10
 
@@ -22,7 +23,7 @@ class ChatController:
         self._worker = None
         # Read the widget's actual model selection rather than assume OLLAMA_MODEL.
         self._llm_model = self.view.chat_widget.current_tag() or OLLAMA_MODEL
-        self._available_subjects_cache: list[int] | None = None
+        self._available_subjects_cache: list[str] | None = None
         self._warmup_worker: CallableWorker | None = None  # see _warm_model_in_background
 
         self.view.chat_widget.message_submitted.connect(self.send_message)
@@ -31,11 +32,21 @@ class ChatController:
     def _on_model_changed(self, model_name: str):
         self._llm_model = model_name
 
-    def _available_subjects(self) -> list[int]:
+    def _available_subjects(self) -> list[str]:
         """Subject folders rarely change mid-session — cache the disk scan."""
         if self._available_subjects_cache is None:
-            self._available_subjects_cache = discover_subject_numbers()
+            self._available_subjects_cache = list_subjects()
         return self._available_subjects_cache
+
+    def _resolve_subject(self, subject_id: str) -> str | None:
+        """Exact folder name, else the single one matching case-insensitively or by number ('3' -> 'QLGE03_')."""
+        names = self._available_subjects()
+        if subject_id in names:
+            return subject_id
+        digits = re.findall(r"\d+", subject_id)
+        matches = [n for n in names if n.lower() == subject_id.lower()
+                   or (len(digits) == 1 and int(digits[0]) in map(int, re.findall(r"\d+", n)))]
+        return matches[0] if len(matches) == 1 else None
 
     def _context_snapshot(self) -> str:
         widget = self.view.display_area_widget
@@ -44,7 +55,6 @@ class ChatController:
             time_frame = (self.dicom_controller.current_time_index, self.model.num_time_frames)
         return build_state_block(
             subject=self.model.folder_path.name if self.model.folder_path else "none",
-            available_subjects=self._available_subjects(),
             loaded_series=sorted(self.model.series),
             time_frame=time_frame,
             grid=widget.grid_size,
@@ -60,7 +70,7 @@ class ChatController:
         return build_messages(history)
 
     def _build_tools(self) -> list[dict]:
-        ctx = ToolContext.from_app(self.model, self.view, self._available_subjects())
+        ctx = ToolContext.from_app(self.model, self.view)
         return build_tools(ctx)
 
     def send_message(self, user_text: str):
@@ -151,22 +161,19 @@ class ChatController:
         self._history.append({"role": "tool", "content": result})
 
     def _execute_load_subject(self, arguments: dict, remaining: list, bubble):
-        try:
-            subject_number = int(arguments["subject_number"])
-            path = subject_folder_path(subject_number)
-        except Exception as e:
-            self._finish_load_subject(f"load_subject failed: {e}", arguments, remaining, bubble)
+        subject_id = str(arguments.get("subject_id", ""))
+        name = self._resolve_subject(subject_id)
+        if name is None:
+            result = f"No single subject folder matches '{subject_id}'. Call list_subjects for the exact names."
+            self._finish_load_subject(result, arguments, remaining, bubble)
             return
-
-        if not path.exists():
-            self._finish_load_subject(f"Subject folder not found: {path}", arguments, remaining, bubble)
-            return
+        path = data_dir() / name
 
         def _on_complete(success: bool):
             result = (
-                f"Loaded subject {subject_number} from {path}."
+                f"Loaded subject {name} from {path}."
                 if success
-                else f"Failed to load subject {subject_number} (still busy loading a previous subject, or load failed)."
+                else f"Failed to load subject {name} (still busy loading a previous subject, or load failed)."
             )
             self._finish_load_subject(result, arguments, remaining, bubble)
 
@@ -179,6 +186,10 @@ class ChatController:
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
         try:
+            if name == "list_subjects":
+                names = self._available_subjects()
+                return f"{len(names)} subjects in {data_dir()}: {', '.join(names)}" if names else f"No subject folders in {data_dir()}."
+
             if name == "run_segmentation":
                 modality = str(arguments.get("modality", "")).upper()
                 if modality not in (*self.model.cine_modalities, "LGE_SAX"):

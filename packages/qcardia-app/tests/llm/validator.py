@@ -66,6 +66,9 @@ def validate(test_case: TestCase, actual_tool_calls: list) -> ValidationResult:
     mode = test_case.match_mode
 
     actual = [c for c in actual_tool_calls if isinstance(c, dict)]
+    # A lookup is a free step toward the answer, scored only by a case that expects it.
+    if not any(e.get("name") == "list_subjects" for e in expected):
+        actual = [c for c in actual if c.get("name") != "list_subjects"]
 
     if mode == "exact":
         return _validate_exact(test_case.id, mode, expected, actual)

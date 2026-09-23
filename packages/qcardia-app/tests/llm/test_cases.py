@@ -1,7 +1,7 @@
 """Eval test cases for qcardia-app-dev's ChatController tool-calling.
 
 One suite, one vocabulary: every case is written against the app's real
-tools and argument names — `load_subject(subject_number=)`,
+tools and argument names — `list_subjects()`, `load_subject(subject_id=)`,
 `display_series(panel_idx=, series_key=, axis=)`, `apply_preset(preset=)`,
 `run_segmentation(modality=)`. See fakes.py for the fixture classes and
 src/llm/ for the real prompt/tool specs this harness exercises unmodified.
@@ -38,7 +38,7 @@ class TestCase:
     prompt: str
     expected_tool_calls: List[dict]
     match_mode: str = "exact"
-    available_subjects: List[int] = field(default_factory=lambda: list(range(1, 22)))
+    available_subjects: List[str] = field(default_factory=lambda: [f"QLGE{n:02d}_" for n in range(1, 22)])
     notes: str = ""
     # For one expected call (matched by name), assert _execute_tool()'s result
     # text contains this substring — for regression cases where the result
@@ -95,8 +95,12 @@ def _no_subject(grid=(2, 2)) -> tuple[FakeModel, FakeView]:
 
 # --- Tool-call helpers — argument keys verified against src/llm/tools.py -----
 
-def load(subject_number: int) -> dict:
-    return {"name": "load_subject", "arguments": {"subject_number": subject_number}}
+def load(subject_id: str) -> dict:
+    return {"name": "load_subject", "arguments": {"subject_id": subject_id}}
+
+
+def list_subjects() -> dict:
+    return {"name": "list_subjects", "arguments": {}}
 
 
 def preset(name: str) -> dict:
@@ -142,23 +146,23 @@ _m, _v = _no_subject()
 _add(
     id="load_001", category="load", description="Load by number, no subject loaded",
     model=_m, view=_v, prompt="Load subject 3",
-    expected_tool_calls=[load(3)], match_mode="exact",
+    expected_tool_calls=[load("QLGE03_")], match_mode="exact",
 )
 _m, _v = _no_subject()
 _add(
     id="load_002", category="load", description="Load via 'open patient' synonym",
     model=_m, view=_v, prompt="Open patient 7",
-    expected_tool_calls=[load(7)], match_mode="exact",
+    expected_tool_calls=[load("QLGE07_")], match_mode="exact",
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_2CH"}])
 _add(
     id="load_003", category="load", description="Switch subject while one is already loaded",
     model=_m, view=_v, prompt="Switch to subject 5",
-    expected_tool_calls=[load(5)], match_mode="exact",
+    expected_tool_calls=[load("QLGE05_")], match_mode="exact",
 )
 _m, _v = _no_subject()
 _add(
-    id="load_neg_001", category="load", description="Subject number not in available list",
+    id="load_neg_001", category="load", description="Subject not in the data folder",
     model=_m, view=_v, prompt="Load subject 999",
     expected_tool_calls=[], match_mode="none",
     notes="999 is out of range — INVALID ARGUMENTS rule: no tool call, no clamping.",
@@ -168,6 +172,19 @@ _add(
     id="load_neg_002", category="load", description="Subject zero — below valid range",
     model=_m, view=_v, prompt="Load subject 0",
     expected_tool_calls=[], match_mode="none",
+)
+_m, _v = _no_subject()
+_add(
+    id="load_004", category="load", description="Other dataset naming: number to folder name",
+    model=_m, view=_v, prompt="Open patient 12",
+    expected_tool_calls=[load("patient_012")], match_mode="exact",
+    available_subjects=[f"patient_{n:03d}" for n in range(1, 41)],
+)
+_m, _v = _no_subject()
+_add(
+    id="load_list_001", category="load", description="Which subjects exist — a lookup, not a load",
+    model=_m, view=_v, prompt="Which subjects can I open?",
+    expected_tool_calls=[list_subjects()], match_mode="exact",
 )
 
 
@@ -666,7 +683,7 @@ _add(
 # The harness runs ONE turn (driver.run_one), so what a compound case can
 # fairly assert depends on where it starts:
 #
-#   From _no_subject(), build_tools() offers load_subject and nothing else —
+#   From _no_subject(), build_tools() offers list_subjects/load_subject only —
 #   no series are loaded, so apply_preset/display_series/run_segmentation are
 #   all filtered out. The only correct output is the load call, which makes
 #   match_mode="exact" a real test: it catches a model inventing calls to
@@ -684,7 +701,7 @@ _m, _v = _no_subject()
 _add(
     id="compound_001", category="compound", description="Load + apply preset in one request",
     model=_m, view=_v, prompt="Load subject 3 and set up the functional view",
-    expected_tool_calls=[load(3)], match_mode="subset",
+    expected_tool_calls=[load("QLGE03_")], match_mode="subset",
     notes="Single-turn harness only sees the load call; apply_preset legitimately comes in a follow-up turn.",
 )
 _m, _v = _no_subject()
@@ -692,7 +709,7 @@ _add(
     id="compound_002", category="compound", description="Four-step request with nothing loaded yet",
     model=_m, view=_v,
     prompt="Load subject 1, display the viability preset, segment the cine 4ch, cine sax and lge sax",
-    expected_tool_calls=[load(1)], match_mode="exact",
+    expected_tool_calls=[load("QLGE01_")], match_mode="exact",
     notes="exact, not subset: apply_preset/run_segmentation aren't offered at all here, so any "
           "call to them is a hallucinated tool, not an eager-but-correct next step.",
 )

@@ -40,25 +40,31 @@ class RunResult:
 
 def run_one(cc: ChatController, user_text: str, think: bool | None = None, timeout: float = 120.0) -> RunResult:
     """Runs one user turn and captures the model's tool_calls. Ignores
-    multi-step continuation — this evaluates single-turn tool selection."""
+    multi-step continuation, except past a list_subjects lookup."""
     cc._history = [{"role": "user", "content": user_text}]
-    messages = cc._messages_for_request()
     tools = cc._build_tools()
 
     # think=None means "use OllamaWorker's own default", not a literal False.
     kwargs = {"think": think} if think is not None else {}
-    worker = OllamaWorker(messages, tools=tools, model=cc._llm_model, **kwargs)
 
     calls: list[dict] = []
     tokens: list[str] = []
     errors: list[str] = []
 
-    worker.tool_calls_ready.connect(lambda c: calls.extend({"name": n, "arguments": a} for n, a in c))
-    worker.token_received.connect(tokens.append)
-    worker.error.connect(errors.append)
-
     start = time.monotonic()
-    worker.run()  # synchronous — see module docstring
+    for _ in range(2):
+        worker = OllamaWorker(cc._messages_for_request(), tools=tools, model=cc._llm_model, **kwargs)
+        new: list[dict] = []
+        tokens.clear()
+        worker.tool_calls_ready.connect(lambda c: new.extend({"name": n, "arguments": a} for n, a in c))
+        worker.token_received.connect(tokens.append)
+        worker.error.connect(errors.append)
+        worker.run()  # synchronous — see module docstring
+        calls += new
+        if errors or not new or any(c["name"] != "list_subjects" for c in new):
+            break
+        for c in new:  # answer the lookup and ask again, as the app does
+            cc._append_tool_history(c["name"], c["arguments"], cc._execute_tool(c["name"], c["arguments"]))
     elapsed = time.monotonic() - start
 
     return RunResult(

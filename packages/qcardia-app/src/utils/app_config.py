@@ -3,8 +3,7 @@
 Layout assumed by the defaults:
     <WORKSPACE>/
     ├── qcardia-app-dev/    ← this repo
-    └── data/
-        └── new_data/       ← subject folders (QLGE01_/, QLGE02_/, ...)
+    └── data/               ← subject folders (any names; changeable on the welcome screen)
 
 If your layout differs, update the paths below.
 """
@@ -14,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 import requests
+from PySide6.QtCore import QSettings
 
 # Root of the workspace that holds all repos and data.
 WORKSPACE_DIR: Path = Path(__file__).parent.parent.parent.parent
@@ -22,34 +22,29 @@ WORKSPACE_DIR: Path = Path(__file__).parent.parent.parent.parent
 APP_DIR: Path = Path(__file__).parent.parent.parent
 ICON_PATH: Path = APP_DIR / "assets" / "images" / "q-cardIA.png"
 
-# Base directory that holds subject folders (e.g. QLGE01_/, QLGE02_/, ...).
-# Used by the AI assistant's load_subject tool.
-SUBJECT_BASE_DIR: Path = WORKSPACE_DIR / "data" / "new_data"
-
-# Cached duplicate-series disambiguation results, kept alongside the subject data.
-DISAMBIGUATION_CACHE_DIR: Path = SUBJECT_BASE_DIR / "disambiguation_cache"
+# Holds one folder per subject, any names; changed on the welcome screen.
+DEFAULT_DATA_DIR: Path = WORKSPACE_DIR / "data"
+_SETTINGS = QSettings("q-cardIA", "qcardia-app")
 
 
-def subject_folder_path(subject_number: int) -> Path:
-    """Return the subject folder path for a given integer subject number."""
-    return SUBJECT_BASE_DIR / f"QLGE{subject_number:02d}_"
+def data_dir() -> Path:
+    return Path(_SETTINGS.value("data_dir", str(DEFAULT_DATA_DIR)))
 
 
-def discover_subject_numbers() -> list[int]:
-    """Scan SUBJECT_BASE_DIR for QLGE{NN}_ folders and return the sorted subject numbers.
+def set_data_dir(path: str):
+    _SETTINGS.setValue("data_dir", path)
 
-    Lets the chat assistant ground load_subject calls against subjects that
-    actually exist, instead of guessing/hallucinating a number.
-    """
-    if not SUBJECT_BASE_DIR.is_dir():
+
+def disambiguation_cache_dir() -> Path:
+    return data_dir() / "disambiguation_cache"
+
+
+def list_subjects() -> list[str]:
+    folder = data_dir()
+    if not folder.is_dir():
         return []
-    numbers = []
-    for entry in SUBJECT_BASE_DIR.iterdir():
-        if entry.is_dir() and entry.name.startswith("QLGE") and entry.name.endswith("_"):
-            digits = entry.name[len("QLGE"):-1]
-            if digits.isdigit():
-                numbers.append(int(digits))
-    return sorted(numbers)
+    skip = disambiguation_cache_dir().name
+    return sorted(e.name for e in folder.iterdir() if e.is_dir() and e.name[0] != "." and e.name != skip)
 
 
 # ---------------------------------------------------------------------------
