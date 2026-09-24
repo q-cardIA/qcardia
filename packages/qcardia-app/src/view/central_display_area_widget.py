@@ -255,23 +255,26 @@ class CentralDisplayAreaWidget(QWidget):
     def is_series_registered(self, series_key: str) -> bool:
         return series_key in self._volumes
 
+    def n_slices(self, series_key: str, axis: str = "transverse") -> int:
+        return self._n_slices(series_key, axis)
+
     def set_panel_series(
-        self, panel_idx: int, series_key: str, axis: str = "transverse"
+        self, panel_idx: int, series_key: str, axis: str = "transverse", slice_idx: int | None = None
     ):
-        """Assign a registered series to a panel slot."""
+        """Assign a registered series to a panel slot, at slice_idx or else the middle slice."""
         if panel_idx < 0 or panel_idx >= self.n_panels:
             return
         self._panel_series_key[panel_idx] = series_key
         self._panel_axis[panel_idx] = axis.lower()
 
         n = self._n_slices(series_key, axis)
-        mid = n // 2 if n > 0 else 0
-        self._panel_slice_idx[panel_idx] = mid
+        z = n // 2 if slice_idx is None else slice_idx
+        self._panel_slice_idx[panel_idx] = z
 
         sl = self._panels[panel_idx].slider
         sl.blockSignals(True)
         sl.setMaximum(max(0, n - 1))
-        sl.setValue(mid)
+        sl.setValue(z)
         sl.setEnabled(n > 1)
         sl.setVisible(n > 1)
         sl.blockSignals(False)

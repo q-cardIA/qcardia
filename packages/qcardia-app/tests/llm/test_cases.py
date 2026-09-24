@@ -6,11 +6,11 @@ tools and argument names — `list_subjects()`, `load_subject(subject_id=)`,
 `run_segmentation(modality=)`. See fakes.py for the fixture classes and
 src/llm/ for the real prompt/tool specs this harness exercises unmodified.
 
-Capabilities the app doesn't have yet — grid sizing, extended-functional and
-flow presets, per-panel slice state, analysis/zoom/playback tools, and the
-T1/EGE/anatomy series keys cardisort doesn't produce — have their cases
-written out but **commented out**, each under a header saying what has to
-land before they're uncommented. Nothing is skipped at runtime: if a case is
+Capabilities the app doesn't have yet — grid sizing, flow presets, per-panel
+slice state, analysis/zoom/playback tools, and the T1/EGE/anatomy series keys
+cardisort doesn't produce — have their cases written out but **commented
+out**, each under a header saying what has to land before they're
+uncommented. Nothing is skipped at runtime: if a case is
 in TEST_CASES it gets run and it counts towards the pass rate.
 
 match_mode:
@@ -263,22 +263,19 @@ _add(
     notes="Harder than preset_neg_002: plenty is loaded, just not the perfusion series.",
 )
 
-# --- Not implemented yet: extended functional preset ------------------------
-# Needs a 'functional_complex' preset (per-slice SAX layout) in
-# utils/hanging_protocols.py's PRESETS; today there are only
-# functional/viability/perfusion.
-#
-# for i, prompt in enumerate([
-#     "Show LV function per slice",
-#     "Extended functional view please",
-#     "I want to see all SAX slices",
-# ], start=1):
-#     _m, _v = _loaded()
-#     _add(
-#         id=f"preset_funcx_{i:03d}", category="preset", description="Extended functional preset",
-#         model=_m, view=_v, prompt=prompt,
-#         expected_tool_calls=[preset("functional_complex")], match_mode="subset",
-#     )
+# --- Extended functional preset ---------------------------------------------
+
+for i, prompt in enumerate([
+    "Show LV function per slice",
+    "Extended functional view please",
+    "I want to see all SAX slices",
+], start=1):
+    _m, _v = _loaded()
+    _add(
+        id=f"preset_funcx_{i:03d}", category="preset", description="Extended functional preset",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[preset("functional_complex")], match_mode="subset",
+    )
 
 # --- Not implemented yet: flow presets --------------------------------------
 # Needs PC_AORTA / PC_MPA series keys out of cardisort plus flow / flow_aorta

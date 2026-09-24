@@ -85,10 +85,13 @@ TOOL_SPECS = [
                 "properties": {
                     "preset": {
                         "type": "string",
-                        "enum": ["functional", "viability", "perfusion"],
+                        "enum": ["functional", "functional_complex", "viability", "perfusion"],
                         "description": (
                             "functional: ventricular/LV/RV function, ejection "
                             "fraction, volumes, wall motion (CINE only). "
+                            "functional_complex: extended functional, long-axis "
+                            "views plus SAX slices from base to apex; for "
+                            "per-slice or full SAX views. "
                             "viability: scar, late gadolinium enhancement, "
                             "infarct, fibrosis, transmurality (needs LGE). "
                             "perfusion: perfusion, ischaemia, CAD, stress testing "

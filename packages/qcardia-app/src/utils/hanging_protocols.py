@@ -55,6 +55,24 @@ PRESETS: dict[str, Preset] = {
             "myocardial scar", "fibrosis", "MI",
         ],
     ),
+    # Long-axis views in column 0, SAX slices basal to apical in the other panels.
+    "functional_complex": Preset(
+        label="Functional (Extended)",
+        grid=(3, 6),
+        panels=[
+            PanelAssignment(0, "CINE_4CH"),
+            PanelAssignment(6, "CINE_3CH"),
+            PanelAssignment(12, "CINE_2CH"),
+        ] + [
+            PanelAssignment(idx, "CINE_SAX", slice_slot=slot)
+            for slot, idx in enumerate(i for i in range(18) if i % 6)
+        ],
+        triggers=[
+            "extended functional", "extended function", "full functional", "per-slice function",
+            "per slice", "all SAX slices", "every SAX slice", "SAX stack", "basal to apical",
+            "detailed function", "complete functional assessment",
+        ],
+    ),
 }
 
 # Not a static PRESETS entry — its grid depends on stress/rest presence, see build_perfusion_preset.
@@ -64,7 +82,7 @@ PERFUSION_TRIGGERS = [
     "myocardial perfusion", "perfusion and scar",
 ]
 
-PRESET_BUTTON_ORDER = ["functional", "viability", "perfusion"]
+PRESET_BUTTON_ORDER = ["functional", "functional_complex", "viability", "perfusion"]
 
 
 _LGE_KEYS = ("LGE_SAX", "LGE_2CH", "LGE_3CH", "LGE_4CH")
@@ -78,7 +96,7 @@ def available_presets(loaded_series: set[str]) -> list[str]:
     gated on each preset's own distinguishing series, not shared CINE_* keys."""
     names = []
     if any(pa.key in loaded_series for pa in PRESETS["functional"].panels):
-        names.append("functional")
+        names += ["functional", "functional_complex"]
     if any(k in loaded_series for k in _LGE_KEYS):
         names.append("viability")
     # LGE_SAX alone doesn't count — 'perfusion' needs real perfusion data,

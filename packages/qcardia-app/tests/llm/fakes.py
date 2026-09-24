@@ -51,7 +51,10 @@ class FakeDisplayAreaWidget:
     def set_grid_size(self, rows: int, cols: int):
         self._grid_rows, self._grid_cols = rows, cols
 
-    def set_panel_series(self, panel_idx: int, series_key: str, axis: str = "transverse"):
+    def n_slices(self, series_key: str, axis: str = "transverse") -> int:
+        return 12
+
+    def set_panel_series(self, panel_idx: int, series_key: str, axis: str = "transverse", slice_idx: int | None = None):
         self._panels[panel_idx] = {"series_key": series_key, "axis": axis, "has_segmentation": False}
 
     def set_panel_empty(self, panel_idx: int):

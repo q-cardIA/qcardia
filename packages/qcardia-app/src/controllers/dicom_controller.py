@@ -234,7 +234,9 @@ class DICOMController:
             return None
 
         total = len(preset.panels)
-        filled = sum(1 for panel in preset.panels if self._widget.is_series_registered(panel.key))
+        n_slots = sum(p.slice_slot is not None for p in preset.panels)
+        slices = [self._preset_slice(p, n_slots) for p in preset.panels]
+        filled = sum(z is not None for z in slices)
         if filled == 0:
             # Leave the current grid/panels untouched — a total no-op should
             # actually be a no-op, not silently wipe what was displayed.
@@ -242,12 +244,23 @@ class DICOMController:
 
         rows, cols = preset.grid
         self._widget.set_grid_size(rows, cols)
-        for panel in preset.panels:
-            if self._widget.is_series_registered(panel.key):
-                self._widget.set_panel_series(panel.idx, panel.key, axis=panel.axis)
+        for panel, z in zip(preset.panels, slices):
+            if z is not None:
+                self._widget.set_panel_series(panel.idx, panel.key, axis=panel.axis, slice_idx=z)
             else:
                 self._widget.set_panel_empty(panel.idx)
         return filled, total
+
+    def _preset_slice(self, panel, n_slots: int) -> int | None:
+        """Slice to show in a preset panel, or None to leave it empty."""
+        if not self._widget.is_series_registered(panel.key):
+            return None
+        n = self._widget.n_slices(panel.key, panel.axis)
+        if panel.slice_slot is None:
+            return n // 2
+        if n >= n_slots:  # spread over the stack, steps of at least one slice
+            return round(panel.slice_slot * (n - 1) / max(n_slots - 1, 1))
+        return panel.slice_slot if panel.slice_slot < n else None
 
     def set_time_frame(self, time_index):
         self.current_time_index = time_index
