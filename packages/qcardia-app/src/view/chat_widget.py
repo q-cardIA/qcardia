@@ -270,8 +270,6 @@ class ChatWidget(QFrame):
 
         pulled = list_ollama_models()
         pulled_tags = {m["tag"] for m in pulled}
-        if not any(m["tag"] == OLLAMA_MODEL for m in pulled):
-            pulled = [{"tag": OLLAMA_MODEL, "label": OLLAMA_MODEL, "local": False}] + pulled
 
         for m in pulled:
             self._model_combo.addItem(m["label"], m["tag"])
@@ -287,8 +285,10 @@ class ChatWidget(QFrame):
             if idx >= 0:
                 self._model_combo.setCurrentIndex(idx)
         self._model_combo.blockSignals(False)
-        if self._model_combo.count():
+        if pulled:  # the default model if installed, else the first one
             self.model_changed.emit(self._model_combo.currentData())
+        else:
+            self.append_system_message(f"No Ollama models installed. Run `ollama pull {OLLAMA_MODEL}`.")
 
     def current_tag(self) -> str | None:
         return self._model_combo.currentData() if self._model_combo.count() else None
