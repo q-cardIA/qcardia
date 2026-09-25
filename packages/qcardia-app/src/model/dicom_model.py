@@ -4,6 +4,7 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -86,6 +87,16 @@ def read_disk_thumbnail(seq_dir: Path, prefer_first_file: bool) -> np.ndarray | 
     return arr.astype(np.uint8)
 
 
+def _model_name(run: Path) -> str:
+    """'project/name' from a wandb run's config, else the run folder name."""
+    try:
+        with open(run / "files" / "config-copy.yaml") as f:
+            exp = yaml.load(f, Loader=yaml.FullLoader)["experiment"]
+        return f"{exp['project']}/{exp['name']}"
+    except (OSError, KeyError, TypeError, yaml.YAMLError):
+        return run.name
+
+
 class DICOMModel:
     def __init__(self):
         self.series: dict[str, BaseSeries] = {}
@@ -97,6 +108,9 @@ class DICOMModel:
         self._cardisort_config = None
         self.use_cardisort_cache = True  # welcome-screen toggles, see WelcomeWidget / main.py
         self.use_disambiguation_cache = True
+        self.use_segmentation_cache = True
+        self.subject_folder: Path | None = None
+        self._series_dirs: dict[str, Path] = {}
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -130,7 +144,8 @@ class DICOMModel:
             logging.warning(f"No config file found under {cine_sax_path}")
 
     def load_cine_series(self, folder_path, series_key: str):
-        self.series[series_key] = CineSeries(Path(folder_path), batch_size=50)
+        # 10, not 50: same output, ~1.5 GB less memory for CINE_SAX, no slower.
+        self.series[series_key] = CineSeries(Path(folder_path), batch_size=10)
         if series_key == "CINE_SAX":
             self.folder_path = Path(folder_path)
         return self._process_temporal_volumes(series_key)
@@ -370,6 +385,40 @@ class DICOMModel:
 
         return results
 
+    def segment(self, series_key: str) -> np.ndarray:
+        """From the subject's .segmentation_cache if made from the same series and weights, else from the model."""
+        run = self.lge_wandb_run_path if series_key == "LGE_SAX" else self._seg_wandb_paths[series_key]
+        weights = run / "files" / "last_model.pt"
+        source = {
+            "series": self._series_dirs[series_key].name,
+            "weights": weights.relative_to(run.parent.parent).as_posix(),
+            "weights_modified": datetime.fromtimestamp(weights.stat().st_mtime).isoformat(timespec="seconds"),
+        }
+        folder = self.subject_folder / ".segmentation_cache" / series_key
+        if self.use_segmentation_cache and (folder / "info.json").exists():
+            info = json.loads((folder / "info.json").read_text())
+            if all(info.get(k) == v for k, v in source.items()):
+                with np.load(folder / "segmentation.npz") as cached:
+                    return cached["seg"]
+
+        if series_key == "LGE_SAX":
+            seg = self.predict_lge_segmentation()
+        else:
+            frames = self.predict_segmentation(series_key)
+            if not frames:
+                raise ValueError(f"The {series_key} segmentation model produced no usable output; see the log.")
+            seg = np.stack(frames).astype(np.uint8)
+        if self.use_segmentation_cache:
+            info = {"model": _model_name(run), **source,
+                    "created": datetime.now().isoformat(timespec="seconds"), "manual_edits": []}
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(folder / "segmentation.npz", seg=seg)
+                (folder / "info.json").write_text(json.dumps(info, indent=2))
+            except OSError as e:
+                logging.warning(f"Could not cache the {series_key} segmentation: {e}")
+        return seg
+
     def get_geometry(self, series_key: str) -> VolumeGeometry | None:
         series = self.series.get(series_key)
         if series is None:
@@ -594,6 +643,7 @@ class DICOMModel:
         return primary, True
 
     def load_series_for_key(self, seq_dir: Path, key: str) -> dict:
+        self._series_dirs[key] = Path(seq_dir)
         if key.startswith("CINE_"):
             volume, num_frames = self.load_cine_series(seq_dir, key)
             info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
@@ -604,6 +654,7 @@ class DICOMModel:
         return info
 
     def load_patient(self, folder_path) -> PatientLoadResult:
+        self.subject_folder = Path(folder_path)
         descriptors = self._describe_patient_folder(folder_path)
         classified = self._group_and_resolve(descriptors, folder_path)
 

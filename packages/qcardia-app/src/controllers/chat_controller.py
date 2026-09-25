@@ -541,7 +541,7 @@ class ChatController:
                         f"{', '.join(repr(m) for m in self.model.cine_modalities)} or 'LGE_SAX'."
                     )
                 if not self.dicom_controller.run_segmentation(modality):
-                    return f"A segmentation is already running — try requesting {modality} again once it finishes."
+                    return f"{modality} segmentation is already running or queued."
                 return f"Requested {modality} segmentation (check the app for the result or any errors)."
 
             if name == "apply_preset":

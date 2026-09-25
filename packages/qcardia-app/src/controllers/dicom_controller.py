@@ -1,8 +1,6 @@
 import logging
 from pathlib import Path
 
-import numpy as np
-
 from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
 from utils.hanging_protocols import PRESETS, build_perfusion_preset
@@ -17,7 +15,9 @@ class DICOMController:
         self._last_result = None
         self._current_subject_folder = None
         self._load_worker = None
-        self._seg_workers: dict[str, CallableWorker] = {}  # keyed by series_key, so different modalities can run concurrently
+        # Runs one at a time, first entry is running: several at once doubled peak memory (#11).
+        self._seg_queue: list[str] = []
+        self._seg_worker: CallableWorker | None = None
 
         self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
@@ -166,45 +166,32 @@ class DICOMController:
         return cards
 
     def run_segmentation(self, series_key: str = "CINE_SAX") -> bool:
-        """Starts segmentation for series_key. Returns False (no-op) if a
-        segmentation for THIS series_key is already running — callers must
-        check this instead of assuming the request was actually started."""
-        existing = self._seg_workers.get(series_key)
-        if existing is not None and existing.isRunning():
+        """Queues segmentation for series_key. Returns False if it is already queued or running."""
+        if series_key in self._seg_queue:
             return False
-        self._widget.show_segmentation_loading(series_key, "Segmenting…")
-        if series_key == "LGE_SAX":
-            worker = CallableWorker(self.model.predict_lge_segmentation)
-        else:
-            worker = CallableWorker(self.model.predict_segmentation, series_key)
-        self._seg_workers[series_key] = worker
-        worker.finished_ok.connect(
-            lambda result: self._on_segmentation_done(series_key, result)
-        )
-        worker.error.connect(
-            lambda exc: self._on_segmentation_error(series_key, exc)
-        )
-        worker.finished.connect(lambda: self._seg_workers.pop(series_key, None))
-        worker.start()
+        self._seg_queue.append(series_key)
+        self._widget.show_segmentation_loading(series_key, "Queued…")
+        if len(self._seg_queue) == 1:
+            self._start_segmentation()
         return True
+
+    def _start_segmentation(self):
+        key = self._seg_queue[0]
+        self._widget.show_segmentation_loading(key, "Segmenting…")
+        self._seg_worker = CallableWorker(self.model.segment, key)
+        self._seg_worker.finished_ok.connect(lambda result: self._on_segmentation_done(key, result))
+        self._seg_worker.error.connect(lambda exc: self._on_segmentation_error(key, exc))
+        self._seg_worker.finished.connect(self._on_segmentation_finished)
+        self._seg_worker.start()
+
+    def _on_segmentation_finished(self):
+        self._seg_worker = None
+        self._seg_queue.pop(0)
+        if self._seg_queue:
+            self._start_segmentation()
 
     def _on_segmentation_done(self, series_key: str, result):
         self._widget.hide_segmentation_loading(series_key)
-        # predict_segmentation returns a per-time-frame list (needs stacking);
-        # predict_lge_segmentation returns one volume directly.
-        if isinstance(result, list):
-            if not result:
-                logging.error(
-                    f"{series_key} segmentation produced no usable output — see earlier "
-                    "'Failed to extract segmentation for time N' warnings for the cause."
-                )
-                self.view.show_warning(
-                    "Segmentation Empty",
-                    f"The {series_key} segmentation model ran but produced no usable "
-                    f"output for this subject. Check the terminal/log output for details.",
-                )
-                return
-            result = np.stack(result, axis=0)
         self._widget.set_segmentation(series_key, result)
 
     def _on_segmentation_error(self, series_key: str, exc):

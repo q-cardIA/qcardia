@@ -39,6 +39,10 @@ class WelcomeWidget(QWidget):
     def use_disambiguation_cache(self) -> bool:
         return self._toggle_preproc_disambig.isChecked()
 
+    @property
+    def use_segmentation_cache(self) -> bool:
+        return self._toggle_preproc_seg.isChecked()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -205,6 +209,9 @@ class WelcomeWidget(QWidget):
 
         self._toggle_preproc_disambig = self._toggle_switch(default=True)
         options_layout.addLayout(self._toggle_row(self._toggle_preproc_disambig, "Preprocessed disambiguation"))
+
+        self._toggle_preproc_seg = self._toggle_switch(default=True)
+        options_layout.addLayout(self._toggle_row(self._toggle_preproc_seg, "Preprocessed segmentation"))
 
         # Zero-spacing container so button_row and _options_panel touch —
         # the panel's own layout spacing would otherwise gap them apart.
