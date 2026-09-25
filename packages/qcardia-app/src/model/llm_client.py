@@ -8,6 +8,7 @@ qcardia.disambiguate.disambiguate_duplicates, just streaming and with tools.
 from __future__ import annotations
 
 import json
+import logging
 
 import requests
 from PySide6.QtCore import QThread, Signal
@@ -34,18 +35,25 @@ class OllamaWorker(QThread):
     finished_ok = Signal()
     error = Signal(str)
 
-    def __init__(self, messages: list[dict], tools: list[dict] | None = None, model: str = OLLAMA_MODEL):
+    def __init__(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        model: str = OLLAMA_MODEL,
+        think: bool = False,
+    ):
         super().__init__()
         self._messages = messages
         self._tools = tools
         self._model = model
+        self._think = think
 
     def run(self):
         payload = {
             "model": self._model,
             "messages": self._messages,
             "stream": True,
-            "think": False,
+            "think": self._think,
             "keep_alive": KEEP_ALIVE,
             "options": {"num_ctx": OLLAMA_NUM_CTX, "temperature": 0.2},
         }
@@ -53,7 +61,8 @@ class OllamaWorker(QThread):
             payload["tools"] = self._tools
 
         try:
-            response = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=120)
+            # 10s to connect, 120s between chunks once streaming.
+            response = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=(10, 120))
             response.raise_for_status()
         except requests.RequestException as e:
             self.error.emit(f"Could not reach Ollama at {OLLAMA_URL}: {e}")
@@ -75,6 +84,7 @@ class OllamaWorker(QThread):
                         (tc["function"]["name"], tc["function"].get("arguments", {}))
                         for tc in tool_calls
                     ]
+                    logging.info(f"[{self._model}] tool_calls: {calls}")
                     self.tool_calls_ready.emit(calls)
                     return
 
@@ -88,6 +98,7 @@ class OllamaWorker(QThread):
             self.error.emit(f"Ollama stream interrupted: {e}")
             return
 
+        logging.info(f"[{self._model}] finished with no tool_calls (text-only reply)")
         self.finished_ok.emit()
 
 
@@ -106,7 +117,7 @@ def warm_model(model: str = OLLAMA_MODEL):
                 "keep_alive": KEEP_ALIVE,
                 "options": {"num_ctx": OLLAMA_NUM_CTX},
             },
-            timeout=60,
+            timeout=(10, 60),
         )
     except requests.RequestException:
         pass  # best-effort warm-up; the real chat call will surface any real connectivity error

@@ -18,7 +18,7 @@ from qcardia.cardisort import (
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 
-from utils.app_config import DISAMBIGUATION_CACHE_DIR
+from utils.app_config import disambiguation_cache_dir
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
@@ -527,7 +527,7 @@ class DICOMModel:
 
     @staticmethod
     def _cache_path(subject_key: str) -> Path:
-        return DISAMBIGUATION_CACHE_DIR / f"{subject_key}.json"
+        return disambiguation_cache_dir() / f"{subject_key}.json"
 
     def _load_disambiguation_cache(self, subject_key: str) -> dict:
         path = self._cache_path(subject_key)
@@ -541,7 +541,7 @@ class DICOMModel:
 
     def _save_disambiguation_cache(self, subject_key: str, cache: dict):
         try:
-            DISAMBIGUATION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            disambiguation_cache_dir().mkdir(parents=True, exist_ok=True)
             with open(self._cache_path(subject_key), "w", encoding="utf-8") as f:
                 json.dump(cache, f, indent=2)
         except Exception as e:
