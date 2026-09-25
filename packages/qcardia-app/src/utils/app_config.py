@@ -24,15 +24,15 @@ ICON_PATH: Path = APP_DIR / "assets" / "images" / "q-cardIA.png"
 
 # Holds one folder per subject, any names; changed on the welcome screen.
 DEFAULT_DATA_DIR: Path = WORKSPACE_DIR / "data"
-_SETTINGS = QSettings("q-cardIA", "qcardia-app")
+SETTINGS = QSettings("q-cardIA", "qcardia-app")
 
 
 def data_dir() -> Path:
-    return Path(_SETTINGS.value("data_dir", str(DEFAULT_DATA_DIR)))
+    return Path(SETTINGS.value("data_dir", str(DEFAULT_DATA_DIR)))
 
 
 def set_data_dir(path: str):
-    _SETTINGS.setValue("data_dir", path)
+    SETTINGS.setValue("data_dir", path)
 
 
 def disambiguation_cache_dir() -> Path:

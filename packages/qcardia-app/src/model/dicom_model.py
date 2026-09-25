@@ -19,6 +19,7 @@ from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 
 from utils.app_config import disambiguation_cache_dir
+from utils.windowing import dicom_window, percentile_window, window_to_uint8
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
@@ -64,33 +65,14 @@ def read_disk_thumbnail(seq_dir: Path, prefer_first_file: bool) -> np.ndarray | 
     if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
         arr = arr.max() - arr  # MONOCHROME1: stored values are inverted
 
-    try:
-        wc_raw, ww_raw = getattr(ds, "WindowCenter", None), getattr(ds, "WindowWidth", None)
-        if wc_raw is None or ww_raw is None:
-            raise ValueError
-        wc = float(wc_raw[0]) if hasattr(wc_raw, "__len__") else float(wc_raw)
-        ww = float(ww_raw[0]) if hasattr(ww_raw, "__len__") else float(ww_raw)
-        if ww <= 0:
-            raise ValueError
-        lo = wc - ww / 2.0
-        arr = np.clip(arr, lo, lo + ww)
-        arr = (arr - lo) / ww * 255.0
-    except Exception:
-        p_lo, p_hi = np.percentile(arr, 2), np.percentile(arr, 98)
-        if p_hi > p_lo:
-            arr = np.clip(arr, p_lo, p_hi)
-            arr = (arr - p_lo) / (p_hi - p_lo) * 255.0
-        else:
-            arr = np.zeros_like(arr)
-
-    return arr.astype(np.uint8)
+    window = dicom_window(ds) or percentile_window(arr, 2, 98)
+    return window_to_uint8(arr, *window) if window else np.zeros(arr.shape, np.uint8)
 
 
 class DICOMModel:
     def __init__(self):
         self.series: dict[str, BaseSeries] = {}
         self.folder_path = None
-        self.temporal_volumes = []
         self.num_time_frames = 0
         self.slice_positions = []
         self._cardisort_model = None
@@ -163,8 +145,7 @@ class DICOMModel:
         slice_entries.sort(key=lambda item: item[0])
         slice_positions = [float(pos) for pos, _ in slice_entries]
         volume = np.stack([entry[1] for entry in slice_entries], axis=0)
-        normalized = self._normalize_lge_volume(volume)
-        return normalized, slice_positions
+        return volume, slice_positions
 
     @staticmethod
     def _extract_lge_slice_image(slice_info):
@@ -178,22 +159,6 @@ class DICOMModel:
             else:
                 image = pixel_array
         return np.asarray(image, dtype=np.float32)
-
-    @staticmethod
-    def _normalize_lge_volume(volume):
-        if volume.size == 0:
-            raise ValueError("Empty LGE volume")
-
-        lower = np.percentile(volume, 1)
-        upper = np.percentile(volume, 99)
-        if np.isclose(upper, lower):
-            upper = lower + 1.0
-        clipped = np.clip(volume, lower, upper)
-        min_val = clipped.min()
-        max_val = clipped.max()
-        denom = max(max_val - min_val, 1e-6)
-        scaled = (clipped - min_val) / denom
-        return (scaled * 255.0).astype(np.uint8)
 
     def predict_lge_segmentation(self):
         if "LGE_SAX" not in self.series:
@@ -215,20 +180,10 @@ class DICOMModel:
         # so reverse here to align segmentation indexing with the display volume.
         return seg_arr[::-1].astype(np.uint8)
 
-    def apply_window(self, image, center, width):
-        min_val = center - width / 2
-        max_val = center + width / 2
-        windowed = np.clip(image, min_val, max_val)
-        windowed = ((windowed - min_val) / (max_val - min_val) * 255).astype(np.uint8)
-        return windowed
-
     def _process_temporal_volumes(self, series_key: str):
         cine = self.series.get(series_key)
         if cine is None:
             raise ValueError("No DICOM data loaded")
-
-        center = float(cine.slice_data["slice01"]["meta_data"][0].WindowCenter)
-        width = float(cine.slice_data["slice01"]["meta_data"][0].WindowWidth)
 
         first_key = sorted(cine.slice_data.keys())[0]
         num_time_frames = len(cine.slice_data[first_key]["pixel_array"])
@@ -242,18 +197,12 @@ class DICOMModel:
         slice_entries.sort(key=lambda item: item[0])
         slice_positions = [float(entry[0]) for entry in slice_entries]
 
-        temporal_volumes = []
-        for time_idx in range(num_time_frames):
-            slices = [entry[1][time_idx] for entry in slice_entries]
-            image_stack = np.stack(slices, axis=0)
-            temporal_volumes.append(self.apply_window(image_stack, center, width))
-
+        volume_4d = np.stack(
+            [np.stack([entry[1][t] for entry in slice_entries], axis=0) for t in range(num_time_frames)]
+        )
         if series_key == "CINE_SAX":
             self.num_time_frames = num_time_frames
             self.slice_positions = slice_positions
-            self.temporal_volumes = temporal_volumes
-
-        volume_4d = np.stack(temporal_volumes, axis=0)
         return volume_4d, num_time_frames
 
     @staticmethod
@@ -601,7 +550,16 @@ class DICOMModel:
             volume, _slice_positions = self.load_lge_series(seq_dir, key)
             info = {"volume": volume, "is_temporal": False, "num_frames": None}
         info["geometry"] = self.get_geometry(key)
+        info["window"] = self._default_window(key, info["volume"])
         return info
+
+    def _default_window(self, key: str, volume: np.ndarray) -> tuple[float, float]:
+        """(center, width): the DICOM window for CINE if valid, else the 1st-99th percentile range."""
+        window = None
+        if key.startswith("CINE_"):
+            window = dicom_window(self.series[key].slice_data["slice01"]["meta_data"][0])
+        sample = volume[::4] if volume.ndim == 4 else volume
+        return window or percentile_window(sample, 1, 99) or (float(volume.min()) + 0.5, 1.0)
 
     def load_patient(self, folder_path) -> PatientLoadResult:
         descriptors = self._describe_patient_folder(folder_path)
