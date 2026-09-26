@@ -49,7 +49,6 @@ def main():
 
     def _configure_preprocessing():
         model.use_cardisort_cache = main_window.welcome_widget.use_cardisort_cache
-        model.use_disambiguation_cache = main_window.welcome_widget.use_disambiguation_cache
 
     main_window.welcome_widget.transition_signal.connect(_configure_preprocessing)
 

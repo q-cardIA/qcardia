@@ -35,16 +35,11 @@ def set_data_dir(path: str):
     _SETTINGS.setValue("data_dir", path)
 
 
-def disambiguation_cache_dir() -> Path:
-    return data_dir() / "disambiguation_cache"
-
-
 def list_subjects() -> list[str]:
     folder = data_dir()
     if not folder.is_dir():
         return []
-    skip = disambiguation_cache_dir().name
-    return sorted(e.name for e in folder.iterdir() if e.is_dir() and e.name[0] != "." and e.name != skip)
+    return sorted(e.name for e in folder.iterdir() if e.is_dir() and e.name[0] != ".")
 
 
 # ---------------------------------------------------------------------------

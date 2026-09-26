@@ -35,11 +35,7 @@ class WelcomeWidget(QWidget):
 
     @property
     def use_cardisort_cache(self) -> bool:
-        return self._toggle_preproc_cardisort.isChecked()
-
-    @property
-    def use_disambiguation_cache(self) -> bool:
-        return self._toggle_preproc_disambig.isChecked()
+        return self._toggle_preproc_labels.isChecked()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -206,11 +202,8 @@ class WelcomeWidget(QWidget):
             self._toggle_llm_assistant.setToolTip("Ollama not detected")
         options_layout.addLayout(self._toggle_row(self._toggle_llm_assistant, "LLM assistant"))
 
-        self._toggle_preproc_cardisort = self._toggle_switch(default=True)
-        options_layout.addLayout(self._toggle_row(self._toggle_preproc_cardisort, "Preprocessed cardisort"))
-
-        self._toggle_preproc_disambig = self._toggle_switch(default=True)
-        options_layout.addLayout(self._toggle_row(self._toggle_preproc_disambig, "Preprocessed disambiguation"))
+        self._toggle_preproc_labels = self._toggle_switch(default=True)
+        options_layout.addLayout(self._toggle_row(self._toggle_preproc_labels, "Precomputed subject labels"))
 
         self._change_data_dir_btn = QPushButton("Edit")
         self._change_data_dir_btn.setProperty("role", "welcomeToggleSwitch")
