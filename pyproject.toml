@@ -1,6 +1,7 @@
 [project]
 name = "qcardia"
 version = "0.0.1"
+requires-python = ">=3.10"
 dependencies = [
     "scipy==1.12.0",
     "scikit-image==0.22.0",
@@ -12,8 +13,8 @@ dependencies = [
     # yet. Both imports are lazy (see qcardia.inference), so a plain-UNet install
     # against main still works, but LA-conditioned/context-aware inference needs
     # these refs until the branches are merged upstream.
-    "qcardia-models@git+https://github.com/q-cardIA/qcardia-models@context-unet",
-    "qcardia-data@git+https://github.com/q-cardIA/qcardia-data@context-la-sampling"
+    "qcardia-models@git+ssh://git@github.com/q-cardIA/qcardia-models-dev@context-unet",
+    "qcardia-data@git+ssh://git@github.com/q-cardIA/qcardia-data-dev@context-la-sampling"
 ]
 
 [build-system]

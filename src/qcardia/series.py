@@ -10,6 +10,8 @@ Classes:
     BaseSeries: A base class for handling sequences of DICOM images.
 """
 
+from __future__ import annotations
+
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
