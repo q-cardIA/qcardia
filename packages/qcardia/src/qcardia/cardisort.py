@@ -5,7 +5,9 @@ Classifies each raw-sequence subdirectory of a patient folder (e.g. "REST",
 SAX, 4CH), using the CardisortClassifier model. Label indices and their
 ordering come from the training label CSV's column headers
 ("2021-10-25OptimisedSerDescMatchingMRIUpdated.csv" in cardisort-v2), split on
-the first underscore into sequence/plane, in order of first appearance.
+the first underscore into sequence/plane, in order of first appearance. The
+"NoGroup" column is not a class: cardisort-v2 labels those series -1
+(unlabelled), and they are excluded from the loss during training.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ SEQUENCE_NAMES = {
     5: "HASTE", 6: "PC", 7: "T2MAPPING", 8: "T2starMAPPING", 9: "EGE",
     10: "TIscout", 11: "DBLGE", 12: "WBLGE", 13: "B0map", 14: "TestPERF",
     15: "PERF", 16: "Scouts", 17: "T1TSE", 18: "MRA", 19: "SFFPMRA",
-    20: "SSFPMRA", 21: "BOLUSTRACK", 22: "NoGroup",
+    20: "SSFPMRA", 21: "BOLUSTRACK",
     -1: "unlabelled",
 }
 
@@ -40,6 +42,14 @@ PLANE_NAMES = {
     12: "DA", 13: "PULV", 14: "MV", 15: "MP", 16: "SAG", 17: "COR",
     -1: "unlabelled",
 }
+
+
+# Frame positions, as fractions of the valid frames of a series, and the
+# intensity above which a frame counts as an unexpected reconstruction. Both
+# come from select_valid_image_slices in cardisort-v2's qcardia_data fork,
+# which prepares the training images.
+FRAME_LOCATIONS = (0.1, 0.3, 0.5, 0.7, 0.9)
+MAX_VALID_FRAME_INTENSITY = 7000.0
 
 
 class CardisortClassifier(nn.Module):
@@ -53,8 +63,15 @@ class CardisortClassifier(nn.Module):
             mlp_channels_list=config["model"]["mlp_channels"],
         )
         feature_size = config["model"]["mlp_channels"][-1]
-        self.seq_head = nn.Linear(feature_size, config["model"]["n_sequence_classes"])
-        self.plane_head = nn.Linear(feature_size, config["model"]["n_plane_classes"])
+        # The heads cover every label index the training CSV can produce, which
+        # is why the config calls them maximums: the indices are non-contiguous,
+        # so some outputs belong to classes absent from the training data.
+        self.seq_head = nn.Linear(
+            feature_size, config["model"]["max_nr_sequence_classes"]
+        )
+        self.plane_head = nn.Linear(
+            feature_size, config["model"]["max_nr_plane_classes"]
+        )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         features = self.backbone(x)
@@ -69,6 +86,13 @@ def load_cardisort_model(wandb_run_path: Path) -> tuple[CardisortClassifier, dic
     config = {
         k: v["value"] for k, v in raw_config.items() if isinstance(v, dict) and "value" in v
     }
+
+    n_channels = config["model"]["nr_input_channels"]
+    if n_channels != len(FRAME_LOCATIONS):
+        raise ValueError(
+            f"Model expects {n_channels} input channels, but the frames are"
+            f" picked at {len(FRAME_LOCATIONS)} positions (FRAME_LOCATIONS)"
+        )
 
     model = CardisortClassifier(config)
     model_weights_path = wandb_run_path / "files" / "best_model.pt"
@@ -124,18 +148,21 @@ def load_series_datasets(sequence_dir: Path) -> list[pydicom.Dataset]:
 
 
 def get_harmonized_pixel_arrays(datasets: list[pydicom.Dataset]) -> list[np.ndarray]:
-    """Pixel arrays for all datasets, resizing any that don't match the series'
-    dominant (most common) shape. Mirrors the reformat step in cardisort-v2's
-    qcardia_data fork, which reconciles minor matrix-size differences between
-    reconstruction types (e.g. magnitude vs. PSIR, or an interleaved scout)
-    within a single series before frame selection."""
+    """Pixel arrays for all datasets, dropping non-2D frames (e.g. RGB
+    thumbnails) and resizing any that don't match the series' dominant (most
+    common) shape. Mirrors the reformat step in cardisort-v2's qcardia_data
+    fork, which reconciles minor matrix-size differences between reconstruction
+    types (e.g. magnitude vs. PSIR, or an interleaved scout) within a single
+    series before frame selection."""
     pixel_arrays = []
     for ds in datasets:
         try:
-            pixel_arrays.append(ds.pixel_array)
+            pixel_array = ds.pixel_array
         except Exception:
             # Corrupt file or unsupported transfer syntax — skip, don't fail the series.
             continue
+        if pixel_array.ndim == 2:
+            pixel_arrays.append(pixel_array)
     if not pixel_arrays:
         raise ValueError("No readable pixel data in series")
 
@@ -150,6 +177,29 @@ def get_harmonized_pixel_arrays(datasets: list[pydicom.Dataset]) -> list[np.ndar
     ]
 
 
+def select_valid_frames(pixel_arrays: list[np.ndarray]) -> list[np.ndarray]:
+    """The frames the classifier reads, one per fraction in FRAME_LOCATIONS,
+    taken from the frames that pass the validity check. Mirrors
+    select_valid_image_slices in cardisort-v2's qcardia_data fork: a frame with
+    negative or very large values comes from an unexpected reconstruction (e.g.
+    a PSIR series exported alongside its magnitude images), and is left out. The
+    same frame can be picked more than once for a short series."""
+    valid_frames = [
+        frame
+        for frame in pixel_arrays
+        if frame.min() >= 0.0 and frame.max() <= MAX_VALID_FRAME_INTENSITY
+    ]
+    if not valid_frames:
+        raise ValueError("No valid frames in series")
+
+    valid_idxs = np.arange(len(valid_frames))
+    frame_idxs = [
+        int(np.argmin(np.abs(valid_idxs - location * (len(valid_frames) - 1))))
+        for location in FRAME_LOCATIONS
+    ]
+    return [valid_frames[idx] for idx in frame_idxs]
+
+
 def build_cardisort_input(
     datasets: list[pydicom.Dataset],
     n_channels: int,
@@ -157,28 +207,29 @@ def build_cardisort_input(
     target_size: tuple[int, int],
     grid_sample_mode: str,
 ) -> torch.Tensor:
-    """Picks n_channels representative frames evenly spaced across the series,
-    resamples them (pixel-spacing aware, like RandResample2Dd) to target_size at
-    target_pixdim, and min-max normalizes the stack to [0, 1] (like
-    NormalizeIntensityd), matching the CardisortClassifier's training-time
-    preprocessing."""
+    """Picks n_channels representative frames across the series, resamples them
+    (like RandResample2Dd) to target_size at target_pixdim, and standardizes
+    each frame to zero mean and unit variance (like StandardizeIntensityd with
+    reference_level "channel"), matching the CardisortClassifier's training-time
+    preprocessing.
+
+    The training images are NIfTI files written with an identity affine, so the
+    pixel spacing of the source series plays no part in the resampling: only the
+    matrix size does. The DICOM PixelSpacing is therefore ignored here as well.
+    """
     pixel_arrays = get_harmonized_pixel_arrays(datasets)
-    frame_idxs = np.linspace(0, len(pixel_arrays) - 1, n_channels).round().astype(int)
     channels = np.stack(
-        [pixel_arrays[idx].astype(np.float32) for idx in frame_idxs], axis=0
+        [frame.astype(np.float32) for frame in select_valid_frames(pixel_arrays)],
+        axis=0,
     )
     # (n_channels, 1, H, W): grid_sample batches over channels via the batch dim
     channels_tensor = torch.tensor(channels).unsqueeze(1)
 
-    pixel_spacing = datasets[frame_idxs[0]].PixelSpacing
     source_size = torch.tensor(channels_tensor.shape[-2:], dtype=torch.float32)
-    real_source_size = (
-        torch.tensor([float(pixel_spacing[0]), float(pixel_spacing[1])]) * source_size
-    )
     real_target_size = torch.tensor(target_pixdim, dtype=torch.float32) * torch.tensor(
         target_size, dtype=torch.float32
     )
-    dimension_scale_factor = real_target_size / real_source_size
+    dimension_scale_factor = real_target_size / source_size
 
     scale_t = utils.t_2d_scale(dimension_scale_factor)
     grid = F.affine_grid(
@@ -194,8 +245,10 @@ def build_cardisort_input(
         padding_mode="zeros",
     ).squeeze(1)  # (n_channels, target_h, target_w)
 
-    resampled = (resampled - resampled.min()) / (resampled.max() - resampled.min() + 1e-6)
-    return resampled.unsqueeze(0)  # (1, n_channels, target_h, target_w)
+    mean = resampled.mean(dim=(1, 2), keepdim=True)
+    std = resampled.std(dim=(1, 2), keepdim=True)
+    standardized = (resampled - mean) / std
+    return standardized.unsqueeze(0)  # (1, n_channels, target_h, target_w)
 
 
 def print_class_probs(head_name: str, probs: torch.Tensor, class_names: dict) -> None:
