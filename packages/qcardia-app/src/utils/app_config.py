@@ -3,8 +3,7 @@
 Layout assumed by the defaults:
     <WORKSPACE>/
     ├── qcardia-app-dev/    ← this repo
-    └── data/
-        └── new_data/       ← subject folders (QLGE01_/, QLGE02_/, ...)
+    └── data/               ← subject folders (any names; changeable on the welcome screen)
 
 If your layout differs, update the paths below.
 """
@@ -14,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 import requests
+from PySide6.QtCore import QSettings
 
 # Root of the workspace that holds all repos and data.
 WORKSPACE_DIR: Path = Path(__file__).parent.parent.parent.parent
@@ -22,45 +22,38 @@ WORKSPACE_DIR: Path = Path(__file__).parent.parent.parent.parent
 APP_DIR: Path = Path(__file__).parent.parent.parent
 ICON_PATH: Path = APP_DIR / "assets" / "images" / "q-cardIA.png"
 
-# Base directory that holds subject folders (e.g. QLGE01_/, QLGE02_/, ...).
-# Used by the AI assistant's load_subject tool.
-SUBJECT_BASE_DIR: Path = WORKSPACE_DIR / "data" / "new_data"
+# Holds one folder per subject, any names; changed on the welcome screen.
+DEFAULT_DATA_DIR: Path = WORKSPACE_DIR / "data"
+_SETTINGS = QSettings("q-cardIA", "qcardia-app")
 
 
-def subject_folder_path(subject_number: int) -> Path:
-    """Return the subject folder path for a given integer subject number."""
-    return SUBJECT_BASE_DIR / f"QLGE{subject_number:02d}_"
+def data_dir() -> Path:
+    return Path(_SETTINGS.value("data_dir", str(DEFAULT_DATA_DIR)))
 
 
-def discover_subject_numbers() -> list[int]:
-    """Scan SUBJECT_BASE_DIR for QLGE{NN}_ folders and return the sorted subject numbers.
+def set_data_dir(path: str):
+    _SETTINGS.setValue("data_dir", path)
 
-    Lets the chat assistant ground load_subject calls against subjects that
-    actually exist, instead of guessing/hallucinating a number.
-    """
-    if not SUBJECT_BASE_DIR.is_dir():
+
+def list_subjects() -> list[str]:
+    folder = data_dir()
+    if not folder.is_dir():
         return []
-    numbers = []
-    for entry in SUBJECT_BASE_DIR.iterdir():
-        if entry.is_dir() and entry.name.startswith("QLGE") and entry.name.endswith("_"):
-            digits = entry.name[len("QLGE"):-1]
-            if digits.isdigit():
-                numbers.append(int(digits))
-    return sorted(numbers)
+    return sorted(e.name for e in folder.iterdir() if e.is_dir() and e.name[0] != ".")
 
 
 # ---------------------------------------------------------------------------
 # Ollama (local LLM chat assistant)
 # ---------------------------------------------------------------------------
 
-OLLAMA_URL: str = "http://localhost:11434/api/chat"
-OLLAMA_GENERATE_URL: str = "http://localhost:11434/api/generate"
-OLLAMA_TAGS_URL: str = "http://localhost:11434/api/tags"
-OLLAMA_MODEL: str = "qwen3:8b"
+# Local Ollama server — 127.0.0.1, not "localhost" (can resolve to an
+# unreachable IPv6 address and hang).
+OLLAMA_URL: str = "http://127.0.0.1:11434/api/chat"
+OLLAMA_GENERATE_URL: str = "http://127.0.0.1:11434/api/generate"
+OLLAMA_TAGS_URL: str = "http://127.0.0.1:11434/api/tags"
+OLLAMA_MODEL: str = "qwen3.5:latest"
 
-# Explicit context window — Ollama silently truncates from the front of the
-# prompt if this is left too low, which would otherwise drop the system
-# prompt/tool definitions with no error.
+# Too low silently truncates the prompt (dropping the system prompt/tools) with no error.
 OLLAMA_NUM_CTX: int = 16384
 
 
@@ -102,9 +95,7 @@ def list_ollama_models() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Local GGUF weights (models/llm/) — not pulled into Ollama by default.
-# Ollama only knows about models in its own store, so these are surfaced
-# separately and imported into Ollama on first use via `ollama create`.
+# Local GGUF weights (models/llm/) — imported into Ollama on first use via `ollama create`.
 # ---------------------------------------------------------------------------
 
 LLM_WEIGHTS_DIR: Path = WORKSPACE_DIR / "models" / "llm"
@@ -145,6 +136,8 @@ def import_gguf_model(gguf_path: Path) -> str:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
     except subprocess.CalledProcessError as e:
