@@ -17,7 +17,13 @@ from qcardia.cardisort import (
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
 from qcardia.series import BaseSeries, CineSeries, LGESeries
 
-from model.subject_labels import SeriesLabel, SubjectLabels, load_labels, update_primary
+from model.subject_labels import (
+    SeriesLabel,
+    SubjectLabels,
+    load_labels,
+    save_labels,
+    update_primary,
+)
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
@@ -405,16 +411,17 @@ class DICOMModel:
             )
         return self._cardisort_model, self._cardisort_config
 
-    def _describe_patient_folder(self, folder_path) -> list[SequenceDescriptor]:
+    def _describe_patient_folder(self, folder_path) -> tuple[list[SequenceDescriptor], bool]:
         folder_path = Path(folder_path)
         if self.use_cardisort_cache:
             cached = load_labels(folder_path)
             if cached is not None:
-                return [
+                descriptors = [
                     SequenceDescriptor(folder_path / s.dir, s.sequence_name, s.plane_name, s.key)
                     for s in cached.series
                 ]
-        return self._classify_live(folder_path)
+                return descriptors, True
+        return self._classify_live(folder_path), False
 
     def _classify_live(self, folder_path: Path) -> list[SequenceDescriptor]:
         model, config = self._get_cardisort_model()
@@ -445,78 +452,90 @@ class DICOMModel:
 
         return descriptors
 
-    def _group_and_resolve(self, descriptors: list[SequenceDescriptor], folder_path) -> dict[str, Path]:
+    def _group_and_resolve(
+        self, descriptors: list[SequenceDescriptor], folder_path, ignore_cache: bool = False
+    ) -> tuple[dict[str, Path], dict[str, dict]]:
         dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
         for d in descriptors:
             if d.key is not None:
                 dirs_by_key[d.key].append(d)
 
-        cached = load_labels(folder_path) if self.use_cardisort_cache else None
+        use_cache = self.use_cardisort_cache and not ignore_cache
+        cached = load_labels(folder_path) if use_cache else None
         primary_by_key = cached.primary_by_key if cached is not None else {}
 
         classified: dict[str, Path] = {}
+        resolved: dict[str, dict] = {}
         for key, group in dirs_by_key.items():
-            primary = self._resolve_primary_dir(key, [d.path for d in group], primary_by_key)
+            dirs = [d.path for d in group]
+            primary, confident = self._resolve_primary_dir(key, dirs, primary_by_key)
             classified[key] = primary
             for d in group:
                 d.is_primary = d.path == primary
+            # A fallback guess must not be cached, or it can never be revisited.
+            if len(dirs) > 1 and confident:
+                resolved[key] = {"candidates": sorted(p.name for p in dirs), "primary": primary.name}
 
-        return classified
+        return classified, resolved
 
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
-        return self._group_and_resolve(self._describe_patient_folder(folder_path), folder_path)
+        descriptors, _ = self._describe_patient_folder(folder_path)
+        return self._group_and_resolve(descriptors, folder_path)[0]
 
     def label_patient_folder(self, folder_path) -> SubjectLabels:
         """Live classification + disambiguation for a whole subject, ignoring any cached sidecar; used by the preprocessing script."""
         folder_path = Path(folder_path)
         descriptors = self._classify_live(folder_path)
+        _, primary_by_key = self._group_and_resolve(descriptors, folder_path, ignore_cache=True)
+        return self._build_labels(folder_path, descriptors, primary_by_key)
 
-        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
-        for d in descriptors:
-            if d.key is not None:
-                dirs_by_key[d.key].append(d)
-
-        primary_by_key = {}
-        for key, group in dirs_by_key.items():
-            dirs = [d.path for d in group]
-            if len(dirs) < 2:
-                continue
-            primary = self._resolve_primary_dir(key, dirs, {})
-            primary_by_key[key] = {"candidates": sorted(d.name for d in dirs), "primary": primary.name}
-
+    def _build_labels(
+        self, folder_path: Path, descriptors: list[SequenceDescriptor], primary_by_key: dict[str, dict]
+    ) -> SubjectLabels:
         series = [
             SeriesLabel(d.path.relative_to(folder_path).as_posix(), d.sequence_name, d.plane_name, d.key)
             for d in descriptors
         ]
         return SubjectLabels(series=series, primary_by_key=primary_by_key)
 
+    def _cache_labels(
+        self, folder_path: Path, descriptors: list[SequenceDescriptor], primary_by_key: dict[str, dict]
+    ) -> None:
+        try:
+            save_labels(folder_path, self._build_labels(folder_path, descriptors, primary_by_key))
+        except Exception as e:
+            logging.warning(f"Could not cache cardisort labels for {folder_path.name}: {e}")
+
     def update_cached_label(self, folder_path, key: str, candidate_names: list[str], primary_name: str):
         """Keeps a manual reclassification (reassign_series) from being reverted by a stale sidecar entry."""
         update_primary(Path(folder_path), key, candidate_names, primary_name)
 
-    def _resolve_primary_dir(self, key: str, dirs: list[Path], primary_by_key: dict) -> Path:
+    def _resolve_primary_dir(
+        self, key: str, dirs: list[Path], primary_by_key: dict
+    ) -> tuple[Path, bool]:
+        """Second element is False when the primary is a fallback guess rather than a real decision."""
         if len(dirs) == 1:
-            return dirs[0]
+            return dirs[0], True
 
         signature = sorted(d.name for d in dirs)
         entry = primary_by_key.get(key)
         if entry is not None and entry.get("candidates") == signature:
             cached = next((d for d in dirs if d.name == entry.get("primary")), None)
             if cached is not None:
-                return cached
+                return cached, True
             logging.warning(f"Cached primary for {key} points at a missing dir, recomputing")
 
         prefix, _, plane_name = key.partition("_")
         try:
             candidates = [summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs]
             result = disambiguate_duplicates((prefix, plane_name), candidates)
-            return next(d for d in dirs if d.name == result["primary_series"])
+            return next(d for d in dirs if d.name == result["primary_series"]), True
         except Exception as e:
             logging.warning(
                 f"Disambiguation failed for {key} ({[d.name for d in dirs]}): {e}; "
                 "falling back to largest series"
             )
-            return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file()))
+            return max(dirs, key=lambda d: sum(1 for f in d.rglob("*") if f.is_file())), False
 
     def load_series_for_key(self, seq_dir: Path, key: str) -> dict:
         if key.startswith("CINE_"):
@@ -529,8 +548,12 @@ class DICOMModel:
         return info
 
     def load_patient(self, folder_path) -> PatientLoadResult:
-        descriptors = self._describe_patient_folder(folder_path)
-        classified = self._group_and_resolve(descriptors, folder_path)
+        folder_path = Path(folder_path)
+        descriptors, from_cache = self._describe_patient_folder(folder_path)
+        classified, primary_by_key = self._group_and_resolve(descriptors, folder_path)
+
+        if not from_cache and self.use_cardisort_cache:
+            self._cache_labels(folder_path, descriptors, primary_by_key)
 
         loaded: dict[str, dict] = {}
         for key, seq_dir in classified.items():
