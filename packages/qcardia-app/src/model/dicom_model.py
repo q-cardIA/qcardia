@@ -405,7 +405,7 @@ class DICOMModel:
 
     def _get_cardisort_model(self):
         if self._cardisort_model is None:
-            cardisort_wandb_path = Path.cwd() / "wandb" / "cardisort"
+            cardisort_wandb_path = Path.cwd() / "wandb" / "new_cardisort"
             self._cardisort_model, self._cardisort_config = load_cardisort_model(
                 cardisort_wandb_path
             )
