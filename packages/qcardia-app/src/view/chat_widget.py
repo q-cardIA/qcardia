@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from model.background_worker import CallableWorker
+from utils import study_log
 from model.voice_input import (
     VOICE_AVAILABLE,
     MicrophoneWorker,
@@ -430,6 +431,7 @@ class ChatWidget(QFrame):
         # send button while it's held — also covers the F9 path, which has
         # no real mouse press for Qt's own :pressed state to latch onto.
         self._mic_btn.setDown(True)
+        self._voice_span = study_log.Span("voice")
         self._mic_worker = MicrophoneWorker(self)
         self._mic_worker.finished.connect(self._on_mic_audio_ready)
         self._mic_worker.error.connect(self._on_mic_error)
@@ -439,6 +441,8 @@ class ChatWidget(QFrame):
         if self._mic_worker is None:
             return
         self._mic_worker.stop()
+        self._voice_span.end()
+        self._voice_span = study_log.Span("transcription")
         self._mic_worker = None
         self._mic_btn.setDown(False)
         self._mic_btn.start_loading()  # same spinning-arc busy indicator as Send
@@ -450,6 +454,7 @@ class ChatWidget(QFrame):
         self._transcription_worker.start()
 
     def _on_transcription_done(self, text: str):
+        self._voice_span.end(text=text)
         self._mic_btn.stop_loading()
         self._transcription_worker = None
         if not text:
@@ -461,6 +466,7 @@ class ChatWidget(QFrame):
         self._input.setFocus()
 
     def _on_mic_error(self, message: str):
+        self._voice_span.end(error=message)
         self._mic_btn.setDown(False)
         self._mic_btn.stop_loading()
         self._mic_worker = None
