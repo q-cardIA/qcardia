@@ -52,7 +52,7 @@ def main():
 
     def _configure_preprocessing():
         model.use_cardisort_cache = main_window.welcome_widget.use_cardisort_cache
-        model.use_disambiguation_cache = main_window.welcome_widget.use_disambiguation_cache
+        model.use_segmentation_cache = main_window.welcome_widget.use_segmentation_cache
 
     main_window.welcome_widget.transition_signal.connect(_configure_preprocessing)
 
@@ -71,13 +71,8 @@ def main():
     main_window.show()
 
     if icon is not None:
-        # Windows' taskbar button is created from python.exe's own icon the
-        # moment the window first appears; the WM_SETICON calls above (made
-        # before/at construction, while heavy imports like torch/tf-keras are
-        # still loading) can be issued before the native window handle is
-        # ready to receive them and get missed. Re-apply once the event loop
-        # is actually pumping messages so Explorer picks up the real icon
-        # immediately instead of only after some later repaint.
+        # Windows can miss the earlier WM_SETICON calls if the native window
+        # handle isn't ready yet — re-apply once the event loop is pumping.
         def _reapply_icon():
             app.setWindowIcon(icon)
             main_window.setWindowIcon(icon)

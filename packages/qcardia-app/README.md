@@ -25,3 +25,7 @@ The example documents every field. The two worth knowing up front are `mode`, wh
 ## Dependencies
 
 See `pyproject.toml` for Python dependencies. SciPy is required for morphological operations.
+
+## Subject data
+
+Each subfolder of the data folder (default `data/`, next to this repo) is one subject. Change it on the welcome screen under `···` → **Edit**.

@@ -7,6 +7,7 @@ wire format; utils.llm_devices picks between them.
 from __future__ import annotations
 
 import json
+import logging
 
 import requests
 from model.background_worker import ChatWorker
@@ -32,7 +33,8 @@ class OllamaWorker(ChatWorker):
             payload["tools"] = self._tools
 
         try:
-            response = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=120)
+            # 10s to connect, 120s between chunks once streaming.
+            response = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=(10, 120))
             response.raise_for_status()
         except requests.RequestException as e:
             # Ollama refuses think:true without the capability and says why in the body, not the status.
@@ -64,6 +66,7 @@ class OllamaWorker(ChatWorker):
                         (tc["function"]["name"], tc["function"].get("arguments", {}))
                         for tc in tool_calls
                     ]
+                    logging.info(f"[{self._model}] tool_calls: {calls}")
                     self.tool_calls_ready.emit(calls)
                     return
 
@@ -81,6 +84,7 @@ class OllamaWorker(ChatWorker):
             self.error.emit(f"Ollama stream interrupted: {e}")
             return
 
+        logging.info(f"[{self._model}] finished with no tool_calls (text-only reply)")
         self.finished_ok.emit()
 
 
@@ -100,7 +104,7 @@ def warm_model(model: str = OLLAMA_MODEL):
                 "options": {"num_ctx": OLLAMA_NUM_CTX},
             },
             # Generous: backs the picker's loading bar, and a big remote model takes minutes.
-            timeout=300,
+            timeout=(10, 300),
         )
     except requests.RequestException:
         pass  # best-effort warm-up; the real chat call will surface any real connectivity error

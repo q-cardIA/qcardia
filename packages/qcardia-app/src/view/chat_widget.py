@@ -53,7 +53,8 @@ _FAILURE_MARKERS = ("failed", "not found", "not loaded", "out of range", "unknow
 # available on click, mirroring how agentic coding UIs collapse tool calls
 # to a summary line with an expandable detail underneath.
 _TOOL_SUMMARY_FORMATTERS = {
-    "load_subject": lambda a: f"Load subject {a.get('subject_number')}",
+    "list_subjects": lambda a: "List subjects",
+    "load_subject": lambda a: f"Load subject {a.get('subject_id')}",
     "run_segmentation": lambda a: f"Run {a.get('modality')} segmentation",
     "apply_preset": lambda a: f"Apply {a.get('preset')} preset",
     "display_series": lambda a: (
@@ -493,8 +494,9 @@ class ChatWidget(QFrame):
         # Cached by the device's probe, so the GUI thread pays no HTTP timeout here.
         pulled = llm_devices.list_models(refresh) if llm_devices.chat_available() else []
         pulled_tags = {m["tag"] for m in pulled}
-        if fallback not in pulled_tags:
-            pulled = [{"tag": fallback, "label": fallback, "local": False}] + pulled
+        pinned = llm_devices.current().model  # e.g. SPIKE's "best-live", which no model list shows
+        if pinned and pinned not in pulled_tags:
+            pulled = [{"tag": pinned, "label": pinned, "local": False}] + pulled
 
         for m in pulled:
             self._model_combo.addItem(m["label"], m["tag"])
@@ -516,8 +518,10 @@ class ChatWidget(QFrame):
                 self._model_combo.setCurrentIndex(idx)
         self._model_combo.blockSignals(False)
         self._sync_think_toggle()
-        if self._model_combo.count():
+        if self._model_combo.count():  # the default model if installed, else the first one
             self.model_changed.emit(self._model_combo.currentData())
+        elif llm_devices.chat_available():
+            self.append_system_message(f"No models installed. Run `ollama pull {llm_devices.default_model()}`.")
 
     def _sync_think_toggle(self):
         """Only offer Think where the model can do it; an always-on button would just error."""
