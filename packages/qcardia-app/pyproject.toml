@@ -18,9 +18,10 @@ dependencies = [
     "qcardia",
     "faster-whisper>=1.0.3",
     "sounddevice>=0.4.6",
+    "wandb>=0.30.0",
 ]
 
 # qcardia-models/qcardia-data aren't imported here directly — they resolve
 # transitively through qcardia's own dependency spec, so nothing to override.
 [tool.uv.sources]
-qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "apply-cardisort" }
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "lax-context-aware-inference" }
