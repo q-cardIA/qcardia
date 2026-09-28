@@ -1,8 +1,10 @@
 import os
+import sys
 
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -12,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from utils.app_config import CHAT_AVAILABLE
+from utils.app_config import CHAT_AVAILABLE, data_dir, set_data_dir
 
 class WelcomeWidget(QWidget):
 
@@ -33,11 +35,7 @@ class WelcomeWidget(QWidget):
 
     @property
     def use_cardisort_cache(self) -> bool:
-        return self._toggle_preproc_cardisort.isChecked()
-
-    @property
-    def use_disambiguation_cache(self) -> bool:
-        return self._toggle_preproc_disambig.isChecked()
+        return self._toggle_preproc_labels.isChecked()
 
     @property
     def use_segmentation_cache(self) -> bool:
@@ -85,6 +83,10 @@ class WelcomeWidget(QWidget):
         row.addWidget(label)
         row.addStretch(1)
         return row
+
+    def _show_data_dir(self):
+        self._data_dir_label.setText(f"Data folder: {data_dir().name}")
+        self._data_dir_label.setToolTip(str(data_dir()))
 
     # ------------------------------------------------------------------
     # Build
@@ -204,14 +206,18 @@ class WelcomeWidget(QWidget):
             self._toggle_llm_assistant.setToolTip("Ollama not detected")
         options_layout.addLayout(self._toggle_row(self._toggle_llm_assistant, "LLM assistant"))
 
-        self._toggle_preproc_cardisort = self._toggle_switch(default=True)
-        options_layout.addLayout(self._toggle_row(self._toggle_preproc_cardisort, "Preprocessed cardisort"))
-
-        self._toggle_preproc_disambig = self._toggle_switch(default=True)
-        options_layout.addLayout(self._toggle_row(self._toggle_preproc_disambig, "Preprocessed disambiguation"))
+        self._toggle_preproc_labels = self._toggle_switch(default=True)
+        options_layout.addLayout(self._toggle_row(self._toggle_preproc_labels, "Precomputed subject labels"))
 
         self._toggle_preproc_seg = self._toggle_switch(default=True)
         options_layout.addLayout(self._toggle_row(self._toggle_preproc_seg, "Preprocessed segmentation"))
+
+        self._change_data_dir_btn = QPushButton("Edit")
+        self._change_data_dir_btn.setProperty("role", "welcomeToggleSwitch")
+        data_dir_row = self._toggle_row(self._change_data_dir_btn, "")
+        self._data_dir_label = data_dir_row.itemAt(1).widget()  # the row's label
+        self._show_data_dir()
+        options_layout.addLayout(data_dir_row)
 
         # Zero-spacing container so button_row and _options_panel touch —
         # the panel's own layout spacing would otherwise gap them apart.
@@ -314,6 +320,7 @@ class WelcomeWidget(QWidget):
             self.transition_signal.emit
         )
         self._chevron_btn.toggled.connect(self._on_chevron_toggled)
+        self._change_data_dir_btn.clicked.connect(self._on_change_data_dir)
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)
         self.right_panel_about_software_pushbutton.clicked.connect(self.about_clicked)
         self.right_panel_helpwiki_pushbutton.clicked.connect(self.help_clicked)
@@ -330,6 +337,15 @@ class WelcomeWidget(QWidget):
             widget.setProperty("panelOpen", checked)
             widget.style().unpolish(widget)
             widget.style().polish(widget)
+
+    def _on_change_data_dir(self):
+        options = QFileDialog.ShowDirsOnly
+        if sys.platform == "darwin":  # native dialog crashes there; Qt's own can't open subfolders on Windows
+            options |= QFileDialog.DontUseNativeDialog
+        folder = QFileDialog.getExistingDirectory(self, "Select data folder", str(data_dir()), options)
+        if folder:
+            set_data_dir(folder)
+            self._show_data_dir()
 
     def community_clicked(self):
         QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA"))

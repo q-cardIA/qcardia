@@ -136,8 +136,13 @@ dmypy.json
 wandb/
 *output*/
 CLAUDE.md
-src/precompute_classification_cache.py
 
 # leftover from context-retrieval branch, not used here
 retrieval_index/
 retrieval_gpu_venv/
+
+# local eval run outputs (tests/llm/README.md) — timestamped, not versioned
+tests/llm/results/
+
+# evidence-gathering prototype run outputs (prototypes/evidence_gathering/README.md)
+prototypes/evidence_gathering/findings/

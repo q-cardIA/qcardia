@@ -17,3 +17,7 @@ This repo contains code for an interactive DICOM viewer.
 ## Dependencies
 
 See `pyproject.toml` for Python dependencies. SciPy is required for morphological operations.
+
+## Subject data
+
+Each subfolder of the data folder (default `data/`, next to this repo) is one subject. Change it on the welcome screen under `···` → **Edit**.
