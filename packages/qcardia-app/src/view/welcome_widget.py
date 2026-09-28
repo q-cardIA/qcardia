@@ -37,6 +37,10 @@ class WelcomeWidget(QWidget):
     def use_cardisort_cache(self) -> bool:
         return self._toggle_preproc_labels.isChecked()
 
+    @property
+    def use_segmentation_cache(self) -> bool:
+        return self._toggle_preproc_seg.isChecked()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -204,6 +208,9 @@ class WelcomeWidget(QWidget):
 
         self._toggle_preproc_labels = self._toggle_switch(default=True)
         options_layout.addLayout(self._toggle_row(self._toggle_preproc_labels, "Precomputed subject labels"))
+
+        self._toggle_preproc_seg = self._toggle_switch(default=True)
+        options_layout.addLayout(self._toggle_row(self._toggle_preproc_seg, "Preprocessed segmentation"))
 
         self._change_data_dir_btn = QPushButton("Edit")
         self._change_data_dir_btn.setProperty("role", "welcomeToggleSwitch")
