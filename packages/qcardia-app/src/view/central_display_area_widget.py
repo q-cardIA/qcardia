@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QSlider,
     QVBoxLayout,
     QWidget,
@@ -22,6 +23,8 @@ from view.custom_graphics_view import CustomQGraphicsView
 from view.loading_overlay import LoadingOverlay
 from view.series_browser_widget import SERIES_KEY_MIME_TYPE
 from view.volume_geometry import VolumeGeometry
+
+_EMPTY_TITLE = "Drop a series here"
 
 
 @dataclass
@@ -134,6 +137,11 @@ class CentralDisplayAreaWidget(QWidget):
             for i in range(self.n_panels)
         ]
 
+    def set_crosshair_shown(self, shown: bool):
+        CustomQGraphicsView.crosshair_shown = shown
+        for p in self._panels:
+            p.viewer.show_crosshair(shown)
+
     def set_grid_size(self, rows: int, cols: int):
         if rows == self._grid_rows and cols == self._grid_cols:
             return
@@ -199,6 +207,8 @@ class CentralDisplayAreaWidget(QWidget):
         # Re-render any panels that already have a series assigned
         for i in range(n):
             if self._panel_series_key[i] is not None:
+                # Rebuilt panels start with the empty title.
+                self._panels[i].title_label.setText(f"{self._panel_series_key[i]} / {self._panel_axis[i]}")
                 self._panels[i].viewer.new_series(self._view_of(i))
                 self._update_panel(i)
 
@@ -214,12 +224,12 @@ class CentralDisplayAreaWidget(QWidget):
         hdr = QHBoxLayout()
         hdr.setContentsMargins(6, 4, 6, 4)
         hdr.setSpacing(8)
-        title = QLabel("Empty")
+        title = QLabel(_EMPTY_TITLE)
         title.setProperty("role", "viewerTitle")
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)  # clip, never widen the grid
         slice_lbl = QLabel("")
         slice_lbl.setProperty("role", "viewerMeta")
-        hdr.addWidget(title)
-        hdr.addStretch(1)
+        hdr.addWidget(title, 1)
         hdr.addWidget(slice_lbl)
 
         slider = QSlider(Qt.Horizontal)
@@ -332,7 +342,7 @@ class CentralDisplayAreaWidget(QWidget):
             return
         self._panel_series_key[panel_idx] = None
         p = self._panels[panel_idx]
-        p.title_label.setText("Empty")
+        p.title_label.setText(_EMPTY_TITLE)
         p.slice_label.setText("")
         p.slider.setEnabled(False)
         p.slider.setVisible(False)
