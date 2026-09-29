@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
-from PySide6.QtGui import QDrag, QImage, QPixmap
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QRectF, Qt, Signal
+from PySide6.QtGui import QDrag, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -15,17 +15,20 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
     QMenu,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from view import theme
+
 SERIES_KEY_MIME_TYPE = "application/x-qcardia-series-key"
 
 _GROUP_ORDER = ["CINE", "LGE", "PERF"]
 _N_COLS = 2
-_CARD_SIZE = 84
+_GAP = 2  # px between thumbnails
 
 _REASSIGN_KEYS = [
     "CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH",
@@ -71,7 +74,9 @@ class _ReassignDialog(QDialog):
         return self._combo.currentText()
 
 
-class _ThumbnailCard(QFrame):
+class _ThumbnailCard(QWidget):
+    """Painted, so resizing the panel only repaints: the image is cropped to a square once."""
+
     reclassify_requested = Signal(object, str)  # (SeriesCardInfo, new_key)
 
     def __init__(self, info: SeriesCardInfo, parent=None):
@@ -79,33 +84,58 @@ class _ThumbnailCard(QFrame):
         self.info = info
         self._draggable = info.draggable
         self.series_key = info.series_key
-        self.setProperty("role", "seriesCard" if info.draggable else "seriesCardMuted")
-        self.setFixedSize(_CARD_SIZE, _CARD_SIZE)
+        self.setProperty("role", "seriesCard")
+        self.setAttribute(Qt.WA_Hover)
+        self.setToolTip(info.label)
+        self._pixmap: QPixmap | None = None
+        self._scaled: QPixmap | None = None  # _pixmap at the card's size
         if info.draggable:
             self.setCursor(Qt.OpenHandCursor)
         self._drag_start = QPoint()
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
-        self._thumb_lbl = QLabel()
-        self._thumb_lbl.setAlignment(Qt.AlignCenter)
-        self._key_lbl = QLabel(info.label)
-        self._key_lbl.setProperty(
-            "role", "seriesCardLabel" if info.draggable else "seriesCardLabelMuted"
-        )
-        self._key_lbl.setAlignment(Qt.AlignCenter)
-        self._key_lbl.setWordWrap(True)
-        layout.addWidget(self._thumb_lbl, 1)
-        layout.addWidget(self._key_lbl)
 
     def set_thumbnail(self, arr: np.ndarray | None):
         if arr is None:
             return
         pix = _to_pixmap(arr)
-        side = _CARD_SIZE - 12
-        scaled = pix.scaled(side, side, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        self._thumb_lbl.setPixmap(scaled)
+        side = min(pix.width(), pix.height())
+        self._pixmap = pix.copy((pix.width() - side) // 2, (pix.height() - side) // 2, side, side)
+        self._scaled = None
+
+    def set_side(self, side: int):
+        if self.width() != side or self.height() != side:
+            self.setFixedSize(side, side)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect())
+        clip = QPainterPath()
+        clip.addRoundedRect(rect, theme.RADIUS, theme.RADIUS)
+        painter.setClipPath(clip)
+        painter.setOpacity(1.0 if self._draggable else 0.45)
+        if self._pixmap is not None:
+            painter.drawPixmap(0, 0, self._scaled_pixmap())
+        else:
+            painter.fillRect(self.rect(), theme.color("bg2"))
+        painter.setOpacity(1.0)
+        metrics = self.fontMetrics()
+        banner = self.rect().adjusted(0, self.height() - metrics.height() - 4, 0, 0)
+        painter.fillRect(banner, theme.color("banner"))
+        painter.setPen(theme.color("text" if self._draggable else "text_muted"))
+        painter.drawText(banner.adjusted(4, 0, -4, 0), Qt.AlignCenter,
+                         metrics.elidedText(self.info.label, Qt.ElideRight, banner.width() - 8))
+        if self._draggable and self.underMouse():
+            painter.setClipping(False)
+            painter.setPen(QPen(theme.color("accent"), 1.5))
+            painter.drawRoundedRect(rect.adjusted(0.75, 0.75, -0.75, -0.75), theme.RADIUS, theme.RADIUS)
+
+    def _scaled_pixmap(self) -> QPixmap:
+        ratio = self.devicePixelRatioF()
+        width, height = round(self.width() * ratio), round(self.height() * ratio)
+        if self._scaled is None or (self._scaled.width(), self._scaled.height()) != (width, height):
+            self._scaled = self._pixmap.scaled(width, height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            self._scaled.setDevicePixelRatio(ratio)
+        return self._scaled
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
@@ -133,8 +163,8 @@ class _ThumbnailCard(QFrame):
         mime.setData(SERIES_KEY_MIME_TYPE, self.series_key.encode("utf-8"))
         drag = QDrag(self)
         drag.setMimeData(mime)
-        if self._thumb_lbl.pixmap():
-            drag.setPixmap(self._thumb_lbl.pixmap())
+        if self._pixmap is not None:
+            drag.setPixmap(self._pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         drag.exec(Qt.CopyAction)
 
 
@@ -147,25 +177,25 @@ class SeriesBrowserWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("seriesBrowser")
-        self.setProperty("role", "seriesBrowserPanel")
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self.setFixedWidth(200)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.setMinimumWidth(theme.scaled(160))
+        self._cards: list[_ThumbnailCard] = []
+        self._collapsed: set[str] = set()  # group names, kept across a reload
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
 
-        title = QLabel("Series")
-        title.setProperty("role", "sidebarSectionTitle")
-        outer.addWidget(title)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.installEventFilter(self)
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
-        self._content_layout.setSpacing(8)
+        self._content_layout.setSpacing(2)
         self._content_layout.addStretch(1)
         self._scroll.setWidget(self._content)
         outer.addWidget(self._scroll, 1)
@@ -176,6 +206,7 @@ class SeriesBrowserWidget(QFrame):
             item = self._content_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._cards = []
 
         groups: dict[str, list[SeriesCardInfo]] = {}
         for card in cards:
@@ -190,20 +221,45 @@ class SeriesBrowserWidget(QFrame):
 
         insert_pos = self._content_layout.count() - 1
         for group in ordered:
-            hdr = QLabel(group)
-            hdr.setProperty("role", "sidebarSectionTitle")
-            self._content_layout.insertWidget(insert_pos, hdr)
-            insert_pos += 1
-
             container = QWidget()
             grid = QGridLayout(container)
-            grid.setContentsMargins(0, 0, 0, 0)
-            grid.setSpacing(6)
+            grid.setContentsMargins(0, 0, 0, 4)
+            grid.setSpacing(_GAP)
+            grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             sorted_cards = sorted(groups[group], key=lambda c: (not c.draggable, c.label))
             for j, info in enumerate(sorted_cards):
                 card = _ThumbnailCard(info)
                 card.set_thumbnail(info.thumbnail)
                 card.reclassify_requested.connect(self.reclassify_requested)
                 grid.addWidget(card, *divmod(j, _N_COLS))
-            self._content_layout.insertWidget(insert_pos, container)
-            insert_pos += 1
+                self._cards.append(card)
+
+            header = QPushButton(f"{group}  {len(sorted_cards)}")
+            header.setProperty("role", "seriesGroupHeader")
+            header.setCheckable(True)
+            header.setChecked(group not in self._collapsed)
+            header.setCursor(Qt.PointingHandCursor)
+            header.toggled.connect(lambda shown, g=group, c=container, h=header: self._fold(g, c, h, shown))
+            self._fold(group, container, header, header.isChecked())
+            self._content_layout.insertWidget(insert_pos, header)
+            self._content_layout.insertWidget(insert_pos + 1, container)
+            insert_pos += 2
+        self._fit_cards()
+
+    def _fold(self, group: str, container: QWidget, header: QPushButton, shown: bool):
+        container.setVisible(shown)
+        header.setIcon(theme.line_icon("chevron_down" if shown else "chevron_right", "text_faint"))
+        (self._collapsed.discard if shown else self._collapsed.add)(group)
+
+    def _fit_cards(self):
+        # Room for the scroll bar is always kept: sizing from the viewport would let the bar and the
+        # card size keep changing each other at some panel heights.
+        width = self._scroll.width() - self._scroll.verticalScrollBar().sizeHint().width()
+        side = max(40, (width - _GAP * (_N_COLS - 1)) // _N_COLS)
+        for card in self._cards:
+            card.set_side(side)
+
+    def eventFilter(self, obj, event):
+        if obj is self._scroll and event.type() == QEvent.Resize:
+            self._fit_cards()
+        return super().eventFilter(obj, event)
