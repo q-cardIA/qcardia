@@ -1,4 +1,4 @@
-"""Logs every button, combo box, slider, dialog, mouse drag, wheel turn and key press, so new widgets need no
+"""Logs every button, menu, combo box, slider, dialog, mouse drag, wheel turn and key press, so new widgets need no
 logging code. Each record names the nearest widget with an objectName, e.g. "panel_2"."""
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QLineEdit,
+    QMenuBar,
     QMessageBox,
     QPlainTextEdit,
     QSlider,
@@ -49,10 +50,13 @@ def _on_slider_action(slider, action):
 
 
 def _watch(widget):
-    if not isinstance(widget, (QAbstractButton, QComboBox, QSlider)) or widget.property("study_logged"):
+    if not isinstance(widget, (QAbstractButton, QComboBox, QSlider, QMenuBar)) or widget.property("study_logged"):
         return
     widget.setProperty("study_logged", True)
-    if isinstance(widget, QAbstractButton):
+    if isinstance(widget, QMenuBar):  # its triggered also fires for actions in submenus
+        widget.triggered.connect(lambda action: study_log.log(
+            "menu", name=action.text().replace("&", ""), **({"checked": action.isChecked()} if action.isCheckable() else {})))
+    elif isinstance(widget, QAbstractButton):
         widget.clicked.connect(lambda checked, w=widget: study_log.log(
             "button", name=_label(w), target=_target(w), **({"checked": checked} if w.isCheckable() else {})))
     elif isinstance(widget, QComboBox):
@@ -114,6 +118,9 @@ class _UiLogger(QObject):
 def install_ui_logger(window):
     """Starts logging the UI for the current study session; Ctrl+Shift+T then marks task start and end."""
     app = QApplication.instance()
+    if app.property("ui_logger_installed"):
+        return  # a second session after Return to Start Screen; one logger is enough
+    app.setProperty("ui_logger_installed", True)
     logger = _UiLogger(app)
     for widget in app.allWidgets():
         _watch(widget)

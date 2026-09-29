@@ -1,26 +1,36 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QIcon
+
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QDockWidget,
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QMessageBox,
     QPushButton,
     QSlider,
-    QSplitter,
+    QStyle,
+    QTabBar,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from utils.app_config import ICON_PATH
+from utils.app_config import ICON_PATH, ISSUES_URL, REPO_URL, SETTINGS, WIKI_URL
+from utils.hanging_protocols import PRESET_BUTTON_ORDER, preset_label
 from view.central_display_area_widget import CentralDisplayAreaWidget
+from view.dialogs import pick_directory
 from view.chat_widget import ChatWidget
 from view.loading_overlay import LoadingOverlay
 from view.series_browser_widget import SeriesBrowserWidget
 from view.sidebar_widget import SidebarWidget
+from view import theme
+from view.theme import StickyMenu, segment_group
 from view.welcome_widget import WelcomeWidget
 
 
@@ -28,32 +38,132 @@ def load_app_icon() -> QIcon | None:
     return QIcon(str(ICON_PATH)) if ICON_PATH.is_file() else None
 
 
+_TAB_DRAG_OUT_PX = 24  # how far past its tab bar a tab must be dragged to unstack its panel
+GRID_SIZES = ((1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (2, 4), (3, 3), (3, 4), (3, 6))  # rows x columns
+
+
+class _ContourIsland(QFrame):
+
+    tool_changed = Signal(str)
+    save_requested = Signal()
+    done_requested = Signal()
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setObjectName("contourIsland")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
+        self._tool_buttons = []
+        for tool, label in (("move", "Move"), ("add", "Add Point"), ("remove", "Remove Point")):
+            button = QPushButton(label)
+            button.toggled.connect(lambda on, t=tool: on and self.tool_changed.emit(t))
+            self._tool_buttons.append(button)
+        layout.addWidget(segment_group(self._tool_buttons))
+        self._tool_buttons[0].setChecked(True)
+        layout.addSpacing(8)
+        save = QPushButton("Save Labels")
+        save.clicked.connect(self.save_requested.emit)
+        done = QPushButton("Done")
+        done.setProperty("role", "primary")
+        done.clicked.connect(self.done_requested.emit)
+        layout.addWidget(save)
+        layout.addWidget(done)
+        parent.installEventFilter(self)
+        self.hide()
+
+    def reset(self):
+        self._tool_buttons[0].setChecked(True)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._place()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize:
+            self._place()
+        return False
+
+    def _place(self):
+        self.adjustSize()
+        self.move((self.parentWidget().width() - self.width()) // 2, 10)
+        self.raise_()
+
+
+class _DockTitle(QWidget):
+    """Dock title bar: the panel's name and a close button. Mouse events it ignores reach the
+    dock, so dragging the bar still moves, stacks or tabs the panel."""
+
+    def __init__(self, dock: QDockWidget):
+        super().__init__(dock)
+        self.setProperty("role", "dockTitle")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 8, 4)
+        name = QLabel(dock.windowTitle())
+        name.setProperty("role", "dockTitleLabel")
+        close = QPushButton()
+        close.setProperty("role", "dockClose")
+        close.setIcon(theme.line_icon("close", "text_faint"))
+        close.setIconSize(QSize(12, 12))
+        name.setFixedHeight(22)  # the close button's height, so both share a centre line
+        name.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        close.setToolTip(f"Hide {dock.windowTitle()} (View menu shows it again)")
+        close.clicked.connect(dock.close)
+        layout.addWidget(name)
+        layout.addStretch(1)
+        layout.addWidget(close)
+        self.setCursor(Qt.OpenHandCursor)
+
+
 class MainWindow(QMainWindow):
 
     load_patient_button_signal = Signal(str)
-    seg_button_signal = Signal()
-    lge_seg_button_signal = Signal()
+    seg_button_signal = Signal(str)
     save_button_signal = Signal()
     time_frame_changed_signal = Signal(int)
     preset_requested_signal = Signal(str)
+    session_started = Signal()  # the analysis screen is built; the welcome screen's choices are still readable
+    session_ended = Signal()
     reclassify_requested_signal = Signal(object, str)
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("mainWindow")
         icon = load_app_icon()
         if icon is not None:
             self.setWindowIcon(icon)
-        self.folder_selected = False
+        self.segmentable_series: tuple[str, ...] = ()  # set by DICOMController
+        self._default_dock_state = None  # set while a session's docks exist
+        self._dock_title_bars: dict[QDockWidget, tuple[QWidget, QWidget]] = {}
+        self._edge_drag = None
+        self._tab_drag: int | None = None
+        # One deferred update per burst of dock moves, visibility changes and tab switches.
+        self._dock_titles_timer = QTimer(self)
+        self._dock_titles_timer.setSingleShot(True)
+        self._dock_titles_timer.timeout.connect(self._update_dock_titles)
+        self.session_busy = lambda: None  # set by main: why the session cannot end yet, or None
+        self._play_timer = QTimer(self)
+        self._play_timer.timeout.connect(lambda: self.step_time_frame(1))
+        self.full_screen_action = QAction("&Full Screen", self)
+        self.full_screen_action.setCheckable(True)
+        self.full_screen_action.setShortcut("F11")
+        self.full_screen_action.toggled.connect(lambda on: self.showFullScreen() if on else self.showMaximized())
+        # Esc leaves full screen; only enabled there, so everywhere else Esc still reaches the widgets.
+        exit_full_screen = QAction(self)
+        exit_full_screen.setShortcut(Qt.Key_Escape)
+        exit_full_screen.setEnabled(False)
+        exit_full_screen.triggered.connect(lambda: self.full_screen_action.setChecked(False))
+        self.full_screen_action.toggled.connect(exit_full_screen.setEnabled)
+        self.addActions([self.full_screen_action, exit_full_screen])  # also on the start screen
         self.welcome_widget = WelcomeWidget(self)
         self.setCentralWidget(self.welcome_widget)
-        self.welcome_widget.transition_signal.connect(self.build_analysis_interface)
+        self.welcome_widget.transition_signal.connect(self._start_session)
         self.setWindowState(Qt.WindowMaximized)
 
     def build_analysis_interface(self):
         self.sidebar = SidebarWidget(self)
         self.sidebar.load_patient_requested.connect(self.on_load_patient_clicked)
-        self.sidebar.predict_requested.connect(self.emit_segmentation_signal)
-        self.sidebar.predict_lge_requested.connect(self.emit_lge_segmentation_signal)
         self.sidebar.save_requested.connect(self.emit_save_signal)
         self.sidebar.preset_requested.connect(self.preset_requested_signal.emit)
 
@@ -69,7 +179,7 @@ class MainWindow(QMainWindow):
 
         time_controls_container = QWidget()
         time_layout = QHBoxLayout(time_controls_container)
-        time_layout.setContentsMargins(6, 4, 6, 4)
+        time_layout.setContentsMargins(8, 4, 8, 4)
         time_layout.setSpacing(8)
         self.time_label = QLabel("Time Frame: 0 / 0")
         self.time_label.setProperty("secondary", "true")
@@ -81,109 +191,302 @@ class MainWindow(QMainWindow):
         self.time_slider.setProperty("role", "timeSlider")
         time_layout.addWidget(self.time_label)
         time_layout.addWidget(self.time_slider)
-        self._play_timer = QTimer(self)
-        self._play_timer.timeout.connect(lambda: self.step_time_frame(1))
         self.display_area_widget.time_step_requested.connect(self.step_time_frame)
         self.display_area_widget.play_toggle_requested.connect(self.toggle_cine)
 
         self.top_bar = QWidget()
         self.top_bar.setProperty("role", "topBar")
         top_layout = QHBoxLayout(self.top_bar)
-        top_layout.setContentsMargins(8, 4, 8, 4)
-        top_layout.setSpacing(12)
-        self.toggle_sidebar_btn = QPushButton("Hide Menu")
-        self.toggle_sidebar_btn.setCheckable(True)
-        self.toggle_sidebar_btn.setProperty("role", "sidebarToggle")
-        self.toggle_sidebar_btn.toggled.connect(self._on_toggle_sidebar)
-        self.toggle_series_browser_btn = QPushButton("Hide Series Panel")
-        self.toggle_series_browser_btn.setCheckable(True)
-        self.toggle_series_browser_btn.setProperty("role", "sidebarToggle")
-        self.toggle_series_browser_btn.toggled.connect(self._on_toggle_series_browser)
-        self.toggle_chat_btn = QPushButton("Hide Assistant")
-        self.toggle_chat_btn.setCheckable(True)
-        self.toggle_chat_btn.setProperty("role", "sidebarToggle")
-        self.toggle_chat_btn.toggled.connect(self._on_toggle_chat)
-        self.contour_edit_btn = QPushButton("Edit Contours")
-        self.contour_edit_btn.setCheckable(True)
-        self.contour_edit_btn.setProperty("role", "contourToggle")
-        self.contour_edit_btn.toggled.connect(self._on_contour_edit_toggled)
-        self.add_point_btn = QPushButton("Add Point")
-        self.add_point_btn.setCheckable(True)
-        self.add_point_btn.setEnabled(False)
-        self.add_point_btn.setProperty("role", "contourTool")
-        self.add_point_btn.toggled.connect(self._on_add_point_toggled)
-        self.remove_point_btn = QPushButton("Remove Point")
-        self.remove_point_btn.setCheckable(True)
-        self.remove_point_btn.setEnabled(False)
-        self.remove_point_btn.setProperty("role", "contourTool")
-        self.remove_point_btn.toggled.connect(self._on_remove_point_toggled)
+        top_layout.setContentsMargins(4, 2, 8, 2)
+        top_layout.setSpacing(8)
         self.app_title = QLabel("q-cardIA v0.0.1")
         self.app_title.setProperty("role", "appTitle")
-        top_layout.addWidget(self.toggle_sidebar_btn)
-        top_layout.addWidget(self.toggle_series_browser_btn)
-        top_layout.addWidget(self.toggle_chat_btn)
-        top_layout.addWidget(self.contour_edit_btn)
-        top_layout.addWidget(self.add_point_btn)
-        top_layout.addWidget(self.remove_point_btn)
-        top_layout.addWidget(self.app_title)
+        self._build_docks()
+        self.menu_bar = self._build_menu_bar()
+        top_layout.addWidget(self.menu_bar, 0, Qt.AlignVCenter)
         top_layout.addStretch(1)
+        top_layout.addWidget(self.app_title)
 
-        central = QWidget()
-        main_v = QVBoxLayout(central)
-        main_v.setContentsMargins(0, 0, 0, 0)
-        main_v.setSpacing(0)
-        main_v.addWidget(self.top_bar)
-        content_row = QSplitter(Qt.Horizontal)
-        content_row.setContentsMargins(0, 0, 0, 0)
-        content_row.setHandleWidth(4)
-        content_row.addWidget(self.sidebar)
-        content_row.addWidget(self.display_area_widget)
-        content_row.addWidget(self.series_browser_widget)
-        content_row.addWidget(self.chat_widget)
-        content_row.setStretchFactor(1, 1)  # display area absorbs extra space when resizing
-        for i in range(content_row.count()):
-            content_row.setCollapsible(i, False)
+        viewer_column = QFrame()
+        viewer_column.setObjectName("viewerColumn")
+        viewer_layout = QVBoxLayout(viewer_column)
+        viewer_layout.setContentsMargins(4, 4, 4, 0)
+        viewer_layout.setSpacing(0)
+        viewer_layout.addWidget(self.display_area_widget, 1)
+        viewer_layout.addWidget(time_controls_container)
+        self.contour_island = _ContourIsland(viewer_column)
+        self.contour_island.tool_changed.connect(self.display_area_widget.set_contour_edit_tool)
+        self.contour_island.save_requested.connect(self.emit_save_signal)
+        self.contour_island.done_requested.connect(lambda: self.contour_edit_action.setChecked(False))
 
-        # Give the chat panel a real default width (not just its minimum) so
-        # user message bubbles — capped at a fraction of the panel's own
-        # width — actually have room to grow, rather than defaulting to
-        # sizeHint-thin. sidebar/series_browser are setFixedWidth() in their
-        # own classes (210/200) — use those exact values here too, otherwise
-        # any slack between what we ask for and their real fixed width shows
-        # up as dead, unassigned space in the splitter.
-        # minimumWidth() (not width()) — setFixedWidth() sets it immediately,
-        # while actual widget geometry isn't resolved until the first layout pass.
-        sidebar_width = self.sidebar.minimumWidth()
-        series_width = self.series_browser_widget.minimumWidth()
-        chat_default_width = min(int(screen_width * 0.15), self.chat_widget.maximumWidth())
-        display_width = max(400, screen_width - sidebar_width - series_width - chat_default_width)
-        content_row.setSizes([sidebar_width, display_width, series_width, chat_default_width])
+        self.setMenuWidget(self.top_bar)
+        self.setCentralWidget(viewer_column)
+        self.setContentsMargins(6, 0, 6, 6)
+        # Sizes and the default layout only take once the docks are laid out, so after this event.
+        QTimer.singleShot(0, lambda: self._settle_docks(screen_width))
 
-        main_v.addWidget(content_row, 1)
-        main_v.addWidget(time_controls_container)
-        self.setCentralWidget(central)
+        # assistant_disabled already folds in the selected device's probe result. Stored: the
+        # welcome screen is deleted after this.
+        self._assistant_disabled = self.welcome_widget.assistant_disabled
+        if self._assistant_disabled:
+            self.chat_dock.hide()
+            self.toggle_chat_action.setVisible(False)
 
-        # assistant_disabled already folds in the selected device's probe result.
-        if self.welcome_widget.assistant_disabled:
-            self.chat_widget.hide()
-            self.toggle_chat_btn.hide()
+    def _start_session(self):
+        self.build_analysis_interface()
+        self.session_started.emit()
 
-    def _directory_dialog_options(self):
-        options = QFileDialog.Options()
-        options |= QFileDialog.ShowDirsOnly
-        options |= (
-            QFileDialog.DontUseNativeDialog
-        )  # use Qt dialog to avoid macOS NSOpenPanel crash
-        return options
+    def return_to_start(self):
+        reason = self.session_busy()
+        if reason:
+            self.show_info("Please wait", f"{reason} Return to the start screen once it has finished.")
+            return
+        self._play_timer.stop()
+        if self._assistant_disabled:
+            self.chat_dock.show()  # hidden for this session only; the saved layout keeps it
+        self.session_ended.emit()
+        self._chat_controller = None
+        SETTINGS.setValue("window/dock_state", self.saveState())
+        self._default_dock_state = None
+        self._dock_titles_timer.stop()
+        self._dock_title_bars = {}
+        for dock in (self.sidebar_dock, self.series_dock, self.chat_dock):
+            self.removeDockWidget(dock)
+            dock.deleteLater()
+        self.top_bar.deleteLater()
+        self.setMenuWidget(None)
+        self.setContentsMargins(0, 0, 0, 0)
+        self.welcome_widget = WelcomeWidget(self)
+        self.welcome_widget.transition_signal.connect(self._start_session)
+        self.setCentralWidget(self.welcome_widget)
+
+    def _build_docks(self):
+        self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
+        self.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
+        self.sidebar_dock = self._dock(self.sidebar, "Patient", "patientDock", Qt.LeftDockWidgetArea)
+        self.series_dock = self._dock(self.series_browser_widget, "Series", "seriesDock", Qt.RightDockWidgetArea)
+        self.chat_dock = self._dock(self.chat_widget, "Assistant", "assistantDock", Qt.RightDockWidgetArea)
+        self.splitDockWidget(self.series_dock, self.chat_dock, Qt.Horizontal)
+
+    def _settle_docks(self, screen_width: int):
+        chat_width = min(int(screen_width * 0.15), self.chat_widget.maximumWidth())
+        self.resizeDocks([self.sidebar_dock, self.series_dock, self.chat_dock],
+                         [self.sidebar.minimumWidth(), theme.scaled(200), chat_width],
+                         Qt.Horizontal)
+        self._default_dock_state = self.saveState()
+        saved = SETTINGS.value("window/dock_state")
+        if saved is not None:
+            self.restoreState(saved)
+            if self._assistant_disabled:
+                self.chat_dock.hide()
+
+    def _update_dock_titles(self):
+        """A dock merged into tabs is named by its tab, so its own title bar goes."""
+        first_tabs = self._first_tab_titles()
+        for dock, (title, blank) in self._dock_title_bars.items():
+            # A closed panel stays in its tab group, but then no tab row shows, so it must not count.
+            tabbed = any(other.toggleViewAction().isChecked() for other in self.tabifiedDockWidgets(dock))
+            if dock.titleBarWidget() is not (blank if tabbed else title):
+                dock.setTitleBarWidget(blank if tabbed else title)
+            # Square top corners under a title bar, square top-left under the first tab.
+            top = "title" if not tabbed else "firstTab" if dock.windowTitle() in first_tabs else "laterTab"
+            theme.set_style_property(dock.widget(), "top", top)
+
+    def _first_tab_titles(self) -> set[str]:
+        """Titles of the docks shown as the first, selected tab; Qt builds these tab bars itself."""
+        titles = set()
+        for bar in self.findChildren(QTabBar, options=Qt.FindDirectChildrenOnly):
+            if not bar.property("watched"):
+                bar.setProperty("watched", True)
+                bar.currentChanged.connect(lambda _: self._dock_titles_timer.start())
+                bar.installEventFilter(self)
+            if bar.isVisible() and bar.currentIndex() == 0:
+                titles.add(bar.tabText(0))
+        return titles
+
+    def _dock(self, panel: QWidget, title: str, name: str, area) -> QDockWidget:
+        dock = QDockWidget(title, self)
+        dock.setObjectName(name)  # restoreState finds each dock by this name
+        dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
+        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self._dock_title_bars[dock] = (_DockTitle(dock), QWidget(dock))
+        dock.setTitleBarWidget(self._dock_title_bars[dock][0])
+        # Painted too, so no seam of the lighter base shows between title and body.
+        dock.setAttribute(Qt.WA_StyledBackground, True)
+        panel.setProperty("role", "dockPanel")
+        panel.setProperty("top", "title")
+        dock.setWidget(panel)
+        self.addDockWidget(area, dock)
+        # After the move settles, as tabifiedDockWidgets only knows the new grouping then.
+        dock.dockLocationChanged.connect(self._dock_titles_timer.start)
+        dock.visibilityChanged.connect(self._dock_titles_timer.start)
+        return dock
+
+    def reset_panel_layout(self):
+        self.restoreState(self._default_dock_state)
+        if self._assistant_disabled:
+            self.chat_dock.hide()
+        self._update_dock_titles()
+
+    def event(self, event):
+        """The edge of a side panel that faces the images resizes that panel alone: the side grows or
+        shrinks and the panels beside it keep their width. Qt's own separators would trade width
+        between neighbours, or share it among the whole side."""
+        kind = event.type()
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            grip = self._panel_edge_at(event.position().toPoint())
+            if grip is not None:
+                dock, sign = grip
+                self._edge_drag = (dock, sign, event.position().x(), dock.width())
+                return True
+        elif kind == QEvent.MouseMove and self._edge_drag:
+            if not event.buttons() & Qt.LeftButton:
+                self._edge_drag = None
+                return super().event(event)
+            dock, sign, x0, w0 = self._edge_drag
+            width = max(dock.minimumSizeHint().width(), round(w0 + sign * (event.position().x() - x0)))
+            self.resizeDocks([dock], [width], Qt.Horizontal)
+            return True
+        elif kind == QEvent.MouseButtonRelease and self._edge_drag:
+            self._edge_drag = None
+            return True
+        return super().event(event)
+
+    def eventFilter(self, obj, event):
+        """A tab dragged out of its tab bar unstacks that panel: dragged down, it goes under the rest of
+        its group; dragged sideways, beside it. Qt's own drag-out needs floating panels, which are off."""
+        if isinstance(obj, QTabBar):
+            kind = event.type()
+            if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._tab_drag = obj.tabAt(event.position().toPoint())
+            elif kind == QEvent.MouseMove and self._tab_drag is not None and event.buttons() & Qt.LeftButton:
+                pos = event.position()
+                below, beside = pos.y() - obj.height(), max(-pos.x(), pos.x() - obj.width())
+                if self._tab_drag >= 0 and max(below, beside) > _TAB_DRAG_OUT_PX:
+                    title, self._tab_drag = obj.tabText(self._tab_drag), None
+                    self._unstack(title, Qt.Vertical if below >= beside else Qt.Horizontal)
+                    return True
+            elif kind == QEvent.MouseButtonRelease:
+                self._tab_drag = None
+        return super().eventFilter(obj, event)
+
+    def _unstack(self, title: str, orientation):
+        dock = next((d for d in self._dock_title_bars if d.windowTitle() == title), None)
+        rest = [d for d in self.tabifiedDockWidgets(dock) if d.toggleViewAction().isChecked()] if dock else []
+        if rest:
+            self.splitDockWidget(rest[0], dock, orientation)
+            self._dock_titles_timer.start()
+
+    def _panel_edge_at(self, pos) -> tuple[QDockWidget, int] | None:
+        gap = self.style().pixelMetric(QStyle.PM_DockWidgetSeparatorExtent) + 6
+        for dock in self._dock_title_bars:
+            if not dock.isVisible() or dock.isFloating():
+                continue
+            rect = dock.geometry()
+            if not rect.top() <= pos.y() <= rect.bottom():
+                continue
+            if self.dockWidgetArea(dock) == Qt.RightDockWidgetArea and rect.left() - gap <= pos.x() < rect.left():
+                return dock, -1
+            if self.dockWidgetArea(dock) == Qt.LeftDockWidgetArea and rect.right() < pos.x() <= rect.right() + gap:
+                return dock, 1
+        return None
+
+    def closeEvent(self, event):
+        if self._default_dock_state is not None:
+            SETTINGS.setValue("window/dock_state", self.saveState())
+            SETTINGS.sync()
+        super().closeEvent(event)
+
+    def _build_menu_bar(self) -> QMenuBar:
+        bar = QMenuBar()
+        bar.setObjectName("appMenu")
+
+        file_menu = bar.addMenu("&File")
+        file_menu.addAction("&Load Patient...", QKeySequence.Open, self.on_load_patient_clicked)
+        file_menu.addAction("&Save New Labels", QKeySequence.Save, self.emit_save_signal)
+        file_menu.addSeparator()
+        file_menu.addAction("&Return to Start Screen", self.return_to_start)
+        file_menu.addSeparator()
+        file_menu.addAction("E&xit", QKeySequence.Quit, self.close)
+
+        view_menu = StickyMenu("&View", bar)
+        bar.addMenu(view_menu)
+        view_menu.addAction(self.full_screen_action)
+        view_menu.addSeparator()
+        self.toggle_sidebar_action = self._panel_action(view_menu, self.sidebar_dock, "&Patient", "Ctrl+B")
+        # Ctrl+A stays "select all" while typing: text fields take their standard keys first.
+        self.toggle_series_browser_action = self._panel_action(view_menu, self.series_dock, "&Series", "Ctrl+Shift+Q")
+        self.toggle_chat_action = self._panel_action(view_menu, self.chat_dock, "&Assistant", "Ctrl+A")
+        view_menu.addAction("&Reset Panel Layout", self.reset_panel_layout)
+        view_menu.addSeparator()
+        crosshair = view_menu.addAction("&Crosshair")
+        crosshair.setCheckable(True)
+        crosshair.toggled.connect(self.display_area_widget.set_crosshair_shown)
+        crosshair.toggled.connect(lambda on: SETTINGS.setValue("view/crosshair", on))
+        crosshair.setChecked(SETTINGS.value("view/crosshair", True, type=bool))
+        self.display_area_widget.set_crosshair_shown(crosshair.isChecked())
+        view_menu.addSeparator()
+        self.grid_menu = StickyMenu("&Grid", view_menu)
+        self.grid_menu.aboutToShow.connect(self._rebuild_grid_menu)
+        view_menu.addMenu(self.grid_menu)
+        layouts = view_menu.addMenu("&Layout")
+        for name in PRESET_BUTTON_ORDER:
+            layouts.addAction(preset_label(name), lambda n=name: self.preset_requested_signal.emit(n))
+
+        tools_menu = StickyMenu("&Tools", bar)
+        bar.addMenu(tools_menu)
+        self.predict_menu = QMenu("Predict &Labels", self)
+        self.predict_menu.aboutToShow.connect(self._rebuild_predict_menu)
+        tools_menu.addMenu(self.predict_menu)
+        self.sidebar.btn_predict.setMenu(self.predict_menu)
+        tools_menu.addSeparator()
+        self.contour_edit_action = tools_menu.addAction("&Edit Contours")
+        self.contour_edit_action.setCheckable(True)
+        self.contour_edit_action.setShortcut("Ctrl+E")
+        self.contour_edit_action.toggled.connect(self._on_contour_edit_toggled)
+        self.contour_edit_action.toggled.connect(self.sidebar.btn_edit_contours.setChecked)
+        self.sidebar.btn_edit_contours.toggled.connect(self.contour_edit_action.setChecked)
+
+        help_menu = bar.addMenu("&Help")
+        for label, url in (("&Tutorials and Wiki", WIKI_URL), ("&Report an Issue", ISSUES_URL),
+                           ("&About q-cardIA", REPO_URL)):
+            help_menu.addAction(label, lambda u=url: QDesktopServices.openUrl(QUrl(u)))
+        return bar
+
+    def _rebuild_grid_menu(self):
+        """Rebuilt on opening: a layout preset may have changed the grid since."""
+        self.grid_menu.clear()
+        group = QActionGroup(self.grid_menu)
+        current = self.display_area_widget.grid_size
+        for rows, cols in GRID_SIZES:
+            action = self.grid_menu.addAction(f"{rows} \u00d7 {cols}")
+            action.setCheckable(True)
+            action.setChecked((rows, cols) == current)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, r=rows, c=cols: self.display_area_widget.set_grid_size(r, c))
+
+    def _rebuild_predict_menu(self):
+        self.predict_menu.clear()
+        loaded = [k for k in self.segmentable_series if self.display_area_widget.is_series_registered(k)]
+        for key in self.segmentable_series:
+            action = self.predict_menu.addAction(key, lambda k=key: self.seg_button_signal.emit(k))
+            action.setEnabled(key in loaded)
+        self.predict_menu.addSeparator()
+        every = self.predict_menu.addAction("All Loaded Views", lambda: [self.seg_button_signal.emit(k) for k in loaded])
+        every.setEnabled(bool(loaded))
+
+    def _panel_action(self, menu, dock: QDockWidget, text: str, shortcut: str | None = None) -> QAction:
+        action = dock.toggleViewAction()
+        action.setText(text)
+        if shortcut:
+            action.setShortcut(shortcut)
+        menu.addAction(action)
+        return action
 
     def on_load_patient_clicked(self):
-        folder_path = QFileDialog.getExistingDirectory(
-            self, "Select Patient Folder", "", self._directory_dialog_options()
-        )
+        folder_path = pick_directory(self, "Select Patient Folder")
         if not folder_path:
             return
-        self.folder_selected = True
-        self.sidebar.enable_post_load()
         self.load_patient_button_signal.emit(folder_path)
 
     def show_loading(self, text: str):
@@ -194,69 +497,14 @@ class MainWindow(QMainWindow):
         self.sidebar.btn_load_patient.setEnabled(True)
         self.loading_overlay.hide_overlay()
 
-    def _on_toggle_sidebar(self, checked):
-        if checked:
-            self.sidebar.hide()
-            self.toggle_sidebar_btn.setText("Show Menu")
-        else:
-            self.sidebar.show()
-            self.toggle_sidebar_btn.setText("Hide Menu")
-
-    def _on_toggle_series_browser(self, checked):
-        if checked:
-            self.series_browser_widget.hide()
-            self.toggle_series_browser_btn.setText("Show Series Panel")
-        else:
-            self.series_browser_widget.show()
-            self.toggle_series_browser_btn.setText("Hide Series Panel")
-
-    def _on_toggle_chat(self, checked):
-        if checked:
-            self.chat_widget.hide()
-            self.toggle_chat_btn.setText("Show Assistant")
-        else:
-            self.chat_widget.show()
-            self.toggle_chat_btn.setText("Hide Assistant")
-
     def _on_contour_edit_toggled(self, checked):
         self.display_area_widget.set_contour_edit_mode(checked)
-        self.contour_edit_btn.setText(
-            "Editing Contours" if checked else "Edit Contours"
-        )
-        self.add_point_btn.setEnabled(checked)
-        self.remove_point_btn.setEnabled(checked)
-        if not checked:
-            self.add_point_btn.setChecked(False)
-            self.remove_point_btn.setChecked(False)
-            self.display_area_widget.set_contour_edit_tool("move")
-
-    def _on_add_point_toggled(self, checked):
-        if checked:
-            self.remove_point_btn.setChecked(False)
-            self.display_area_widget.set_contour_edit_tool("add")
-        elif not self.remove_point_btn.isChecked():
-            self.display_area_widget.set_contour_edit_tool("move")
-
-    def _on_remove_point_toggled(self, checked):
-        if checked:
-            self.add_point_btn.setChecked(False)
-            self.display_area_widget.set_contour_edit_tool("remove")
-        elif not self.add_point_btn.isChecked():
-            self.display_area_widget.set_contour_edit_tool("move")
-
-    def has_folder_been_selected(self):
-        return self.folder_selected
-
-    def emit_segmentation_signal(self):
-        if self.has_folder_been_selected():
-            self.seg_button_signal.emit()
-
-    def emit_lge_segmentation_signal(self):
-        self.lge_seg_button_signal.emit()
+        self.display_area_widget.set_contour_edit_tool("move")
+        self.contour_island.reset()
+        self.contour_island.setVisible(checked)
 
     def emit_save_signal(self):
-        if self.has_folder_been_selected():
-            self.save_button_signal.emit()
+        self.save_button_signal.emit()
 
     def update_time_slider_range(self, num_frames):
         self._play_timer.stop()
