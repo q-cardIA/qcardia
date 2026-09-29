@@ -122,6 +122,8 @@ class CustomQGraphicsView(QGraphicsView):
     def __set_interface(self):
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
+        self.setAcceptDrops(False)
+        self.viewport().setAcceptDrops(False)
         self.setEnabled(False)
         self.setFocusPolicy(Qt.ClickFocus)  # keys act on the clicked panel, never steal focus from the chat
         self.setRenderHint(QPainter.Antialiasing, True)
