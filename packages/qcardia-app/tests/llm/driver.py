@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from controllers.chat_controller import ChatController  # noqa: E402
-from model.llm_client import OllamaWorker  # noqa: E402
+from model.ollama_client import OllamaWorker  # noqa: E402
 from utils.app_config import OLLAMA_MODEL  # noqa: E402
 
 from fakes import FakeDicomController  # noqa: E402

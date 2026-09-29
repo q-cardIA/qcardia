@@ -378,10 +378,10 @@ class WelcomeWidget(QWidget):
             self.transition_signal.emit
         )
         self._chevron_btn.toggled.connect(self._on_chevron_toggled)
+        self._device_combo.currentIndexChanged.connect(self._on_device_selected)
         self._change_data_dir_btn.clicked.connect(self._on_change_data_dir)
         self._edit_controls_btn.clicked.connect(self._on_edit_controls)
         self._edit_appearance_btn.clicked.connect(self._on_edit_appearance)
-        self._device_combo.currentIndexChanged.connect(self._on_device_selected)
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)
         self.right_panel_about_software_pushbutton.clicked.connect(self.about_clicked)
         self.right_panel_helpwiki_pushbutton.clicked.connect(self.help_clicked)

@@ -1,4 +1,8 @@
-"""ChatController — Qt orchestration around the LLM interaction layer in `llm/`."""
+"""ChatController — Qt orchestration around the LLM interaction layer in `llm/`.
+
+The worker class comes from utils.llm_devices, so a device speaking another wire
+format changes nothing here.
+"""
 from __future__ import annotations
 
 import logging
@@ -25,7 +29,9 @@ class ChatController:
         self.model = model
         self._history: list[dict] = []
         self._worker = None
-        # Read the widget's actual model selection rather than a default.
+        # ChatWidget builds and selects its model combo before this controller
+        # exists (see MainWindow.build_analysis_interface), so read its actual
+        # selection here rather than a default: the two must not silently disagree.
         self._llm_model = self.view.chat_widget.current_tag() or llm_devices.default_model()
         self._think = self.view.chat_widget.think_enabled()
         self._available_subjects_cache: list[str] | None = None

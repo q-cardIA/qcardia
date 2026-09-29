@@ -51,9 +51,8 @@ def list_subjects() -> list[str]:
 # Ollama (local LLM chat assistant)
 # ---------------------------------------------------------------------------
 
-# Local Ollama server — 127.0.0.1, not "localhost" (can resolve to an
-# unreachable IPv6 address and hang). utils.llm_devices rebinds these at
-# runtime, so every function below reads them at call time.
+# utils.llm_devices rebinds these at runtime, so every function below reads them at call time.
+# 127.0.0.1, not "localhost": that can resolve to an unreachable IPv6 address and hang.
 OLLAMA_URL: str = "http://127.0.0.1:11434/api/chat"
 OLLAMA_GENERATE_URL: str = "http://127.0.0.1:11434/api/generate"
 OLLAMA_TAGS_URL: str = "http://127.0.0.1:11434/api/tags"

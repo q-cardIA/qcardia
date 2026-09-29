@@ -580,6 +580,9 @@ class ChatWidget(QFrame):
         # Cached by the device's probe, so the GUI thread pays no HTTP timeout here.
         pulled = llm_devices.list_models(refresh) if llm_devices.chat_available() else []
         pulled_tags = {m["tag"] for m in pulled}
+        pinned = llm_devices.current().model  # e.g. SPIKE's "best-live", which no model list shows
+        if pinned and pinned not in pulled_tags:
+            pulled = [{"tag": pinned, "label": pinned, "local": False}] + pulled
 
         for m in pulled:
             self._model_combo.addItem(m["label"], m["tag"])
@@ -604,13 +607,10 @@ class ChatWidget(QFrame):
         self._update_model_button()
         if self._model_menu.isVisible():
             QTimer.singleShot(0, self._rebuild_model_menu)  # not from inside the menu's own click
-        if pulled:  # the default model if installed, else the first one
+        if self._model_combo.count():  # the default model if installed, else the first one
             self.model_changed.emit(self._model_combo.currentData())
-        else:
-            if llm_devices.current().is_local:
-                self.append_system_message(f"No Ollama models installed. Run `ollama pull {llm_devices.default_model()}`.")
-            else:
-                self.append_system_message(f"No models available on {llm_devices.current().label}.")
+        elif llm_devices.chat_available():
+            self.append_system_message(f"No models installed. Run `ollama pull {llm_devices.default_model()}`.")
 
     def _sync_think_toggle(self):
         """Only offer Think where the model can do it; Ollama rejects the request otherwise."""
