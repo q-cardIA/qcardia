@@ -85,7 +85,9 @@ class CentralDisplayAreaWidget(QWidget):
         self._panel_series_key: list[str | None] = []
         self._panel_axis: list[str] = []
         self._panel_slice_idx: list[int] = []
-        self._panel_linked: list[bool] = []  # linked panels of one series scroll together
+        self._panel_depth: list[int] = []  # slice the panel scrolled to, may pass the stack's end (see _scroll)
+        self._panel_linked: list[bool] = []  # linked panels of one view (SAX, 4CH, ...) zoom, pan and scroll together
+        self._group_views: dict[tuple[str, str], tuple[float, float, float]] = {}
         self._panel_contours: list[bool] = []  # show the segmentation in this panel
 
         # Shared world-space crosshair; None until the user first clicks
@@ -138,7 +140,7 @@ class CentralDisplayAreaWidget(QWidget):
         # Preserve series assignments for panels that survive the resize
         old_keys = list(self._panel_series_key)
         old_axes = list(self._panel_axis)
-        old_slices = list(self._panel_slice_idx)
+        old_slices, old_depths = list(self._panel_slice_idx), list(self._panel_depth)
         old_linked, old_contours = list(self._panel_linked), list(self._panel_contours)
         old_rows, old_cols = self._grid_rows, self._grid_cols
 
@@ -158,7 +160,8 @@ class CentralDisplayAreaWidget(QWidget):
         self._panel_series_key = (old_keys + [None] * n)[:n]
         self._panel_axis       = (old_axes + ["transverse"] * n)[:n]
         self._panel_slice_idx  = (old_slices + [0] * n)[:n]
-        self._panel_linked     = (old_linked + [False] * n)[:n]
+        self._panel_depth      = (old_depths + [0] * n)[:n]
+        self._panel_linked     = (old_linked + [True] * n)[:n]
         self._panel_contours   = (old_contours + [True] * n)[:n]
 
         # Build fresh panels
@@ -195,6 +198,7 @@ class CentralDisplayAreaWidget(QWidget):
         # Re-render any panels that already have a series assigned
         for i in range(n):
             if self._panel_series_key[i] is not None:
+                self._panels[i].viewer.new_series(self._view_of(i))
                 self._update_panel(i)
 
     def _make_panel(self, idx: int) -> _Panel:
@@ -234,6 +238,7 @@ class CentralDisplayAreaWidget(QWidget):
         )
         viewer.action_requested.connect(lambda a, n, i=idx: self._on_viewer_action(i, a, n))
         viewer.window_dragged.connect(lambda dx, dy, i=idx: self._on_window_drag(i, dx, dy))
+        viewer.view_changed.connect(lambda *view, i=idx: self._on_view_changed(i, view))
 
         vbox.addLayout(hdr)
         vbox.addWidget(slider)
@@ -274,6 +279,7 @@ class CentralDisplayAreaWidget(QWidget):
                       self._windows, self._default_windows, self._contour_cache):
             store.clear()
         self._world_crosshair = None
+        self._group_views.clear()
 
     def refresh_panels(self, series_key: str | None = None):
         """Show each panel's series again (only series_key's panels, if given); empty panels whose series is gone."""
@@ -302,9 +308,9 @@ class CentralDisplayAreaWidget(QWidget):
             return
         self._panel_series_key[panel_idx] = series_key
         self._panel_axis[panel_idx] = axis.lower()
-        self._panel_linked[panel_idx], self._panel_contours[panel_idx] = False, True
+        self._panel_linked[panel_idx], self._panel_contours[panel_idx] = True, True
         self._sync_toggles(panel_idx)
-        self._panels[panel_idx].viewer.new_series()
+        self._panels[panel_idx].viewer.new_series(self._view_of(panel_idx))
 
         n = self._n_slices(series_key, axis)
         sl = self._panels[panel_idx].slider
@@ -314,6 +320,7 @@ class CentralDisplayAreaWidget(QWidget):
         sl.setEnabled(n > 1)
         sl.setVisible(n > 1)
         self._set_slice(panel_idx, n // 2 if slice_idx is None else slice_idx)
+        self._panel_depth[panel_idx] = self._panel_slice_idx[panel_idx]
 
         self._panels[panel_idx].title_label.setText(f"{series_key} / {axis}")
         self._update_panel(panel_idx)
@@ -509,17 +516,30 @@ class CentralDisplayAreaWidget(QWidget):
             self._panels[panel_idx].viewer.set_crosshair_from_volume_indices(row, col)
 
     def _on_panel_slider_changed(self, panel_idx: int, value: int):
-        key = self._panel_series_key[panel_idx]
-        if key is None:
-            return
-        n = self._n_slices(key, self._panel_axis[panel_idx])
-        new_z = min(max(0, value), max(0, n - 1))
-        step = new_z - self._panel_slice_idx[panel_idx]
-        self._panel_slice_idx[panel_idx] = new_z
-        self._update_panel(panel_idx)
-        if self._panel_linked[panel_idx]:
-            self._move_linked(panel_idx, step)
+        if self._panel_series_key[panel_idx] is not None:
+            self._scroll(panel_idx, value - self._panel_depth[panel_idx])
 
+    def _scroll(self, source: int, step: int):
+        """Scroll source by step slices, with its linked panels. A panel's depth may pass the end of its
+        stack (it then shows the last slice), so panels keep their spacing once one of them reaches the end.
+        A linked panel that alone shows its series follows the anatomy through the crosshair instead."""
+        key, axis = self._panel_series_key[source], self._panel_axis[source]
+        depth, n = self._panel_depth[source], self._n_slices(key, axis)
+        step = min(max(depth + step, min(depth, 0)), max(depth, n - 1)) - depth
+        if not step:
+            return
+        stacks = Counter(zip(self._panel_series_key, self._panel_axis))
+        for i in self._linked_with(source) if self._panel_linked[source] else [source]:
+            stack = (self._panel_series_key[i], self._panel_axis[i])
+            if (i != source and stack != (key, axis) and stacks[stack] == 1
+                    and key in self._geometries and stack[0] in self._geometries):
+                continue
+            new_depth = self._panel_depth[i] + step
+            if self._set_slice(i, min(max(0, new_depth), self._n_slices(*stack) - 1)):
+                self._update_panel(i)
+            self._panel_depth[i] = new_depth
+
+        new_z = self._panel_slice_idx[source]
         geom = self._geometries.get(key)
         if geom is not None:
             # Keep the existing in-plane crosshair position; move to the new slice
@@ -530,11 +550,12 @@ class CentralDisplayAreaWidget(QWidget):
             else:
                 row, col = geom.n_rows / 2.0, geom.n_cols / 2.0
             self._world_crosshair = geom.pixel_to_world(row, col, new_z)
-            self._broadcast_world_crosshair(panel_idx)
+            self._broadcast_world_crosshair(source, scrolled=True)
 
-    def _broadcast_world_crosshair(self, source: int):
+    def _broadcast_world_crosshair(self, source: int, scrolled: bool = False):
         """Project _world_crosshair into every panel, updating slice index and crosshair. A series and axis
-        shown in several panels keeps each panel's slice (e.g. the extended preset's depths)."""
+        shown in several panels keeps each panel's slice (e.g. the extended preset's depths), and after a
+        scroll only linked panels follow."""
         stacks = Counter(zip(self._panel_series_key, self._panel_axis))
         for i in range(self.n_panels):
             key = self._panel_series_key[i]
@@ -552,24 +573,39 @@ class CentralDisplayAreaWidget(QWidget):
             row = max(0, min(int(round(r)), geom.n_rows - 1))
             col = max(0, min(int(round(c)), geom.n_cols - 1))
             n = self._n_slices(key, self._panel_axis[i])
-            follows = n > 0 and (i == source or stacks[key, self._panel_axis[i]] == 1)
+            follows = n > 0 and (i == source or stacks[key, self._panel_axis[i]] == 1 and (
+                not scrolled or self._panel_linked[i] and self._panel_linked[source]))
             if follows and self._set_slice(i, max(0, min(int(round(new_z)), n - 1))):
                 self._update_panel(i)
             self._panels[i].viewer.set_crosshair_from_volume_indices(row, col)
 
-    def _move_linked(self, source: int, step: int):
-        """Other linked panels of the source's series and axis move by the same number of slices."""
-        stack = (self._panel_series_key[source], self._panel_axis[source])
-        n = self._n_slices(*stack)
-        for i in range(self.n_panels):
-            if i != source and self._panel_linked[i] and (self._panel_series_key[i], self._panel_axis[i]) == stack:
-                self._set_slice(i, min(max(0, self._panel_slice_idx[i] + step), n - 1))
-                self._update_panel(i)
+    def _group(self, panel_idx: int) -> tuple[str, str] | None:
+        """Link group: the view (SAX, 4CH, ...) and axis, so CINE_SAX and LGE_SAX are linked."""
+        key = self._panel_series_key[panel_idx]
+        return None if key is None else (key.rsplit("_", 1)[-1], self._panel_axis[panel_idx])
+
+    def _linked_with(self, source: int) -> list[int]:
+        """Linked panels in source's group, source included."""
+        group = self._group(source)
+        return [i for i in range(self.n_panels) if self._panel_linked[i] and self._group(i) == group]
+
+    def _view_of(self, panel_idx: int) -> tuple[float, float, float]:
+        default = (1.0, 0.0, 0.0)
+        return self._group_views.get(self._group(panel_idx), default) if self._panel_linked[panel_idx] else default
+
+    def _on_view_changed(self, source: int, view: tuple[float, float, float]):
+        if not self._panel_linked[source] or self._group(source) is None:
+            return
+        self._group_views[self._group(source)] = view
+        for i in self._linked_with(source):
+            if i != source:
+                self._panels[i].viewer.set_view(*view)
 
     def _set_slice(self, panel_idx: int, z: int) -> bool:
         """Set a panel's slice and slider without triggering the slider's own handler; returns whether it changed."""
         changed = z != self._panel_slice_idx[panel_idx]
-        self._panel_slice_idx[panel_idx] = z
+        if changed:
+            self._panel_slice_idx[panel_idx] = self._panel_depth[panel_idx] = z
         slider = self._panels[panel_idx].slider
         slider.blockSignals(True)
         slider.setValue(z)
@@ -595,15 +631,17 @@ class CentralDisplayAreaWidget(QWidget):
         elif key is None:
             return
         elif action == "slice":
-            slider.setValue(self._panel_slice_idx[panel_idx] + amount)  # the slider clamps; its signal does the rest
+            self._scroll(panel_idx, amount)
         elif action in ("first", "last"):
             slider.setValue(0 if action == "first" else slider.maximum())
         elif action == "reset":
             self._windows[key] = self._default_windows[key]
             self._refresh_images(key)
         elif action == "link":
-            self._panel_linked[panel_idx] = not self._panel_linked[panel_idx]
+            linked = self._panel_linked[panel_idx] = not self._panel_linked[panel_idx]
             self._sync_toggles(panel_idx)
+            if linked:
+                self._panels[panel_idx].viewer.set_view(*self._view_of(panel_idx))
         elif action == "contours":
             self._panel_contours[panel_idx] = not self._panel_contours[panel_idx]
             self._sync_toggles(panel_idx)

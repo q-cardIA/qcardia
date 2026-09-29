@@ -68,6 +68,7 @@ class CustomQGraphicsView(QGraphicsView):
     contours_updated = Signal(list)
     action_requested = Signal(str, int)  # ("slice"|"frame", step), or (first|last|play|reset|link|contours, 0)
     window_dragged = Signal(float, float)  # screen pixels moved (dx, dy)
+    view_changed = Signal(float, float, float)  # set by the user: see view_state()
 
     def __init__(self, view_type="axial", size=QSize(150, 150), parent=None):
         super(CustomQGraphicsView, self).__init__()
@@ -111,6 +112,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.crosshair_pos = None
         self.dragging_crosshair = None
         self._needs_fit = True
+        self._fit_view = (1.0, 0.0, 0.0)
         self.image_2d_h = 0
         self.image_2d_w = 0
 
@@ -154,10 +156,11 @@ class CustomQGraphicsView(QGraphicsView):
         self.__position_toggles()
 
     def __set_panel_toggles(self):
-        """Link and contour toggles, bottom right: shown while the mouse is over the panel, and a
-        linked panel keeps a faint link icon so the link stays visible."""
+        """Link and contour toggles, bottom right: shown while the mouse is over the panel, and an
+        unlinked panel keeps a faint link icon so the exception stays visible."""
         buttons = []
-        for action, tip, draw in (("link", "Link scrolling with the other linked panels of this series", _draw_link),
+        for action, tip, draw in (("link", "Link zoom, pan and scrolling with the other linked panels of this view (SAX, 4CH, ...)",
+                                   _draw_link),
                                   ("contours", "Show contours in this panel", _draw_contours)):
             button = QToolButton(self)
             button.setCheckable(True)
@@ -183,7 +186,7 @@ class CustomQGraphicsView(QGraphicsView):
 
     def __show_toggles(self, hover: bool):
         self._contour_button.setVisible(hover)
-        self._link_button.setVisible(hover or self._link_button.isChecked())
+        self._link_button.setVisible(hover or not self._link_button.isChecked())
         self._link_fade.setOpacity(1.0 if hover else 0.45)
 
     def enterEvent(self, event):
@@ -231,6 +234,28 @@ class CustomQGraphicsView(QGraphicsView):
             center = anchor + (center - anchor) * (self._zoom / new_zoom)
         self._zoom, self._center = new_zoom, center
         self.__apply_view()
+        self.__emit_view()
+
+    def view_state(self) -> tuple[float, float, float]:
+        """Zoom relative to fit-to-panel, and the view centre's offset from the image middle as a
+        fraction of the image width and height, so series of other sizes can take the same view."""
+        center = self.__view_center()
+        return self._zoom, center.x() / self.image_2d_w - 0.5, center.y() / self.image_2d_h - 0.5
+
+    def __emit_view(self):
+        if self.image_2d_w and self.image_2d_h:
+            self.view_changed.emit(*self.view_state())
+
+    def set_view(self, zoom: float, fx: float, fy: float):
+        """Take the view of a linked panel (see view_state)."""
+        self._fit_view = (zoom, fx, fy)
+        if self.image_2d_w and not self._needs_fit:
+            self.__show_fit_view()
+
+    def __show_fit_view(self):
+        zoom, fx, fy = self._fit_view
+        self._zoom, self._center = zoom, QPointF((0.5 + fx) * self.image_2d_w, (0.5 + fy) * self.image_2d_h)
+        self.__apply_view()
 
     def zoom_in(self):
         self._zoom_by(1.25)
@@ -239,16 +264,18 @@ class CustomQGraphicsView(QGraphicsView):
         self._zoom_by(0.8)
 
     def reset_view(self):
-        self._zoom, self._center = 1.0, None
+        self._zoom, self._center, self._fit_view = 1.0, None, (1.0, 0.0, 0.0)
         self.__apply_view()
+        self.__emit_view()
 
-    def new_series(self):
-        """The next slice is fitted and centred, with the crosshair in the middle."""
-        self._needs_fit = True
+    def new_series(self, view: tuple[float, float, float] = (1.0, 0.0, 0.0)):
+        """The next slice is shown at view (see view_state), with the crosshair in the middle."""
+        self._needs_fit, self._fit_view = True, view
 
     def __pan(self, delta):
         self._center = self.__view_center() - QPointF(delta.x(), delta.y()) * self.__px()
         self.centerOn(self._center)
+        self.__emit_view()
 
     # ── Input ─────────────────────────────────────────────────────────────
 
@@ -443,8 +470,8 @@ class CustomQGraphicsView(QGraphicsView):
         if new_size:
             self.scene.setSceneRect(QRectF(-10 * w, -10 * h, 21 * w, 21 * h))  # room to pan
         if new_size or self._needs_fit:
-            self._zoom, self._center, self._needs_fit = 1.0, None, False
-            self.__apply_view()
+            self._needs_fit = False
+            self.__show_fit_view()
             self.updateCrosshairPosition(w / 2, h / 2)
         elif self.crosshair_pos is None:
             self.updateCrosshairPosition(w / 2, h / 2)
