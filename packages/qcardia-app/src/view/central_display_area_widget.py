@@ -86,8 +86,8 @@ class CentralDisplayAreaWidget(QWidget):
         self._panel_series_key: list[str | None] = []
         self._panel_axis: list[str] = []
         self._panel_slice_idx: list[int] = []
-        self._panel_depth: list[int] = []  # slice the panel scrolled to, may pass the stack's end (see _scroll)
-        self._panel_linked: list[bool] = []  # linked panels of one view (SAX, 4CH, ...) zoom, pan and scroll together
+        self._panel_depth: list[int] = []
+        self._panel_linked: list[bool] = []
         self._group_views: dict[tuple[str, str], tuple[float, float, float]] = {}
         self._panel_contours: list[bool] = []  # show the segmentation in this panel
 
@@ -523,9 +523,6 @@ class CentralDisplayAreaWidget(QWidget):
             self._scroll(panel_idx, value - self._panel_depth[panel_idx])
 
     def _scroll(self, source: int, step: int):
-        """Scroll source by step slices, with its linked panels. A panel's depth may pass the end of its
-        stack (it then shows the last slice), so panels keep their spacing once one of them reaches the end.
-        A linked panel that alone shows its series follows the anatomy through the crosshair instead."""
         key, axis = self._panel_series_key[source], self._panel_axis[source]
         depth, n = self._panel_depth[source], self._n_slices(key, axis)
         step = min(max(depth + step, min(depth, 0)), max(depth, n - 1)) - depth
@@ -556,9 +553,6 @@ class CentralDisplayAreaWidget(QWidget):
             self._broadcast_world_crosshair(source, scrolled=True)
 
     def _broadcast_world_crosshair(self, source: int, scrolled: bool = False):
-        """Project _world_crosshair into every panel, updating slice index and crosshair. A series and axis
-        shown in several panels keeps each panel's slice (e.g. the extended preset's depths), and after a
-        scroll only linked panels follow."""
         stacks = Counter(zip(self._panel_series_key, self._panel_axis))
         for i in range(self.n_panels):
             key = self._panel_series_key[i]
@@ -583,26 +577,23 @@ class CentralDisplayAreaWidget(QWidget):
             self._panels[i].viewer.set_crosshair_from_volume_indices(row, col)
 
     def _group(self, panel_idx: int) -> tuple[str, str] | None:
-        """Link group: the view (SAX, 4CH, ...) and axis, so CINE_SAX and LGE_SAX are linked."""
         key = self._panel_series_key[panel_idx]
         return None if key is None else (key.rsplit("_", 1)[-1], self._panel_axis[panel_idx])
 
     def _linked_with(self, source: int) -> list[int]:
-        """Linked panels in source's group, source included."""
         group = self._group(source)
         return [i for i in range(self.n_panels) if self._panel_linked[i] and self._group(i) == group]
 
-    def _view_of(self, panel_idx: int) -> tuple[float, float, float]:
-        default = (1.0, 0.0, 0.0)
-        return self._group_views.get(self._group(panel_idx), default) if self._panel_linked[panel_idx] else default
+    def _view_of(self, panel_idx: int) -> tuple[float, float, float] | None:
+        return self._group_views.get(self._group(panel_idx)) if self._panel_linked[panel_idx] else None
 
     def _on_view_changed(self, source: int, view: tuple[float, float, float]):
-        if not self._panel_linked[source] or self._group(source) is None:
-            return
-        self._group_views[self._group(source)] = view
-        for i in self._linked_with(source):
-            if i != source:
-                self._panels[i].viewer.set_view(*view)
+        group = self._group(source)
+        if self._panel_linked[source] and group:
+            self._group_views[group] = view
+            for i in self._linked_with(source):
+                if i != source:
+                    self._panels[i].viewer.set_view(view)
 
     def _set_slice(self, panel_idx: int, z: int) -> bool:
         """Set a panel's slice and slider without triggering the slider's own handler; returns whether it changed."""
@@ -644,7 +635,7 @@ class CentralDisplayAreaWidget(QWidget):
             linked = self._panel_linked[panel_idx] = not self._panel_linked[panel_idx]
             self._sync_toggles(panel_idx)
             if linked:
-                self._panels[panel_idx].viewer.set_view(*self._view_of(panel_idx))
+                self._panels[panel_idx].viewer.set_view(self._view_of(panel_idx))
         elif action == "contours":
             self._panel_contours[panel_idx] = not self._panel_contours[panel_idx]
             self._sync_toggles(panel_idx)
