@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from utils.windowing import window_to_uint8
 from view.custom_graphics_view import CustomQGraphicsView
 from view.loading_overlay import LoadingOverlay
 from view.series_browser_widget import SERIES_KEY_MIME_TYPE
@@ -56,6 +58,8 @@ class _PanelDropContainer(QWidget):
 
 
 class CentralDisplayAreaWidget(QWidget):
+    time_step_requested = Signal(int)
+    play_toggle_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__()
@@ -69,7 +73,10 @@ class CentralDisplayAreaWidget(QWidget):
         )
 
         # Series data — keyed by series_key (e.g. "CINE_SAX", "LGE_SAX")
-        self._volumes: dict[str, np.ndarray] = {}       # (T,Z,H,W) or (Z,H,W) or (T,H,W)
+        self._volumes: dict[str, np.ndarray] = {}       # original values: (T,Z,H,W) or (Z,H,W) or (T,H,W)
+        self._windows: dict[str, tuple[float, float]] = {}  # (center, width), shared by a series' panels
+        self._default_windows: dict[str, tuple[float, float]] = {}
+        self._contour_cache: dict[tuple, list[dict] | None] = {}
         self._is_temporal: dict[str, bool] = {}
         self._geometries: dict[str, VolumeGeometry] = {}
         self._segmentations: dict[str, np.ndarray] = {}
@@ -78,9 +85,13 @@ class CentralDisplayAreaWidget(QWidget):
         self._panel_series_key: list[str | None] = []
         self._panel_axis: list[str] = []
         self._panel_slice_idx: list[int] = []
+        self._panel_linked: list[bool] = []  # linked panels of one series scroll together
+        self._panel_contours: list[bool] = []  # show the segmentation in this panel
 
         # Shared world-space crosshair; None until the user first clicks
         self._world_crosshair: np.ndarray | None = None
+        self._pending_crosshair: tuple[int, int, int] | None = None  # latest drag point, applied once per event loop
+        self._pending_window: dict[str, tuple[float, float]] = {}
 
         self.current_time_index: int = 0
 
@@ -128,6 +139,7 @@ class CentralDisplayAreaWidget(QWidget):
         old_keys = list(self._panel_series_key)
         old_axes = list(self._panel_axis)
         old_slices = list(self._panel_slice_idx)
+        old_linked, old_contours = list(self._panel_linked), list(self._panel_contours)
         old_rows, old_cols = self._grid_rows, self._grid_cols
 
         # Tear down existing layout and panels
@@ -146,11 +158,13 @@ class CentralDisplayAreaWidget(QWidget):
         self._panel_series_key = (old_keys + [None] * n)[:n]
         self._panel_axis       = (old_axes + ["transverse"] * n)[:n]
         self._panel_slice_idx  = (old_slices + [0] * n)[:n]
+        self._panel_linked     = (old_linked + [False] * n)[:n]
+        self._panel_contours   = (old_contours + [True] * n)[:n]
 
         # Build fresh panels
         for idx in range(n):
-            p = self._make_panel(idx)
-            self._panels.append(p)
+            self._panels.append(self._make_panel(idx))
+            self._sync_toggles(idx)
 
         # Place panels and dividers in the grid
         for idx, p in enumerate(self._panels):
@@ -218,6 +232,8 @@ class CentralDisplayAreaWidget(QWidget):
         viewer.coordinates_changed.connect(
             lambda x, y, i=idx: self._on_panel_coordinates_changed(i, x, y)
         )
+        viewer.action_requested.connect(lambda a, n, i=idx: self._on_viewer_action(i, a, n))
+        viewer.window_dragged.connect(lambda dx, dy, i=idx: self._on_window_drag(i, dx, dy))
 
         vbox.addLayout(hdr)
         vbox.addWidget(slider)
@@ -241,13 +257,33 @@ class CentralDisplayAreaWidget(QWidget):
         series_key: str,
         volume: np.ndarray,
         is_temporal: bool,
+        window: tuple[float, float],
         geometry: VolumeGeometry | None = None,
     ):
-        """Register a loaded series volume (and optional DICOM geometry)."""
+        """Register a loaded series volume, its default (center, width) window and optional DICOM geometry."""
         self._volumes[series_key] = volume
+        self._windows[series_key] = self._default_windows[series_key] = window
+        self._forget_contours(series_key)
         self._is_temporal[series_key] = is_temporal
         if geometry is not None:
             self._geometries[series_key] = geometry
+
+    def clear_series(self):
+        """Forget the previous subject's volumes, windows and segmentations."""
+        for store in (self._volumes, self._is_temporal, self._geometries, self._segmentations,
+                      self._windows, self._default_windows, self._contour_cache):
+            store.clear()
+        self._world_crosshair = None
+
+    def refresh_panels(self, series_key: str | None = None):
+        """Show each panel's series again (only series_key's panels, if given); empty panels whose series is gone."""
+        for i, key in enumerate(self._panel_series_key):
+            if key is None or series_key not in (None, key):
+                continue
+            if key in self._volumes:
+                self.set_panel_series(i, key, axis=self._panel_axis[i])
+            else:
+                self.set_panel_empty(i)
 
     def set_geometry(self, series_key: str, geom: VolumeGeometry):
         self._geometries[series_key] = geom
@@ -266,18 +302,18 @@ class CentralDisplayAreaWidget(QWidget):
             return
         self._panel_series_key[panel_idx] = series_key
         self._panel_axis[panel_idx] = axis.lower()
+        self._panel_linked[panel_idx], self._panel_contours[panel_idx] = False, True
+        self._sync_toggles(panel_idx)
+        self._panels[panel_idx].viewer.new_series()
 
         n = self._n_slices(series_key, axis)
-        z = n // 2 if slice_idx is None else slice_idx
-        self._panel_slice_idx[panel_idx] = z
-
         sl = self._panels[panel_idx].slider
         sl.blockSignals(True)
         sl.setMaximum(max(0, n - 1))
-        sl.setValue(z)
+        sl.blockSignals(False)
         sl.setEnabled(n > 1)
         sl.setVisible(n > 1)
-        sl.blockSignals(False)
+        self._set_slice(panel_idx, n // 2 if slice_idx is None else slice_idx)
 
         self._panels[panel_idx].title_label.setText(f"{series_key} / {axis}")
         self._update_panel(panel_idx)
@@ -299,20 +335,15 @@ class CentralDisplayAreaWidget(QWidget):
             return None
         n = self._n_slices(series_key, "transverse")
         mid = n // 2 if n > 0 else 0
-        return self._get_slice_2d(series_key, "transverse", mid, t=0)
+        return self._display(series_key, self._get_slice_2d(series_key, "transverse", mid, t=0))
 
     def _on_panel_series_dropped(self, panel_idx: int, series_key: str):
         if self.is_series_registered(series_key):
             self.set_panel_series(panel_idx, series_key)
 
-    def refresh_series(self, series_key: str):
-        """Re-render any panel currently showing series_key against its (possibly new) volume."""
-        for i in range(self.n_panels):
-            if self._panel_series_key[i] == series_key:
-                self.set_panel_series(i, series_key, axis=self._panel_axis[i])
-
     def set_segmentation(self, series_key: str, seg_volume: np.ndarray):
         self._segmentations[series_key] = seg_volume
+        self._forget_contours(series_key)
         for i in range(self.n_panels):
             if self._panel_series_key[i] == series_key:
                 self._update_panel(i)
@@ -379,7 +410,22 @@ class CentralDisplayAreaWidget(QWidget):
             return self._extract_slice(vol, axis, z)
         return None
 
-    def _get_contours(
+    def _time_of(self, series_key: str) -> int:
+        return self.current_time_index if self._is_temporal.get(series_key) else 0
+
+    def _display(self, series_key: str, slice_2d: np.ndarray) -> np.ndarray:
+        return window_to_uint8(slice_2d, *self._windows[series_key])
+
+    def _forget_contours(self, series_key: str):
+        self._contour_cache = {k: v for k, v in self._contour_cache.items() if k[0] != series_key}
+
+    def _get_contours(self, series_key: str, axis: str, z: int, t: int) -> list[dict] | None:
+        key = (series_key, axis, z, t)
+        if key not in self._contour_cache:
+            self._contour_cache[key] = self._compute_contours(series_key, axis, z, t)
+        return self._contour_cache[key]
+
+    def _compute_contours(
         self, series_key: str, axis: str, z: int, t: int
     ) -> list[dict] | None:
         seg = self._segmentations.get(series_key)
@@ -408,14 +454,14 @@ class CentralDisplayAreaWidget(QWidget):
 
     # ── Panel rendering ───────────────────────────────────────────────────
 
-    def _update_panel(self, panel_idx: int):
+    def _update_panel(self, panel_idx: int, contours: bool = True):
         key = self._panel_series_key[panel_idx]
         if key is None:
             return
         p = self._panels[panel_idx]
         axis = self._panel_axis[panel_idx]
         z = self._panel_slice_idx[panel_idx]
-        t = self.current_time_index
+        t = self._time_of(key)
 
         slice_2d = self._get_slice_2d(key, axis, z, t)
         if slice_2d is None:
@@ -424,8 +470,10 @@ class CentralDisplayAreaWidget(QWidget):
         geom = self._geometries.get(key)
         p.viewer.set_pixel_spacing(geom.pixel_spacing if geom is not None else (1.0, 1.0))
         p.viewer.set_contour_line_mm(2.5 if key.startswith("LGE") else 2.0)
-        p.viewer.update_contour_paths(self._get_contours(key, axis, z, t))
-        p.viewer.update_slice_view(slice_2d)
+        if contours:
+            shown = self._get_contours(key, axis, z, t) if self._panel_contours[panel_idx] else None
+            p.viewer.update_contour_paths(shown)
+        p.viewer.update_slice_view(self._display(key, slice_2d))
 
         n = self._n_slices(key, axis)
         p.slice_label.setText(f"Slice: {z + 1}/{n}" if n > 1 else "")
@@ -437,8 +485,18 @@ class CentralDisplayAreaWidget(QWidget):
     # ── World-coordinate crosshair sync ──────────────────────────────────
 
     def _on_panel_coordinates_changed(self, panel_idx: int, sig_x: int, sig_y: int):
-        # Signal emits (col, row) as (x, y)
-        col, row = sig_x, sig_y
+        # A drag sends many points: keep the latest and apply it once the queued events are handled.
+        if self._pending_crosshair is None:
+            QTimer.singleShot(0, self._apply_pending_crosshair)
+        self._pending_crosshair = (panel_idx, sig_x, sig_y)
+
+    def _apply_pending_crosshair(self):
+        if self._pending_crosshair is None:
+            return
+        panel_idx, col, row = self._pending_crosshair  # signal emits (col, row) as (x, y)
+        self._pending_crosshair = None
+        if panel_idx >= self.n_panels:
+            return
         key = self._panel_series_key[panel_idx]
         if key is None:
             return
@@ -446,7 +504,7 @@ class CentralDisplayAreaWidget(QWidget):
         if geom is not None:
             z = self._panel_slice_idx[panel_idx]
             self._world_crosshair = geom.pixel_to_world(row, col, z)
-            self._broadcast_world_crosshair()
+            self._broadcast_world_crosshair(panel_idx)
         else:
             self._panels[panel_idx].viewer.set_crosshair_from_volume_indices(row, col)
 
@@ -456,7 +514,11 @@ class CentralDisplayAreaWidget(QWidget):
             return
         n = self._n_slices(key, self._panel_axis[panel_idx])
         new_z = min(max(0, value), max(0, n - 1))
+        step = new_z - self._panel_slice_idx[panel_idx]
         self._panel_slice_idx[panel_idx] = new_z
+        self._update_panel(panel_idx)
+        if self._panel_linked[panel_idx]:
+            self._move_linked(panel_idx, step)
 
         geom = self._geometries.get(key)
         if geom is not None:
@@ -468,12 +530,12 @@ class CentralDisplayAreaWidget(QWidget):
             else:
                 row, col = geom.n_rows / 2.0, geom.n_cols / 2.0
             self._world_crosshair = geom.pixel_to_world(row, col, new_z)
-            self._broadcast_world_crosshair()
-        else:
-            self._update_panel(panel_idx)
+            self._broadcast_world_crosshair(panel_idx)
 
-    def _broadcast_world_crosshair(self):
-        """Project _world_crosshair into every panel, updating slice index and crosshair."""
+    def _broadcast_world_crosshair(self, source: int):
+        """Project _world_crosshair into every panel, updating slice index and crosshair. A series and axis
+        shown in several panels keeps each panel's slice (e.g. the extended preset's depths)."""
+        stacks = Counter(zip(self._panel_series_key, self._panel_axis))
         for i in range(self.n_panels):
             key = self._panel_series_key[i]
             if key is None:
@@ -490,17 +552,87 @@ class CentralDisplayAreaWidget(QWidget):
             row = max(0, min(int(round(r)), geom.n_rows - 1))
             col = max(0, min(int(round(c)), geom.n_cols - 1))
             n = self._n_slices(key, self._panel_axis[i])
-            if n > 0:
-                new_z = max(0, min(int(round(new_z)), n - 1))
-                self._panel_slice_idx[i] = new_z
-                sl = self._panels[i].slider
-                sl.blockSignals(True)
-                sl.setValue(new_z)
-                sl.blockSignals(False)
-            # _update_panel calls update_slice_view first (which preserves crosshair_pos),
-            # then we overwrite with the projected position.
-            self._update_panel(i)
+            follows = n > 0 and (i == source or stacks[key, self._panel_axis[i]] == 1)
+            if follows and self._set_slice(i, max(0, min(int(round(new_z)), n - 1))):
+                self._update_panel(i)
             self._panels[i].viewer.set_crosshair_from_volume_indices(row, col)
+
+    def _move_linked(self, source: int, step: int):
+        """Other linked panels of the source's series and axis move by the same number of slices."""
+        stack = (self._panel_series_key[source], self._panel_axis[source])
+        n = self._n_slices(*stack)
+        for i in range(self.n_panels):
+            if i != source and self._panel_linked[i] and (self._panel_series_key[i], self._panel_axis[i]) == stack:
+                self._set_slice(i, min(max(0, self._panel_slice_idx[i] + step), n - 1))
+                self._update_panel(i)
+
+    def _set_slice(self, panel_idx: int, z: int) -> bool:
+        """Set a panel's slice and slider without triggering the slider's own handler; returns whether it changed."""
+        changed = z != self._panel_slice_idx[panel_idx]
+        self._panel_slice_idx[panel_idx] = z
+        slider = self._panels[panel_idx].slider
+        slider.blockSignals(True)
+        slider.setValue(z)
+        slider.blockSignals(False)
+        return changed
+
+    def _sync_toggles(self, panel_idx: int):
+        self._panels[panel_idx].viewer.set_panel_toggles(self._panel_linked[panel_idx],
+                                                        self._panel_contours[panel_idx])
+
+    # ── Viewer input ─────────────────────────────────────────────────────
+
+    def _on_viewer_action(self, panel_idx: int, action: str, amount: int):
+        key = self._panel_series_key[panel_idx]
+        if (action == "slice" and key and self._is_temporal.get(key)
+                and self._n_slices(key, self._panel_axis[panel_idx]) <= 1):
+            action = "frame"  # single-slice cine (LAX): scrolling steps time instead, as in Medis
+        slider = self._panels[panel_idx].slider
+        if action == "frame":
+            self.time_step_requested.emit(amount)
+        elif action == "play":
+            self.play_toggle_requested.emit()
+        elif key is None:
+            return
+        elif action == "slice":
+            slider.setValue(self._panel_slice_idx[panel_idx] + amount)  # the slider clamps; its signal does the rest
+        elif action in ("first", "last"):
+            slider.setValue(0 if action == "first" else slider.maximum())
+        elif action == "reset":
+            self._windows[key] = self._default_windows[key]
+            self._refresh_images(key)
+        elif action == "link":
+            self._panel_linked[panel_idx] = not self._panel_linked[panel_idx]
+            self._sync_toggles(panel_idx)
+        elif action == "contours":
+            self._panel_contours[panel_idx] = not self._panel_contours[panel_idx]
+            self._sync_toggles(panel_idx)
+            self._update_panel(panel_idx)
+
+    def _on_window_drag(self, panel_idx: int, dx: float, dy: float):
+        key = self._panel_series_key[panel_idx]
+        if key is None:
+            return
+        if not self._pending_window:
+            QTimer.singleShot(0, self._apply_pending_window)
+        sum_dx, sum_dy = self._pending_window.get(key, (0.0, 0.0))
+        self._pending_window[key] = (sum_dx + dx, sum_dy + dy)
+
+    def _apply_pending_window(self):
+        """Right = wider window (less contrast), down = higher level (darker), scaled to the width."""
+        pending, self._pending_window = self._pending_window, {}
+        for key, (dx, dy) in pending.items():
+            if key not in self._windows:
+                continue
+            center, width = self._windows[key]
+            narrowest = self._default_windows[key][1] / 100
+            self._windows[key] = (center + dy * width / 300, max(narrowest, width * 1.005 ** dx))
+            self._refresh_images(key)
+
+    def _refresh_images(self, series_key: str):
+        for i in range(self.n_panels):
+            if self._panel_series_key[i] == series_key:
+                self._update_panel(i, contours=False)
 
     # ── Contour editing stubs (to be implemented properly later) ─────────
 

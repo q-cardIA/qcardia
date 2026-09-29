@@ -696,3 +696,14 @@ QPushButton[role="welcomeInfoAction"]:pressed {
 	background-color: rgb(189, 147, 249);
 	color: rgb(255, 255, 255);
 }
+
+/* Link / contour toggles in a panel's bottom-right corner (shown on hover) */
+QToolButton[role="viewerOverlay"] {
+	background-color: transparent;
+	border: none;
+	border-radius: 4px;
+	padding: 0px;
+}
+QToolButton[role="viewerOverlay"]:hover {
+	background-color: rgba(255, 255, 255, 28);
+}
