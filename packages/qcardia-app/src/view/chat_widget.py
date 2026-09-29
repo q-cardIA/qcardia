@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPalette, QPen, QTextDocument
+from PySide6.QtCore import QEvent, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QFontMetricsF, QPainter, QPalette, QPen, QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
+    QPlainTextEdit,
     QMenu,
     QPushButton,
     QScrollArea,
@@ -36,7 +39,8 @@ from utils.app_config import (
     gguf_model_tag,
     import_gguf_model,
 )
-from view.theme import PopupComboBox, thin_loading_bar
+from view import theme
+from view.theme import thin_loading_bar
 
 _USER_BUBBLE_WIDTH_FRACTION = 0.7  # user bubbles can grow up to 70% of the panel width
 
@@ -121,7 +125,9 @@ class _Bubble(QFrame):
         """Width needed to render the current text on one line — QLabel's own
         sizeHint() is unreliable for this once word-wrap is on, so measure
         directly with font metrics instead."""
-        return self._label.fontMetrics().horizontalAdvance(self._label.text()) + self._MARGINS
+        # Rounded up plus spare: at an exact fit, word wrap moves the last word to a hidden line.
+        advance = QFontMetricsF(self._label.font()).horizontalAdvance(self._label.text())
+        return math.ceil(advance) + self._MARGINS + 4
 
     def apply_width_cap(self, cap: int):
         """Fix the bubble's width to whatever is smaller: its natural
@@ -205,7 +211,7 @@ class _ThinkingBubble(QFrame):
         layout.addWidget(self._header)
 
         self._detail = QLabel()
-        self._detail.setProperty("role", "toolCallDetail")
+        self._detail.setProperty("role", "thinkingDetail")
         self._detail.setWordWrap(True)
         self._detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._detail.setTextFormat(Qt.TextFormat.PlainText)  # raw thought, not a formatted answer
@@ -229,48 +235,124 @@ class _ThinkingBubble(QFrame):
         self._detail.setVisible(self._expanded)
 
 
-class _ThinkToggle(QPushButton):
-    """Ask the model to reason first. Off by default; sized so its label never clips."""
+class _ChatInput(QPlainTextEdit):
+    """Message box that grows with its text up to MAX_LINES; Enter sends, Shift+Enter adds a line."""
 
-    _LABEL = "Think"
-    _H_PADDING = 24  # the stylesheet's horizontal padding plus both borders
+    submitted = Signal()
+    MAX_LINES = 6
 
     def __init__(self, parent=None):
-        super().__init__(self._LABEL, parent)
-        self.setProperty("role", "chatThinkToggle")
-        self.setCheckable(True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self._fitting = False
-        self._fit()
+        super().__init__(parent)
+        self.setProperty("role", "chatInput")
+        self.setTabChangesFocus(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.document().setDocumentMargin(2)
+        self.document().documentLayout().documentSizeChanged.connect(self._fit)
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def insert(self, text: str):
+        self.insertPlainText(text)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not event.modifiers() & Qt.ShiftModifier:
+            self.submitted.emit()
+            return
+        super().keyPressEvent(event)
 
     def _fit(self):
-        if self._fitting:
-            return  # setFixedWidth re-enters changeEvent
-        self._fitting = True
-        try:
-            self.ensurePolished()  # else we measure the default font, not the themed one
-            self.setFixedWidth(self.fontMetrics().horizontalAdvance(self._LABEL) + self._H_PADDING)
-        finally:
-            self._fitting = False
+        # From the laid-out text: frameWidth() also counts the text padding.
+        doc = self.document()
+        layout = doc.documentLayout()
+        text_height, block = 0.0, doc.firstBlock()
+        while block.isValid():
+            text_height += layout.blockBoundingRect(block).height()
+            block = block.next()
+        lines = max(1, round(doc.size().height()))
+        per_line = text_height / lines
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded if lines > self.MAX_LINES else Qt.ScrollBarAlwaysOff)
+        margins = self.contentsMargins()
+        height = round(per_line * min(lines, self.MAX_LINES) + 2 * doc.documentMargin()) + margins.top() + margins.bottom()
+        if height != self.height():
+            self.setFixedHeight(height)
 
-    def match_height(self, other: QWidget):
-        """Adopt the combo's height; the base QPushButton min-height would leave this taller."""
-        other.ensurePolished()
-        self.setFixedHeight(other.sizeHint().height())
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
 
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
             self._fit()
 
-    def set_supported(self, supported: bool, reason: str = ""):
-        """Grey out for a model that cannot reason; Ollama rejects the request outright."""
-        if not supported and self.isChecked():
-            self.setChecked(False)
-        self.setEnabled(supported)
-        self.setToolTip(reason or ("Ask the model to reason before answering"
-                                   if supported else "This model cannot reason"))
+
+_NAME_ACRONYMS = {"gpt": "GPT", "oss": "OSS", "llm": "LLM", "ai": "AI", "vl": "VL"}
+
+
+def short_model_name(tag: str | None) -> str:
+    """Ollama tag to a short display name: "deepseek-v4.1:latest" to "Deepseek V4.1", "qwen3:8b" to "Qwen 3 8B"."""
+    if not tag:
+        return "No model"
+    base, _, variant = tag.partition(":")
+    words = [w for w in re.split(r"[-_ ]+", re.sub(r"([A-Za-z]{2,})(\d)", r"\1 \2", base)) if w]
+    if variant and variant != "latest":
+        words.append(variant)
+    pretty = []
+    for w in words:
+        if w.lower() in _NAME_ACRONYMS:
+            pretty.append(_NAME_ACRONYMS[w.lower()])
+        elif re.fullmatch(r"\d+(\.\d+)?[bm]", w.lower()):
+            pretty.append(w.upper())
+        else:
+            pretty.append(w[:1].upper() + w[1:])
+    return " ".join(pretty)
+
+
+class _ModelPill(QPushButton):
+    """Painted, so the chevron follows the (elided) name directly."""
+
+    _PAD = 10
+    _GAP = 6
+    _CHEVRON = 10
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._label = ""
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.setMinimumWidth(60)
+        self.setAttribute(Qt.WA_Hover)
+
+    def set_label(self, label: str):
+        self._label = label
+        self.updateGeometry()
+        self.update()
+
+    def sizeHint(self):
+        text = math.ceil(QFontMetricsF(self.font()).horizontalAdvance(self._label))
+        return QSize(2 * self._PAD + text + self._GAP + self._CHEVRON, max(24, self.fontMetrics().height() + 8))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        active = self.underMouse() or (self.menu() is not None and self.menu().isVisible())
+        if active:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.color("bg3"))
+            painter.drawRoundedRect(QRectF(self.rect()), self.height() / 2, self.height() / 2)
+        metrics = QFontMetricsF(self.font())
+        room = self.width() - 2 * self._PAD - self._GAP - self._CHEVRON
+        text = metrics.elidedText(self._label, Qt.ElideRight, room)
+        painter.setPen(theme.color("text" if active else "text_muted"))
+        painter.drawText(QRect(self._PAD, 0, room, self.height()), Qt.AlignVCenter | Qt.AlignLeft, text)
+        x = self._PAD + math.ceil(metrics.horizontalAdvance(text)) + self._GAP
+        chevron = QRect(x, (self.height() - self._CHEVRON) // 2, self._CHEVRON, self._CHEVRON)
+        theme.line_icon("chevron_down", "text_faint").paint(painter, chevron)
 
 
 class _SendButton(QPushButton):
@@ -290,17 +372,11 @@ class _SendButton(QPushButton):
         self._loading = True
         self._angle = 0
         self._timer.start()
-        self.setProperty("busy", True)
-        self.style().unpolish(self)
-        self.style().polish(self)
         self.update()
 
     def stop_loading(self):
         self._loading = False
         self._timer.stop()
-        self.setProperty("busy", False)
-        self.style().unpolish(self)
-        self.style().polish(self)
         self.update()
 
     def _tick(self):
@@ -334,9 +410,8 @@ class ChatWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("chatPanel")
-        self.setProperty("role", "seriesBrowserPanel")
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        self.setMinimumWidth(280)
+        self.setMinimumWidth(theme.scaled(280))
 
         self._assistant_bubble: _Bubble | None = None
         self._thinking_bubble: _ThinkingBubble | None = None
@@ -353,9 +428,6 @@ class ChatWidget(QFrame):
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
 
-        title = QLabel("Assistant")
-        title.setProperty("role", "sidebarSectionTitle")
-        outer.addWidget(title)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -371,15 +443,19 @@ class ChatWidget(QFrame):
         self._scroll.setWidget(self._content)
         outer.addWidget(self._scroll, 1)
 
-        input_row = QHBoxLayout()
-        input_row.setSpacing(4)
-        self._input = QLineEdit()
+        self._composer = QFrame()
+        self._composer.setObjectName("chatComposer")
+        composer = QVBoxLayout(self._composer)
+        composer.setContentsMargins(6, 12, 6, 6)  # the pill and the text start at the same x
+        composer.setSpacing(4)
+        self._input = _ChatInput()
         self._input.setPlaceholderText("Ask something…")
-        self._input.returnPressed.connect(self._on_send_clicked)
-        input_row.addWidget(self._input, 1)
+        self._input.submitted.connect(self._on_send_clicked)
+        self._input.textChanged.connect(self._update_send_button)
+        composer.addWidget(self._input)
 
-        self._mic_btn = _SendButton("🎤")
-        self._mic_btn.setProperty("role", "sidebarButton")
+        self._mic_btn = _SendButton("")
+        self._mic_btn.setProperty("role", "composerIcon")
         if VOICE_AVAILABLE:
             self._mic_btn.setToolTip("Hold to speak (or hold F9)\nRight-click to select microphone")
             self._mic_btn.pressed.connect(self._on_mic_press)
@@ -390,38 +466,47 @@ class ChatWidget(QFrame):
         else:
             self._mic_btn.setToolTip("Voice input unavailable — install faster-whisper and sounddevice.")
             self._mic_btn.setEnabled(False)
-        input_row.addWidget(self._mic_btn)
 
-        self._send_btn = _SendButton("Send")
-        self._send_btn.setProperty("role", "sidebarButton")
+        self._send_btn = _SendButton("")
+        self._send_btn.setProperty("role", "composerSend")
+        self._send_btn.setToolTip("Send (Enter)")
         self._send_btn.clicked.connect(self._on_send_clicked)
-        input_row.addWidget(self._send_btn)
-        outer.addLayout(input_row)
+        self._send_btn.hide()
+        self._apply_composer_icons()
+        theme.notifier.changed.connect(self._apply_composer_icons)
 
+        # Hidden: they hold the state that the model button's menu shows and sets.
         # Switchable mid-session, so a remote device dropping doesn't end the conversation.
-        self._device_combo = PopupComboBox()
-        self._device_combo.setProperty("role", "chatCombo")
+        self._device_combo = QComboBox(self)
+        self._device_combo.hide()
         self._populate_device_combo()
         self._device_combo.currentIndexChanged.connect(self._on_device_selected)
-        outer.addWidget(self._device_combo)
-        self._device_bar = thin_loading_bar()
-        outer.addWidget(self._device_bar)
-
-        # The combo takes the leftover width, the toggle only what its label needs.
-        model_row = QHBoxLayout()
-        model_row.setContentsMargins(0, 0, 0, 0)
-        model_row.setSpacing(6)
-        self._model_combo = PopupComboBox()
-        self._model_combo.setProperty("role", "chatCombo")
-        self._model_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self._model_combo.setMinimumWidth(80)
-        self._think_btn = _ThinkToggle()
-        self._think_btn.toggled.connect(self.think_changed.emit)
+        self._model_combo = QComboBox(self)
+        self._model_combo.hide()
+        self._think_action = QAction("Think before answering", self)
+        self._think_action.setCheckable(True)
+        self._think_action.toggled.connect(self.think_changed.emit)
+        self._model_btn = _ModelPill()
+        self._model_btn.setProperty("role", "modelPicker")
+        self._model_btn.setCursor(Qt.PointingHandCursor)
+        self._model_menu = theme.StickyMenu(self._model_btn)
+        self._model_menu.setToolTipsVisible(True)
+        self._model_menu.aboutToShow.connect(self._rebuild_model_menu)
+        self._model_btn.setMenu(self._model_menu)
         self._populate_model_combo()
         self._model_combo.currentIndexChanged.connect(self._on_model_selected)
-        model_row.addWidget(self._model_combo, 1)
-        model_row.addWidget(self._think_btn, 0)
-        outer.addLayout(model_row)
+        self._think_action.toggled.connect(lambda _: self._update_model_button())
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.setSpacing(4)
+        bottom_row.addWidget(self._model_btn)
+        bottom_row.addStretch(1)
+        bottom_row.addWidget(self._mic_btn)
+        bottom_row.addWidget(self._send_btn)
+        composer.addLayout(bottom_row)
+        outer.addWidget(self._composer)
+        self._device_bar = thin_loading_bar()
+        outer.addWidget(self._device_bar)
         # Driven by ChatController, which knows when the model is actually loaded.
         self._model_bar = thin_loading_bar()
         outer.addWidget(self._model_bar)
@@ -516,6 +601,9 @@ class ChatWidget(QFrame):
                 self._model_combo.setCurrentIndex(idx)
         self._model_combo.blockSignals(False)
         self._sync_think_toggle()
+        self._update_model_button()
+        if self._model_menu.isVisible():
+            QTimer.singleShot(0, self._rebuild_model_menu)  # not from inside the menu's own click
         if pulled:  # the default model if installed, else the first one
             self.model_changed.emit(self._model_combo.currentData())
         else:
@@ -525,17 +613,64 @@ class ChatWidget(QFrame):
                 self.append_system_message(f"No models available on {llm_devices.current().label}.")
 
     def _sync_think_toggle(self):
-        """Only offer Think where the model can do it; an always-on button would just error."""
-        if not hasattr(self, "_think_btn"):
-            return  # populate runs once during construction, before the toggle exists
+        """Only offer Think where the model can do it; Ollama rejects the request otherwise."""
         if not llm_devices.chat_available():
-            self._think_btn.set_supported(False, "Select a working device first")
-            return
-        tag = self.current_tag()
-        self._think_btn.set_supported(llm_devices.supports_thinking(tag))
+            supported, reason = False, "Select a working device first"
+        else:
+            supported = llm_devices.supports_thinking(self.current_tag())
+            reason = "Ask the model to reason before answering" if supported else "This model cannot reason"
+        if not supported:
+            self._think_action.setChecked(False)
+        self._think_action.setEnabled(supported)
+        self._think_action.setToolTip(reason)
+
+    def _update_model_button(self):
+        name = short_model_name(self.current_tag())
+        self._model_btn.set_label(f"{name} · Think" if self.think_enabled() else name)
+        self._model_btn.setToolTip(f"{self.current_tag() or 'No model'} on {llm_devices.current().label}"
+                                   f", thinking {'on' if self.think_enabled() else 'off'}")
+
+    def _update_send_button(self):
+        self._send_btn.setVisible(self._busy or bool(self._input.text().strip()))
+
+    def _apply_composer_icons(self):
+        for button, kind, token in ((self._mic_btn, "mic", "text_muted"), (self._send_btn, "arrow_up", "on_accent")):
+            button.setIcon(theme.line_icon(kind, token))
+            button.setIconSize(QSize(16, 16))
+
+    def _rebuild_model_menu(self):
+        menu = self._model_menu
+        # Rebuilt while open after a device switch: keep the bottom edge (Think, devices) in place.
+        anchor = menu.geometry().bottom() if menu.isVisible() else None
+        menu.clear()
+        self._add_choices(menu, "Model", self._model_combo)
+        if self._model_combo.count() == 0:
+            menu.addAction("No models installed").setEnabled(False)
+        menu.addAction("Refresh model list", lambda: self._populate_model_combo(refresh=True))
+        menu.addSeparator()
+        menu.addAction(self._think_action)
+        menu.addSeparator()
+        self._add_choices(menu, "Device", self._device_combo)
+        pill_top = self._model_btn.mapToGlobal(self._model_btn.rect().topLeft()).y()
+        if anchor is not None and anchor <= pill_top + 2:  # opened upward
+            menu.adjustSize()
+            menu.move(menu.x(), anchor - menu.height() + 1)
+
+    @staticmethod
+    def _add_choices(menu, title: str, combo: QComboBox):
+        """The combo's items as one exclusive group; picking one sets the combo."""
+        menu.addAction(title).setEnabled(False)
+        group = QActionGroup(menu)
+        for i in range(combo.count()):
+            action = menu.addAction(combo.itemText(i))
+            group.addAction(action)
+            action.setCheckable(True)
+            action.setChecked(i == combo.currentIndex())
+            action.setEnabled(combo.isEnabled())
+            action.triggered.connect(lambda _=False, i=i: combo.setCurrentIndex(i))
 
     def think_enabled(self) -> bool:
-        return self._think_btn.isChecked() and self._think_btn.isEnabled()
+        return self._think_action.isChecked() and self._think_action.isEnabled()
 
     def current_tag(self) -> str | None:
         return self._model_combo.currentData() if self._model_combo.count() else None
@@ -549,6 +684,7 @@ class ChatWidget(QFrame):
             return
         # Thinking is per-model, so re-check on every change, not only on rebuild.
         self._sync_think_toggle()
+        self._update_model_button()
         self.model_changed.emit(data)
 
     def _start_import(self, gguf_path_str: str):
@@ -601,6 +737,7 @@ class ChatWidget(QFrame):
             self._send_btn.stop_loading()
         else:
             self._send_btn.start_loading()
+        self._update_send_button()
 
     # -- voice input (push-to-talk) ------------------------------------------
 
@@ -722,11 +859,6 @@ class ChatWidget(QFrame):
         margins = self._content_layout.contentsMargins()
         available = self._scroll.viewport().width() - margins.left() - margins.right()
         return max(120, int(available * _USER_BUBBLE_WIDTH_FRACTION))
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        # Deferred to first show: the stylesheet may be applied after this widget is built.
-        self._think_btn.match_height(self._model_combo)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
