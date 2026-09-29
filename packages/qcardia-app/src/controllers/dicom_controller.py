@@ -78,13 +78,13 @@ class DICOMController:
             return
 
         max_frames = 0
+        self._widget.clear_series()
         for key, info in result.loaded.items():
-            self._widget.register_series(
-                key, info["volume"], is_temporal=info["is_temporal"], geometry=info["geometry"]
-            )
+            self._register(key, info)
             if info["is_temporal"]:
                 max_frames = max(max_frames, info["num_frames"])
 
+        self._widget.refresh_panels()
         self._last_result = result
         self.view.series_browser_widget.populate(self._build_browser_cards(result))
 
@@ -116,10 +116,8 @@ class DICOMController:
             return
 
         study_log.log("reassign_series", series_folder=card_info.path.name, key=new_key)
-        self._widget.register_series(
-            new_key, info["volume"], is_temporal=info["is_temporal"], geometry=info["geometry"]
-        )
-        self._widget.refresh_series(new_key)
+        self._register(new_key, info)
+        self._widget.refresh_panels(new_key)
 
         for entry in self._last_result.entries:
             if entry.path == card_info.path:
@@ -135,6 +133,10 @@ class DICOMController:
 
         self._last_result.loaded[new_key] = info
         self.view.series_browser_widget.populate(self._build_browser_cards(self._last_result))
+
+    def _register(self, key: str, info: dict):
+        self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],
+                                     window=info["window"], geometry=info["geometry"])
 
     def _build_browser_cards(self, result) -> list[SeriesCardInfo]:
         cards = []
