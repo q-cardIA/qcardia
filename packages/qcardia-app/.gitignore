@@ -137,6 +137,12 @@ wandb/
 *output*/
 CLAUDE.md
 
+# agent worktrees for other branches, checked out inside this repo
+.claude/
+
+# your own LLM device list: host addresses, ssh aliases, gateway URLs
+config/llm_devices.json
+
 # leftover from context-retrieval branch, not used here
 retrieval_index/
 retrieval_gpu_venv/

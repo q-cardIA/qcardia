@@ -16,8 +16,8 @@ from controllers.dicom_controller import DICOMController
 from model.background_worker import CallableWorker
 from model.dicom_model import DICOMModel
 from model.voice_input import VOICE_AVAILABLE, TranscriptionWorker
-from utils import study_log
-from utils.app_config import APP_DIR, CHAT_AVAILABLE, data_dir
+from utils import llm_devices, study_log
+from utils.app_config import APP_DIR, data_dir
 from view.theme import apply_theme
 from view.main_window import MainWindow, load_app_icon
 from view.ui_logger import install_ui_logger
@@ -46,6 +46,9 @@ def main():
         app.setWindowIcon(icon)
     apply_theme(app)
     main_window = MainWindow()
+
+    # Belt and braces over llm_devices' atexit hook, which an abrupt Qt exit can skip.
+    app.aboutToQuit.connect(llm_devices.shutdown)
 
     model = DICOMModel()
     controller = DICOMController(main_window, model)
@@ -77,20 +80,17 @@ def main():
     main_window.welcome_widget.transition_signal.connect(_start_study_log)
     app.aboutToQuit.connect(_end_study_log)
 
-    if CHAT_AVAILABLE:
-        # chat_widget only exists after build_analysis_interface() runs, which
-        # itself only fires once the welcome screen's transition_signal fires.
-        def _wire_chat():
-            if main_window.welcome_widget.assistant_disabled:
-                return
-            main_window._chat_controller = ChatController(main_window, controller, model)
-            if VOICE_AVAILABLE:
-                # Downloads/loads the whisper model off the GUI thread so the
-                # first push-to-talk doesn't stall on a cold model load.
-                main_window._voice_preload_worker = CallableWorker(TranscriptionWorker.preload_model)
-                main_window._voice_preload_worker.start()
+    # Deferred, not checked at import: the LLM device is picked on the welcome screen.
+    def _wire_chat():
+        if main_window.welcome_widget.assistant_disabled:
+            return
+        main_window._chat_controller = ChatController(main_window, controller, model)
+        if VOICE_AVAILABLE:
+            # Off the GUI thread, so the first push-to-talk isn't a cold model load.
+            main_window._voice_preload_worker = CallableWorker(TranscriptionWorker.preload_model)
+            main_window._voice_preload_worker.start()
 
-        main_window.welcome_widget.transition_signal.connect(_wire_chat)
+    main_window.welcome_widget.transition_signal.connect(_wire_chat)
 
     main_window.show()
 

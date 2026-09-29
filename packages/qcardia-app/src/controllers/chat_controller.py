@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from contextlib import suppress
 
 from PySide6.QtCore import Qt
 
@@ -10,9 +11,9 @@ from llm.context import build_state_block
 from llm.prompt import build_messages
 from llm.tools import ToolContext, build_tools
 from model.background_worker import CallableWorker
-from model.llm_client import OllamaWorker, warm_model
-from utils import study_log
-from utils.app_config import OLLAMA_MODEL, data_dir, list_subjects
+from model.ollama_client import warm_model
+from utils import llm_devices, study_log
+from utils.app_config import data_dir, list_subjects
 
 _MAX_HISTORY_TURNS = 10
 
@@ -24,16 +25,76 @@ class ChatController:
         self.model = model
         self._history: list[dict] = []
         self._worker = None
-        # Read the widget's actual model selection rather than assume OLLAMA_MODEL.
-        self._llm_model = self.view.chat_widget.current_tag() or OLLAMA_MODEL
+        # Read the widget's actual model selection rather than a default.
+        self._llm_model = self.view.chat_widget.current_tag() or llm_devices.default_model()
+        self._think = self.view.chat_widget.think_enabled()
         self._available_subjects_cache: list[str] | None = None
         self._warmup_worker: CallableWorker | None = None  # see _warm_model_in_background
+        self._model_load_worker: CallableWorker | None = None  # see _preload_selected_model
+        self._live_workers: list = []  # anything whose thread must outlive its variable
 
         self.view.chat_widget.message_submitted.connect(self.send_message)
         self.view.chat_widget.model_changed.connect(self._on_model_changed)
+        self.view.chat_widget.device_changed.connect(self._on_device_changed)
+        self.view.chat_widget.think_changed.connect(self._on_think_changed)
 
     def _on_model_changed(self, model_name: str):
         self._llm_model = model_name
+        self._preload_selected_model()
+
+    def _on_think_changed(self, enabled: bool):
+        self._think = enabled
+
+    def _on_device_changed(self, device):
+        """Detach, not stop, a request still running on the device we just left.
+
+        It is blocked in a socket read, so it can only be disconnected (a late reply
+        must not land in a moved-on conversation, nor null out the next worker) and
+        held until it finishes (dropping it mid-run aborts the process).
+        """
+        worker = self._worker
+        if worker is None:
+            # A tool sequence with no worker in flight is still mid-run, and re-enabling
+            # input would let the next send race its follow-up request.
+            return
+        self._worker = None
+        for signal in (worker.token_received, worker.thinking_received,
+                       worker.tool_calls_ready,
+                       worker.finished_ok, worker.error, worker.finished):
+            with suppress(RuntimeError, TypeError):
+                signal.disconnect()  # no args = drop every slot on that signal
+        self._hold(worker)
+        self._chat_span.end(error="abandoned on device switch")
+        self.view.chat_widget.finalize_assistant_message()  # close the dangling bubble
+        self.view.chat_widget.append_system_message(
+            f"Abandoned the request still running on the previous device. "
+            f"Ask again to run it on {device.label}."
+        )
+        self.view.chat_widget.set_enabled(True)
+
+    def _hold(self, worker):
+        """Keep a worker alive until its thread really ends; dropping it mid-run aborts."""
+        self._live_workers.append(worker)
+        worker.finished.connect(lambda w=worker: w in self._live_workers and self._live_workers.remove(w))
+
+    def _preload_selected_model(self):
+        """Load the newly picked model now, so the next send doesn't absorb the cold load."""
+        if not llm_devices.supports_warmup():
+            return
+        self.view.chat_widget.set_model_loading(True)
+        worker = CallableWorker(warm_model, self._llm_model)
+        # Overwrites a possibly still-running warm-up, so _hold keeps that one referenced.
+        self._model_load_worker = worker
+        self._hold(worker)
+        worker.finished.connect(lambda w=worker: self._on_model_loaded(w))
+        worker.start()
+
+    def _on_model_loaded(self, worker):
+        # A newer selection can start first; only the most recent clears the indicator.
+        if worker is not self._model_load_worker:
+            return
+        self._model_load_worker = None
+        self.view.chat_widget.set_model_loading(False)
 
     def _available_subjects(self) -> list[str]:
         """Subject folders rarely change mid-session — cache the disk scan."""
@@ -99,8 +160,11 @@ class ChatController:
             self._history = self._history[cutoff:]
 
     def _start_worker(self, messages: list[dict]):
-        self._worker = OllamaWorker(messages, tools=self._build_tools(), model=self._llm_model)
+        worker_cls = llm_devices.worker_class()
+        self._worker = worker_cls(messages, tools=self._build_tools(), model=self._llm_model,
+                                  think=self._think)
         self._worker.token_received.connect(self.view.chat_widget.append_assistant_chunk)
+        self._worker.thinking_received.connect(self.view.chat_widget.append_thinking_chunk)
         self._worker.token_received.connect(lambda _: self._chat_span.mark("first_token"), Qt.SingleShotConnection)
         self._worker.tool_calls_ready.connect(self._on_tool_calls)
         self._worker.finished_ok.connect(self._on_finished)
@@ -135,6 +199,8 @@ class ChatController:
         """Gets Ollama resident with the right num_ctx while the tool call(s)
         below are still running, so the follow-up chat request doesn't also
         pay a cold-load penalty."""
+        if not llm_devices.supports_warmup():
+            return
         if self._warmup_worker is not None and self._warmup_worker.isRunning():
             return
         worker = CallableWorker(warm_model, self._llm_model)
