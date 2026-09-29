@@ -33,7 +33,7 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "zoom_in": ("Zoom in", "key"),
     "zoom_out": ("Zoom out", "key"),
     "reset": ("Reset view", "key"),
-    "link": ("Link scrolling of a panel", "key"),
+    "link": ("Link zoom, pan and scrolling of a panel", "key"),
     "contours": ("Show / hide contours in a panel", "key"),
 }
 
