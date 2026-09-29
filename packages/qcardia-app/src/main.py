@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 import sys
 
 # torch (via MKL) and faster-whisper's ctranslate2 backend each bundle their
@@ -15,9 +16,11 @@ from controllers.dicom_controller import DICOMController
 from model.background_worker import CallableWorker
 from model.dicom_model import DICOMModel
 from model.voice_input import VOICE_AVAILABLE, TranscriptionWorker
-from utils.app_config import CHAT_AVAILABLE
+from utils import study_log
+from utils.app_config import APP_DIR, CHAT_AVAILABLE, data_dir
 from view.theme import apply_theme
 from view.main_window import MainWindow, load_app_icon
+from view.ui_logger import install_ui_logger
 
 logging.basicConfig(level=logging.INFO)
 
@@ -52,6 +55,27 @@ def main():
         model.use_segmentation_cache = main_window.welcome_widget.use_segmentation_cache
 
     main_window.welcome_widget.transition_signal.connect(_configure_preprocessing)
+
+    def _start_study_log():
+        welcome = main_window.welcome_widget
+        if welcome.study_logging:
+            study_log.start_session(
+                welcome.participant_id, welcome.condition, assistant=not welcome.assistant_disabled,
+                cardisort_cache=welcome.use_cardisort_cache,
+                segmentation_cache=welcome.use_segmentation_cache, data_folder=str(data_dir()),
+            )
+            install_ui_logger(main_window)
+
+    def _end_study_log():
+        path = study_log.end_session()
+        if path is not None:
+            # Detached, so the report finishes after the app has closed.
+            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            subprocess.Popen([sys.executable, str(APP_DIR / "tests" / "study" / "study_report.py"), str(path)],
+                             creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    main_window.welcome_widget.transition_signal.connect(_start_study_log)
+    app.aboutToQuit.connect(_end_study_log)
 
     if CHAT_AVAILABLE:
         # chat_widget only exists after build_analysis_interface() runs, which

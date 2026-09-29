@@ -146,3 +146,5 @@ tests/llm/results/
 
 # evidence-gathering prototype run outputs (prototypes/evidence_gathering/README.md)
 prototypes/evidence_gathering/findings/
+
+logs/

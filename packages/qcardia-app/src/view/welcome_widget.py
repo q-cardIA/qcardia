@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -42,6 +43,18 @@ class WelcomeWidget(QWidget):
     @property
     def use_segmentation_cache(self) -> bool:
         return self._toggle_preproc_seg.isChecked()
+
+    @property
+    def study_logging(self) -> bool:
+        return self._toggle_study_log.isChecked()
+
+    @property
+    def participant_id(self) -> str:
+        return self._participant_edit.text()
+
+    @property
+    def condition(self) -> str:
+        return self._condition_edit.text()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -223,6 +236,16 @@ class WelcomeWidget(QWidget):
 
         self._toggle_preproc_seg = self._toggle_switch(default=True)
         options_layout.addLayout(self._toggle_row(self._toggle_preproc_seg, "Preprocessed segmentation"))
+
+        self._toggle_study_log = self._toggle_switch(default=False)
+        study_row = self._toggle_row(self._toggle_study_log, "Study logging")
+        self._participant_edit, self._condition_edit = QLineEdit(), QLineEdit()
+        for edit, placeholder in ((self._participant_edit, "Participant ID"), (self._condition_edit, "Condition")):
+            edit.setPlaceholderText(placeholder)
+            edit.setEnabled(False)
+            self._toggle_study_log.toggled.connect(edit.setEnabled)
+            study_row.insertWidget(study_row.count() - 1, edit)
+        options_layout.addLayout(study_row)
 
         self._change_data_dir_btn, self._data_dir_label = self._edit_row(options_layout)
         self._show_data_dir()

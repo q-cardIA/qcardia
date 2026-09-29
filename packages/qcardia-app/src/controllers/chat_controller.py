@@ -4,11 +4,14 @@ from __future__ import annotations
 import logging
 import re
 
+from PySide6.QtCore import Qt
+
 from llm.context import build_state_block
 from llm.prompt import build_messages
 from llm.tools import ToolContext, build_tools
 from model.background_worker import CallableWorker
 from model.llm_client import OllamaWorker, warm_model
+from utils import study_log
 from utils.app_config import OLLAMA_MODEL, data_dir, list_subjects
 
 _MAX_HISTORY_TURNS = 10
@@ -79,6 +82,7 @@ class ChatController:
 
         self._history.append({"role": "user", "content": user_text})
         self._trim_history()
+        self._chat_span = study_log.Span("chat", text=user_text, model=self._llm_model)
 
         self.view.chat_widget.set_enabled(False)
         self.view.chat_widget.begin_assistant_message()
@@ -97,6 +101,7 @@ class ChatController:
     def _start_worker(self, messages: list[dict]):
         self._worker = OllamaWorker(messages, tools=self._build_tools(), model=self._llm_model)
         self._worker.token_received.connect(self.view.chat_widget.append_assistant_chunk)
+        self._worker.token_received.connect(lambda _: self._chat_span.mark("first_token"), Qt.SingleShotConnection)
         self._worker.tool_calls_ready.connect(self._on_tool_calls)
         self._worker.finished_ok.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
@@ -112,9 +117,11 @@ class ChatController:
         text = self.view.chat_widget.finalize_assistant_message()
         if text:
             self._history.append({"role": "assistant", "content": text})
+        self._chat_span.end(reply=text)
         self.view.chat_widget.set_enabled(True)
 
     def _on_error(self, message: str):
+        self._chat_span.end(error=message)
         self.view.chat_widget.finalize_assistant_message()
         self.view.chat_widget.append_system_message(f"Error: {message}")
         self.view.chat_widget.set_enabled(True)
@@ -144,16 +151,17 @@ class ChatController:
         name, arguments = remaining.pop(0)
         bubble = self.view.chat_widget.append_tool_call(name, arguments)
 
-        if name == "load_subject":
-            self._execute_load_subject(arguments, remaining, bubble)
-            return  # continues once the background load actually finishes
-
-        result = self._execute_tool(name, arguments)
+        with study_log.acting("assistant"):
+            if name == "load_subject":
+                self._execute_load_subject(arguments, remaining, bubble)
+                return  # continues once the background load actually finishes
+            result = self._execute_tool(name, arguments)
         bubble.set_result(result)
         self._append_tool_history(name, arguments, result)
         self._execute_tool_sequence(remaining)
 
     def _append_tool_history(self, name: str, arguments: dict, result: str):
+        study_log.log("tool_call", name=name, arguments=arguments, result=result)
         self._history.append({
             "role": "assistant", "content": "",
             "tool_calls": [{"function": {"name": name, "arguments": arguments}}],
