@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from utils import bindings
 from utils.app_config import CHAT_AVAILABLE, data_dir, set_data_dir
+from view.controls_dialog import ControlsDialog
 
 class WelcomeWidget(QWidget):
 
@@ -84,9 +86,19 @@ class WelcomeWidget(QWidget):
         row.addStretch(1)
         return row
 
+    def _edit_row(self, layout) -> tuple[QPushButton, QLabel]:
+        button = QPushButton("Edit")
+        button.setProperty("role", "welcomeToggleSwitch")
+        row = self._toggle_row(button, "")
+        layout.addLayout(row)
+        return button, row.itemAt(1).widget()
+
     def _show_data_dir(self):
         self._data_dir_label.setText(f"Data folder: {data_dir().name}")
         self._data_dir_label.setToolTip(str(data_dir()))
+
+    def _show_controls(self):
+        self._controls_label.setText(f"Controls: {bindings.preset_name(bindings.current())}")
 
     # ------------------------------------------------------------------
     # Build
@@ -212,12 +224,10 @@ class WelcomeWidget(QWidget):
         self._toggle_preproc_seg = self._toggle_switch(default=True)
         options_layout.addLayout(self._toggle_row(self._toggle_preproc_seg, "Preprocessed segmentation"))
 
-        self._change_data_dir_btn = QPushButton("Edit")
-        self._change_data_dir_btn.setProperty("role", "welcomeToggleSwitch")
-        data_dir_row = self._toggle_row(self._change_data_dir_btn, "")
-        self._data_dir_label = data_dir_row.itemAt(1).widget()  # the row's label
+        self._change_data_dir_btn, self._data_dir_label = self._edit_row(options_layout)
         self._show_data_dir()
-        options_layout.addLayout(data_dir_row)
+        self._edit_controls_btn, self._controls_label = self._edit_row(options_layout)
+        self._show_controls()
 
         # Zero-spacing container so button_row and _options_panel touch —
         # the panel's own layout spacing would otherwise gap them apart.
@@ -321,6 +331,7 @@ class WelcomeWidget(QWidget):
         )
         self._chevron_btn.toggled.connect(self._on_chevron_toggled)
         self._change_data_dir_btn.clicked.connect(self._on_change_data_dir)
+        self._edit_controls_btn.clicked.connect(self._on_edit_controls)
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)
         self.right_panel_about_software_pushbutton.clicked.connect(self.about_clicked)
         self.right_panel_helpwiki_pushbutton.clicked.connect(self.help_clicked)
@@ -337,6 +348,10 @@ class WelcomeWidget(QWidget):
             widget.setProperty("panelOpen", checked)
             widget.style().unpolish(widget)
             widget.style().polish(widget)
+
+    def _on_edit_controls(self):
+        ControlsDialog(self).exec()
+        self._show_controls()
 
     def _on_change_data_dir(self):
         options = QFileDialog.ShowDirsOnly
