@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -81,6 +81,10 @@ class MainWindow(QMainWindow):
         self.time_slider.setProperty("role", "timeSlider")
         time_layout.addWidget(self.time_label)
         time_layout.addWidget(self.time_slider)
+        self._play_timer = QTimer(self)
+        self._play_timer.timeout.connect(lambda: self.step_time_frame(1))
+        self.display_area_widget.time_step_requested.connect(self.step_time_frame)
+        self.display_area_widget.play_toggle_requested.connect(self.toggle_cine)
 
         self.top_bar = QWidget()
         self.top_bar.setProperty("role", "topBar")
@@ -255,10 +259,23 @@ class MainWindow(QMainWindow):
             self.save_button_signal.emit()
 
     def update_time_slider_range(self, num_frames):
+        self._play_timer.stop()
         self.time_slider.setMaximum(num_frames - 1)
         self.time_slider.setValue(0)
         self.time_slider.setEnabled(num_frames > 1)
         self.time_label.setText(f"Time Frame: 1 / {num_frames}")
+
+    def step_time_frame(self, step: int):
+        n = self.time_slider.maximum() + 1
+        if n > 1:
+            self.time_slider.setValue((self.time_slider.value() + step) % n)
+
+    def toggle_cine(self):
+        """Play or pause the cine: one heartbeat per second, at most 50 frames per second."""
+        if self._play_timer.isActive():
+            self._play_timer.stop()
+        elif self.time_slider.maximum() > 0:
+            self._play_timer.start(max(20, 1000 // (self.time_slider.maximum() + 1)))
 
     def on_time_slider_changed(self, value):
         max_val = self.time_slider.maximum()
