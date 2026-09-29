@@ -1,10 +1,8 @@
 import os
-import sys
 
-from PySide6.QtCore import QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtCore import QPoint, QSize, QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -17,9 +15,11 @@ from PySide6.QtWidgets import (
 
 from model.background_worker import CallableWorker
 from utils import bindings, llm_devices
-from utils.app_config import data_dir, set_data_dir
+from utils.app_config import COMMUNITY_URL, ISSUES_URL, REPO_URL, WIKI_URL, data_dir, set_data_dir
 from view.controls_dialog import ControlsDialog
-from view.theme import PopupComboBox, thin_loading_bar
+from view.dialogs import pick_directory
+from view import theme
+from view.theme import AppearanceDialog, PopupComboBox, thin_loading_bar
 
 
 class WelcomeWidget(QWidget):
@@ -73,14 +73,16 @@ class WelcomeWidget(QWidget):
             filename,
         )
 
-    def _icon_btn(self, text, image_file, role):
+    def _icon_btn(self, text, image_file, role, token="text_muted"):
         btn = QPushButton(f"  {text}")
         btn.setProperty("role", role)
-        pix = QPixmap(self._asset(image_file))
-        if not pix.isNull():
-            btn.setIcon(QIcon(pix))
-            btn.setIconSize(QSize(20, 20))
+        btn.setIcon(theme.tinted_icon(self._asset(image_file), token))
+        btn.setIconSize(QSize(20, 20))
         return btn
+
+    def _retint_main_action(self):
+        self.left_panel_single_patient_pushbutton.setIcon(
+            theme.tinted_icon(self._asset("patient-icon.png"), "on_accent"))
 
     def _toggle_switch(self, default: bool, enabled: bool = True) -> QPushButton:
         """An ON/OFF pill button standing in for a checkbox — used in the
@@ -167,23 +169,16 @@ class WelcomeWidget(QWidget):
         self.central_label = QWidget()
         self.central_label.setObjectName("centralContainer")
         self.central_label.setAttribute(Qt.WA_StyledBackground, True)
-        self.central_label.setProperty("role", "welcomeCentral")
 
         card_layout = QHBoxLayout(self.central_label)
         card_layout.setContentsMargins(0, 0, 0, 0)
-        card_layout.setSpacing(0)
+        card_layout.setSpacing(6)  # the gap between the analysis screen's cards
 
         self.left_panel = self._build_left_panel()
         self.right_panel = self._build_right_panel()
 
-        divider = QLabel()
-        divider.setFixedWidth(1)
-        divider.setProperty("role", "divider")
-        divider.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-
-        card_layout.addWidget(self.left_panel)
-        card_layout.addWidget(divider)
-        card_layout.addWidget(self.right_panel)
+        card_layout.addWidget(self.left_panel, 1)
+        card_layout.addWidget(self.right_panel, 1)
 
         card_row = QHBoxLayout()
         card_row.addStretch(1)
@@ -214,8 +209,9 @@ class WelcomeWidget(QWidget):
         button_row_layout.setSpacing(0)
 
         self.left_panel_single_patient_pushbutton = self._icon_btn(
-            "Single patient mode", "patient-icon.png", "welcomeMainAction"
+            "Single patient mode", "patient-icon.png", "welcomeMainAction", "on_accent"
         )
+        theme.notifier.changed.connect(self._retint_main_action)
         self._chevron_btn = QPushButton("···")
         self._chevron_btn.setCheckable(True)
         self._chevron_btn.setChecked(False)
@@ -225,7 +221,8 @@ class WelcomeWidget(QWidget):
         button_row_layout.addWidget(self.left_panel_single_patient_pushbutton, 1)
         button_row_layout.addWidget(self._chevron_btn)
 
-        self._options_panel = QFrame()
+        self._options_panel = QFrame(self)
+        theme.notifier.changed.connect(self._replace_options)
         self._options_panel.setProperty("role", "welcomeOptionsPanel")
         self._options_panel.hide()
         options_layout = QVBoxLayout(self._options_panel)
@@ -283,16 +280,11 @@ class WelcomeWidget(QWidget):
         self._show_data_dir()
         self._edit_controls_btn, self._controls_label = self._edit_row(options_layout)
         self._show_controls()
+        self._edit_appearance_btn, self._appearance_label = self._edit_row(options_layout)
+        self._appearance_label.setText(theme.appearance_summary())
 
-        # Zero-spacing container so button_row and _options_panel touch —
-        # the panel's own layout spacing would otherwise gap them apart.
-        button_group = QWidget()
-        button_group_layout = QVBoxLayout(button_group)
-        button_group_layout.setContentsMargins(0, 0, 0, 0)
-        button_group_layout.setSpacing(0)
-        button_group_layout.addWidget(button_row)
-        button_group_layout.addWidget(self._options_panel)
-        layout.addWidget(button_group)
+        layout.addWidget(button_row)
+        self._button_row = button_row  # the options panel drops down from here, over the screen
 
         desc = QLabel("Load and analyse a single patient's cardiac MRI study.")
         desc.setProperty("role", "welcomeDescription")
@@ -356,7 +348,8 @@ class WelcomeWidget(QWidget):
                 opt = ps
             else:
                 self.parent.resize(opt)
-        self.setMinimumSize(opt)
+        # The parent may be maximized or full screen: never pin the window's minimum to that.
+        self.setMinimumSize(opt.boundedTo(QSize(1280, 720)))
         self.resize(opt)
 
         btn_h = 52
@@ -387,6 +380,7 @@ class WelcomeWidget(QWidget):
         self._chevron_btn.toggled.connect(self._on_chevron_toggled)
         self._change_data_dir_btn.clicked.connect(self._on_change_data_dir)
         self._edit_controls_btn.clicked.connect(self._on_edit_controls)
+        self._edit_appearance_btn.clicked.connect(self._on_edit_appearance)
         self._device_combo.currentIndexChanged.connect(self._on_device_selected)
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)
         self.right_panel_about_software_pushbutton.clicked.connect(self.about_clicked)
@@ -440,35 +434,55 @@ class WelcomeWidget(QWidget):
         self._device_status.setText(f"{device.label} check failed: {exc}")
         self._toggle_llm_assistant.setEnabled(llm_devices.chat_available())
 
+    def _place_options(self):
+        panel, row = self._options_panel, self._button_row
+        panel.setFixedWidth(row.width())
+        panel.adjustSize()
+        top = row.mapTo(self, QPoint(0, 0))
+        y = top.y() + row.height()
+        if y + panel.height() > self.height():  # no room below: open upward, within the window
+            y = max(0, top.y() - panel.height())
+        panel.move(top.x(), y)
+        panel.raise_()
+
+    def _replace_options(self):
+        if self._options_panel.isVisible():  # e.g. a text size change moves the button row
+            QTimer.singleShot(0, self._place_options)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._options_panel.isVisible():
+            self._place_options()
+
     def _on_chevron_toggled(self, checked: bool):
+        if checked:
+            self._place_options()
         self._options_panel.setVisible(checked)
-        # unpolish/polish forces Qt to re-match QSS after a property change.
         for widget in (self.left_panel_single_patient_pushbutton, self._chevron_btn):
-            widget.setProperty("panelOpen", checked)
-            widget.style().unpolish(widget)
-            widget.style().polish(widget)
+            theme.set_style_property(widget, "panelOpen", checked)
 
     def _on_edit_controls(self):
         ControlsDialog(self).exec()
         self._show_controls()
 
+    def _on_edit_appearance(self):
+        AppearanceDialog(self).exec()
+        self._appearance_label.setText(theme.appearance_summary())
+
     def _on_change_data_dir(self):
-        options = QFileDialog.ShowDirsOnly
-        if sys.platform == "darwin":  # native dialog crashes there; Qt's own can't open subfolders on Windows
-            options |= QFileDialog.DontUseNativeDialog
-        folder = QFileDialog.getExistingDirectory(self, "Select data folder", str(data_dir()), options)
+        folder = pick_directory(self, "Select data folder")
         if folder:
             set_data_dir(folder)
             self._show_data_dir()
 
     def community_clicked(self):
-        QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA"))
+        QDesktopServices.openUrl(QUrl(COMMUNITY_URL))
 
     def about_clicked(self):
-        QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia"))
+        QDesktopServices.openUrl(QUrl(REPO_URL))
 
     def help_clicked(self):
-        QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia/wiki"))
+        QDesktopServices.openUrl(QUrl(WIKI_URL))
 
     def issues_clicked(self):
-        QDesktopServices.openUrl(QUrl("https://github.com/q-cardIA/qcardia/issues"))
+        QDesktopServices.openUrl(QUrl(ISSUES_URL))
