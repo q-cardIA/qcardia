@@ -16,11 +16,14 @@ _KIND_TITLES = {
     "drag": ("Mouse drag", "a mouse button (with Ctrl, Shift or Alt), or a key to hold while dragging with left"),
     "wheel": ("Mouse wheel", "the wheel (with Ctrl, Shift or Alt), or a key to hold while scrolling"),
     "key": ("Single actions", "a key, or a mouse click (also the side buttons)"),
+    "hold": ("Voice input", "any key to hold, alone or with Ctrl, Shift or Alt, a modifier on its own, "
+                            "or the middle or a side mouse button"),
 }
 _REJECT = {
     "drag": "Drag actions need a mouse button or a key to hold.",
     "wheel": "Scroll actions need the wheel or a key to hold.",
     "key": "Single actions need a key or a mouse click.",
+    "hold": "Push to talk needs a key, or the middle or a side mouse button.",
 }
 
 
@@ -33,6 +36,7 @@ class _BindingButton(QPushButton):
         super().__init__()
         self.action, self.kind = action, kind
         self._capturing = self._swallow_release = False
+        self._modifier: str | None = None
         self.setMinimumWidth(180)
         self.clicked.connect(self._start)
 
@@ -41,7 +45,7 @@ class _BindingButton(QPushButton):
         self.setText(bindings.label(binding))
 
     def _start(self):
-        self._capturing = True
+        self._capturing, self._modifier = True, None
         self.setText("Press a key, click or scroll…")
         self.setFocus()
 
@@ -56,6 +60,8 @@ class _BindingButton(QPushButton):
             self._finish("")
         else:
             drag = bindings.drag_binding(event.button(), event.modifiers())
+            if self.kind == "hold" and event.button() not in bindings.HOLD_BUTTONS:
+                drag = None
             self._finish((drag if self.kind == "drag" else bindings.click_of(drag)) or "")
 
     def wheelEvent(self, event):
@@ -67,9 +73,11 @@ class _BindingButton(QPushButton):
             super().keyPressEvent(event)
         elif event.key() == Qt.Key_Escape:
             self._finish(None)
-        elif event.key() not in (Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta):
+        elif event.key() in bindings.MODIFIER_KEYS:
+            self._modifier = bindings.MODIFIER_KEYS[event.key()] if self.kind == "hold" else None
+        else:
             key = bindings.bare_key(event)
-            if self.kind == "key":
+            if self.kind in ("key", "hold"):
                 self._finish(bindings.key_binding(event))
             elif key.isalnum() or len(key) > 1:  # a key to hold: letters, digits or named keys like Space
                 self._finish(f"{key}+LeftDrag" if self.kind == "drag" else f"{key}+Wheel")
@@ -83,6 +91,9 @@ class _BindingButton(QPushButton):
         super().focusOutEvent(event)
 
     def keyReleaseEvent(self, event):
+        if self._capturing and self._modifier and bindings.hold_key(event) == self._modifier:
+            self._finish(self._modifier)
+            return
         if self._swallow_release:  # else releasing Space would click the button again
             self._swallow_release = False
             return

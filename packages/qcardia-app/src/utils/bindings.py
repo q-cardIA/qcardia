@@ -35,12 +35,13 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "reset": ("Reset view", "key"),
     "link": ("Link zoom, pan and scrolling of a panel", "key"),
     "contours": ("Show / hide contours in a panel", "key"),
+    "push_to_talk": ("Push to talk", "hold"),
 }
 
 _KEYS = {
     "slice_prev": "Up", "slice_next": "Down", "first_slice": "Home", "last_slice": "End",
     "frame_prev": "Left", "frame_next": "Right", "play": "Space",
-    "zoom_in": "+", "zoom_out": "-", "reset": "R", "link": "L", "contours": "C",
+    "zoom_in": "+", "zoom_out": "-", "reset": "R", "link": "L", "contours": "C", "push_to_talk": "Ctrl+Space",
 }
 # Cardiac: left stays free for crosshair and contours, right-drag windows (Medis, QMass, Segment).
 # PACS: left-drag windows, right-drag zooms (OHIF, Horos).
@@ -175,3 +176,19 @@ def key_binding(event) -> str:
     if text and not text.isalnum() and not text.isspace():
         mods &= ~Qt.ShiftModifier  # '+' needs Shift on some layouts
     return QKeySequence(QKeyCombination(mods, Qt.Key(event.key()))).toString()
+
+
+MODIFIER_KEYS = {Qt.Key_Control: "Ctrl", Qt.Key_Shift: "Shift", Qt.Key_Alt: "Alt", Qt.Key_Meta: "Meta"}
+HOLD_BUTTONS = (Qt.MiddleButton, Qt.BackButton, Qt.ForwardButton)
+
+
+def hold_binding(event) -> str:
+    return MODIFIER_KEYS.get(event.key()) or key_binding(event)
+
+
+def hold_key(event) -> str:
+    return MODIFIER_KEYS.get(event.key()) or bare_key(event)
+
+
+def last_key(binding: str) -> str:
+    return binding.rpartition("+")[2] or "+"

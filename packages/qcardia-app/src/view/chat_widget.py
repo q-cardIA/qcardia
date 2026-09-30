@@ -32,7 +32,7 @@ from model.voice_input import (
     select_input_device,
     selected_input_device,
 )
-from utils import llm_devices
+from utils import bindings, llm_devices
 from utils.app_config import (
     discover_local_gguf_files,
     gguf_model_tag,
@@ -426,6 +426,10 @@ class _SendButton(QPushButton):
         painter.drawArc(rect, -self._angle * 16, 100 * 16)
 
 
+_PTT_EVENTS = (QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.ShortcutOverride,
+               QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick)
+
+
 class ChatWidget(QFrame):
     """Minimal chat sidebar panel: scrollback of bubbles + input box + send
     button + a model picker backed by whatever Ollama already has pulled
@@ -450,7 +454,7 @@ class ChatWidget(QFrame):
         self._busy = False
         self._busy_before_switch = False
         self._mic_worker: MicrophoneWorker | None = None
-        self._f9_held = False
+        self._ptt_held = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -485,7 +489,9 @@ class ChatWidget(QFrame):
         self._mic_btn = _SendButton("")
         self._mic_btn.setProperty("role", "composerIcon")
         if VOICE_AVAILABLE:
-            self._mic_btn.setToolTip("Hold to speak (or hold F9)\nRight-click to select microphone")
+            hold = bindings.current().get("push_to_talk")
+            self._mic_btn.setToolTip(f"Hold to speak{f' (or hold {bindings.label(hold)})' if hold else ''}"
+                                     "\nRight-click to select microphone")
             self._mic_btn.pressed.connect(self._on_mic_press)
             self._mic_btn.released.connect(self._on_mic_release)
             self._mic_btn.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -770,18 +776,34 @@ class ChatWidget(QFrame):
     # -- voice input (push-to-talk) ------------------------------------------
 
     def eventFilter(self, obj, event):
-        """Global F9 push-to-talk, so it works from any focused widget."""
-        if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
-            if event.key() == Qt.Key_F9 and not self._f9_held:
-                self._f9_held = True
-                self._on_mic_press()
+        """Global push-to-talk on its binding, so it works from any focused widget."""
+        kind = event.type()
+        if kind == QEvent.Type.ApplicationDeactivate and self._ptt_held:
+            self._end_hold()
+        elif kind in _PTT_EVENTS and (self._ptt_held or QApplication.activeModalWidget() is None):
+            ptt = bindings.current().get("push_to_talk")
+            mouse = kind in _PTT_EVENTS[3:]
+            release = kind in (QEvent.Type.KeyRelease, QEvent.Type.MouseButtonRelease)
+            repeat = not mouse and event.isAutoRepeat()
+            click = bindings.click_of(bindings.drag_binding(event.button(), event.modifiers())) if mouse else None
+            if not ptt or (mouse and not click):
+                pass
+            elif self._ptt_held and bindings.last_key(click or bindings.hold_key(event)) == bindings.last_key(ptt):
+                if release and not repeat:
+                    self._end_hold()
+                event.accept()
                 return True
-        elif event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
-            if event.key() == Qt.Key_F9 and self._f9_held:
-                self._f9_held = False
-                self._on_mic_release()
+            elif not release and not repeat and (click or bindings.hold_binding(event)) == ptt:
+                if kind != QEvent.Type.ShortcutOverride:
+                    self._ptt_held = True
+                    self._on_mic_press()
+                event.accept()
                 return True
         return super().eventFilter(obj, event)
+
+    def _end_hold(self):
+        self._ptt_held = False
+        self._on_mic_release()
 
     def _show_mic_device_menu(self, pos):
         """Right-click context menu on the mic button to choose an input device."""
@@ -813,7 +835,7 @@ class ChatWidget(QFrame):
         if not VOICE_AVAILABLE or self._mic_worker is not None:
             return
         # setDown() gives the mic button the same pressed accent look as the
-        # send button while it's held — also covers the F9 path, which has
+        # send button while it's held — also covers the push-to-talk key, which has
         # no real mouse press for Qt's own :pressed state to latch onto.
         self._mic_btn.setDown(True)
         self._voice_span = study_log.Span("voice")
