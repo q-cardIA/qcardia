@@ -15,7 +15,7 @@ from controllers.chat_controller import ChatController
 from controllers.dicom_controller import DICOMController
 from model.background_worker import CallableWorker
 from model.dicom_model import DICOMModel
-from model.voice_input import VOICE_AVAILABLE, TranscriptionWorker
+from model.voice_input import VOICE_AVAILABLE, preload_model
 from utils import llm_devices, study_log
 from utils.app_config import APP_DIR, data_dir
 from view.theme import apply_theme
@@ -100,7 +100,7 @@ def main():
         # Once per app: a second session must not drop a preload that is still running.
         if VOICE_AVAILABLE and getattr(main_window, "_voice_preload_worker", None) is None:
             # Off the GUI thread, so the first push-to-talk isn't a cold model load.
-            main_window._voice_preload_worker = CallableWorker(TranscriptionWorker.preload_model)
+            main_window._voice_preload_worker = CallableWorker(preload_model)
             main_window._voice_preload_worker.start()
 
     main_window.session_started.connect(_wire_chat)

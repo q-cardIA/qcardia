@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QFontMetricsF, QPainter, QPalette, QPen, QTextDocument
+from PySide6.QtGui import QAction, QActionGroup, QFontMetricsF, QPainter, QPalette, QPen, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -28,7 +28,6 @@ from utils import study_log
 from model.voice_input import (
     VOICE_AVAILABLE,
     MicrophoneWorker,
-    TranscriptionWorker,
     list_input_devices,
     select_input_device,
     selected_input_device,
@@ -249,12 +248,42 @@ class _ChatInput(QPlainTextEdit):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.document().setDocumentMargin(2)
         self.document().documentLayout().documentSizeChanged.connect(self._fit)
+        self._preview: QTextCursor | None = None
+        self._preview_edited = False
 
     def text(self) -> str:
         return self.toPlainText()
 
     def insert(self, text: str):
         self.insertPlainText(text)
+
+    def begin_preview(self):
+        self._preview, self._preview_edited = QTextCursor(self.textCursor()), False
+        self._preview.clearSelection()
+
+    def show_preview(self, stable: str, tentative: str):
+        if self._preview is None:
+            return
+        cursor = self._preview
+        (cursor.joinPreviousEditBlock if self._preview_edited else cursor.beginEditBlock)()
+        cursor.removeSelectedText()
+        start = cursor.position()
+        space = " " if (stable or tentative) and start and not self.document().characterAt(start - 1).isspace() else ""
+        cursor.insertText(space + stable + (" " if stable and tentative else ""), QTextCharFormat())
+        muted = QTextCharFormat()
+        muted.setForeground(theme.color("text_muted"))
+        cursor.insertText(tentative, muted)
+        cursor.endEditBlock()
+        self._preview_edited = True
+        end = cursor.position()
+        self.setTextCursor(cursor)
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+
+    def end_preview(self, text: str | None):
+        if text is not None:
+            self.show_preview(text, "")
+        self._preview = None
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not event.modifiers() & Qt.ShiftModifier:
@@ -421,7 +450,6 @@ class ChatWidget(QFrame):
         self._busy = False
         self._busy_before_switch = False
         self._mic_worker: MicrophoneWorker | None = None
-        self._transcription_worker: TranscriptionWorker | None = None
         self._f9_held = False
 
         outer = QVBoxLayout(self)
@@ -789,37 +817,27 @@ class ChatWidget(QFrame):
         # no real mouse press for Qt's own :pressed state to latch onto.
         self._mic_btn.setDown(True)
         self._voice_span = study_log.Span("voice")
+        self._input.begin_preview()
         self._mic_worker = MicrophoneWorker(self)
-        self._mic_worker.finished.connect(self._on_mic_audio_ready)
+        self._mic_worker.partial.connect(self._input.show_preview)
+        self._mic_worker.finished.connect(self._on_transcription_done)
         self._mic_worker.error.connect(self._on_mic_error)
         self._mic_worker.start()
 
     def _on_mic_release(self):
-        if self._mic_worker is None:
+        if self._mic_worker is None or self._mic_worker.isInterruptionRequested():
             return
         self._mic_worker.stop()
         self._voice_span.end()
         self._voice_span = study_log.Span("transcription")
-        self._mic_worker = None
         self._mic_btn.setDown(False)
         self._mic_btn.start_loading()  # same spinning-arc busy indicator as Send
-
-    def _on_mic_audio_ready(self, audio):
-        self._transcription_worker = TranscriptionWorker(audio, parent=self)
-        self._transcription_worker.finished.connect(self._on_transcription_done)
-        self._transcription_worker.error.connect(self._on_mic_error)
-        self._transcription_worker.start()
 
     def _on_transcription_done(self, text: str):
         self._voice_span.end(text=text)
         self._mic_btn.stop_loading()
-        self._transcription_worker = None
-        if not text:
-            return
-        current = self._input.text()
-        if current and not current.endswith(" "):
-            text = " " + text
-        self._input.insert(text)
+        self._mic_worker = None
+        self._input.end_preview(text)
         self._input.setFocus()
 
     def _on_mic_error(self, message: str):
@@ -827,7 +845,7 @@ class ChatWidget(QFrame):
         self._mic_btn.setDown(False)
         self._mic_btn.stop_loading()
         self._mic_worker = None
-        self._transcription_worker = None
+        self._input.end_preview(None)
         self.append_system_message(f"Voice error: {message}")
 
     # -- bubbles ------------------------------------------------------------
