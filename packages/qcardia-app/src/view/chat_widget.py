@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPalette, QPen
+from PySide6.QtGui import QPainter, QPalette, QPen, QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,15 +29,18 @@ from model.voice_input import (
     select_input_device,
     selected_input_device,
 )
+from utils import llm_devices
 from utils.app_config import (
-    OLLAMA_MODEL,
     discover_local_gguf_files,
     gguf_model_tag,
     import_gguf_model,
-    list_ollama_models,
 )
+from view.theme import PopupComboBox, thin_loading_bar
 
 _USER_BUBBLE_WIDTH_FRACTION = 0.7  # user bubbles can grow up to 70% of the panel width
+
+# Indent per bullet level; Qt's 40px default is a ~5-character jump, this is about two.
+_LIST_INDENT = 18
 
 # Result strings that just restate what the tool call's own summary line
 # already says (e.g. "Apply viability preset" -> "Applied 'viability'
@@ -74,6 +77,11 @@ def _tool_call_summary(name: str, arguments: dict) -> str:
         return name.replace("_", " ").capitalize()
 
 
+def _as_markdown(text: str) -> str:
+    """Assistant text for QLabel's markdown renderer, with inline HTML neutralised."""
+    return text.replace("&", "&amp;").replace("<", "&lt;")
+
+
 class _Bubble(QFrame):
     """A single chat message: user (right-aligned, accent, capped at a
     fraction of the panel width), assistant/system (fill the panel width)."""
@@ -89,10 +97,24 @@ class _Bubble(QFrame):
         self._label = QLabel()
         self._label.setWordWrap(True)
         self._label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # Only the assistant formats its text; user and system lines are shown verbatim.
+        self._markdown = role == "assistant"
+        # Explicit: QLabel's AutoText default sniffs its input and would render stray markup.
+        self._label.setTextFormat(
+            Qt.TextFormat.MarkdownText if self._markdown else Qt.TextFormat.PlainText
+        )
         layout.addWidget(self._label)
 
     def set_text(self, text: str):
-        self._label.setText(text)
+        self._label.setText(_as_markdown(text) if self._markdown else text)
+        if self._markdown:
+            self._compact_list_indent()
+
+    def _compact_list_indent(self):
+        """Shrink Qt's 40px list indent, via the document QLabel parents to itself (undocumented)."""
+        for doc in self._label.findChildren(QTextDocument):
+            if doc.indentWidth() != _LIST_INDENT:
+                doc.setIndentWidth(_LIST_INDENT)
 
     def natural_width(self) -> int:
         """Width needed to render the current text on one line — QLabel's own
@@ -134,6 +156,7 @@ class _ToolCallBubble(QFrame):
         self._detail.setProperty("role", "toolCallDetail")
         self._detail.setWordWrap(True)
         self._detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._detail.setTextFormat(Qt.TextFormat.PlainText)  # arguments and paths, verbatim
         self._detail.setText(f"{name}({json.dumps(arguments)})")
         self._detail.setVisible(False)
         layout.addWidget(self._detail)
@@ -142,6 +165,7 @@ class _ToolCallBubble(QFrame):
         self._result_label.setProperty("role", "toolCallResult")
         self._result_label.setWordWrap(True)
         self._result_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._result_label.setTextFormat(Qt.TextFormat.PlainText)
         self._result_label.setVisible(False)
         layout.addWidget(self._result_label)
 
@@ -161,6 +185,91 @@ class _ToolCallBubble(QFrame):
         self.setProperty("status", "error" if self._has_notable_result else "ok")
         self.style().unpolish(self)
         self.style().polish(self)
+
+
+class _ThinkingBubble(QFrame):
+    """Collapsed-by-default reasoning, folded the way tool calls are."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "chatBubbleThinking")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setSpacing(2)
+
+        self._header = QPushButton("Thinking…")
+        self._header.setProperty("role", "toolCallHeader")
+        self._header.setCursor(Qt.PointingHandCursor)
+        self._header.clicked.connect(self._toggle)
+        layout.addWidget(self._header)
+
+        self._detail = QLabel()
+        self._detail.setProperty("role", "toolCallDetail")
+        self._detail.setWordWrap(True)
+        self._detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._detail.setTextFormat(Qt.TextFormat.PlainText)  # raw thought, not a formatted answer
+        self._detail.setVisible(False)
+        layout.addWidget(self._detail)
+
+        self._expanded = False
+        self._buffer = ""
+        self._started = time.monotonic()
+
+    def append(self, text: str):
+        self._buffer += text
+        self._detail.setText(self._buffer.strip())
+
+    def seal(self):
+        """Swap the live label for how long it took, so a finished turn reads as finished."""
+        self._header.setText(f"Thought for {time.monotonic() - self._started:.1f}s")
+
+    def _toggle(self):
+        self._expanded = not self._expanded
+        self._detail.setVisible(self._expanded)
+
+
+class _ThinkToggle(QPushButton):
+    """Ask the model to reason first. Off by default; sized so its label never clips."""
+
+    _LABEL = "Think"
+    _H_PADDING = 24  # the stylesheet's horizontal padding plus both borders
+
+    def __init__(self, parent=None):
+        super().__init__(self._LABEL, parent)
+        self.setProperty("role", "chatThinkToggle")
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._fitting = False
+        self._fit()
+
+    def _fit(self):
+        if self._fitting:
+            return  # setFixedWidth re-enters changeEvent
+        self._fitting = True
+        try:
+            self.ensurePolished()  # else we measure the default font, not the themed one
+            self.setFixedWidth(self.fontMetrics().horizontalAdvance(self._LABEL) + self._H_PADDING)
+        finally:
+            self._fitting = False
+
+    def match_height(self, other: QWidget):
+        """Adopt the combo's height; the base QPushButton min-height would leave this taller."""
+        other.ensurePolished()
+        self.setFixedHeight(other.sizeHint().height())
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._fit()
+
+    def set_supported(self, supported: bool, reason: str = ""):
+        """Grey out for a model that cannot reason; Ollama rejects the request outright."""
+        if not supported and self.isChecked():
+            self.setChecked(False)
+        self.setEnabled(supported)
+        self.setToolTip(reason or ("Ask the model to reason before answering"
+                                   if supported else "This model cannot reason"))
 
 
 class _SendButton(QPushButton):
@@ -218,6 +327,8 @@ class ChatWidget(QFrame):
 
     message_submitted = Signal(str)
     model_changed = Signal(str)
+    think_changed = Signal(bool)
+    device_changed = Signal(object)  # the new Device, once it is actually serving
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -227,10 +338,12 @@ class ChatWidget(QFrame):
         self.setMinimumWidth(280)
 
         self._assistant_bubble: _Bubble | None = None
+        self._thinking_bubble: _ThinkingBubble | None = None
         self._assistant_buffer = ""
         self._import_worker: CallableWorker | None = None
         self._user_bubbles: list[_Bubble] = []
         self._busy = False
+        self._busy_before_switch = False
         self._mic_worker: MicrophoneWorker | None = None
         self._transcription_worker: TranscriptionWorker | None = None
         self._f9_held = False
@@ -284,39 +397,144 @@ class ChatWidget(QFrame):
         input_row.addWidget(self._send_btn)
         outer.addLayout(input_row)
 
-        self._model_combo = QComboBox()
+        # Switchable mid-session, so a remote device dropping doesn't end the conversation.
+        self._device_combo = PopupComboBox()
+        self._device_combo.setProperty("role", "chatCombo")
+        self._populate_device_combo()
+        self._device_combo.currentIndexChanged.connect(self._on_device_selected)
+        outer.addWidget(self._device_combo)
+        self._device_bar = thin_loading_bar()
+        outer.addWidget(self._device_bar)
+
+        # The combo takes the leftover width, the toggle only what its label needs.
+        model_row = QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.setSpacing(6)
+        self._model_combo = PopupComboBox()
+        self._model_combo.setProperty("role", "chatCombo")
+        self._model_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self._model_combo.setMinimumWidth(80)
+        self._think_btn = _ThinkToggle()
+        self._think_btn.toggled.connect(self.think_changed.emit)
         self._populate_model_combo()
         self._model_combo.currentIndexChanged.connect(self._on_model_selected)
-        outer.addWidget(self._model_combo)
+        model_row.addWidget(self._model_combo, 1)
+        model_row.addWidget(self._think_btn, 0)
+        outer.addLayout(model_row)
+        # Driven by ChatController, which knows when the model is actually loaded.
+        self._model_bar = thin_loading_bar()
+        outer.addWidget(self._model_bar)
+
+    def set_model_loading(self, loading: bool):
+        """Show/hide the hairline strip under the model picker."""
+        self._model_bar.setVisible(loading)
+
+    # -- device picker --------------------------------------------------
+
+    def _populate_device_combo(self):
+        self._device_combo.blockSignals(True)
+        self._device_combo.clear()
+        active = llm_devices.current()
+        for device in llm_devices.load_devices():
+            self._device_combo.addItem(device.label, device)
+            if device.id == active.id:
+                self._device_combo.setCurrentIndex(self._device_combo.count() - 1)
+        self._device_combo.blockSignals(False)
+
+    def _on_device_selected(self, index: int):
+        device = self._device_combo.itemData(index)
+        if device is None or device.id == llm_devices.current().id:
+            return
+        self._device_combo.setEnabled(False)
+        self._device_bar.show()
+        # A switch can start mid-request; on failure the old device and its request live on.
+        self._busy_before_switch = self._busy
+        self.set_enabled(False)
+        self.append_system_message(f"Switching to {device.label}…")
+        worker = CallableWorker(llm_devices.activate, device)
+        worker.finished_ok.connect(lambda result, d=device: self._on_device_switched(d, result))
+        worker.error.connect(lambda exc, d=device: self._on_device_switch_failed(d, exc))
+        self._device_switch_worker = worker
+        worker.start()
+
+    def _on_device_switched(self, device, result):
+        self._device_combo.setEnabled(True)
+        self._device_bar.hide()
+        if result.ok:
+            # The controller re-enables input itself once it has let go of any request on
+            # the old device; a tool sequence still mid-run must stay blocked.
+            self.set_enabled(not self._busy_before_switch)
+            self.device_changed.emit(device)
+            self.append_system_message(f"Now using {device.label}: {result.detail}")
+            self._populate_model_combo()  # each device serves its own models
+        else:
+            self.set_enabled(not self._busy_before_switch)
+            self.append_system_message(
+                f"{device.label} unavailable. {result.detail} "
+                f"Staying on {llm_devices.current().label}."
+            )
+            self._populate_device_combo()  # snap the combo back to what is actually active
+
+    def _on_device_switch_failed(self, device, exc: Exception):
+        self._device_combo.setEnabled(True)
+        self._device_bar.hide()
+        self.set_enabled(not self._busy_before_switch)
+        self.append_system_message(f"Could not switch to {device.label}: {exc}")
+        self._populate_device_combo()
 
     # -- model picker ---------------------------------------------------
 
-    def _populate_model_combo(self, select_tag: str | None = None):
-        select_tag = select_tag or self.current_tag() or OLLAMA_MODEL
+    def _populate_model_combo(self, select_tag: str | None = None, refresh: bool = False):
+        # The device's own default: a hosted gateway shares no model names with local Ollama.
+        fallback = llm_devices.default_model()
+        select_tag = select_tag or self.current_tag() or fallback
         self._model_combo.blockSignals(True)
         self._model_combo.clear()
 
-        pulled = list_ollama_models()
+        # Cached by the device's probe, so the GUI thread pays no HTTP timeout here.
+        pulled = llm_devices.list_models(refresh) if llm_devices.chat_available() else []
         pulled_tags = {m["tag"] for m in pulled}
+        pinned = llm_devices.current().model  # e.g. SPIKE's "best-live", which no model list shows
+        if pinned and pinned not in pulled_tags:
+            pulled = [{"tag": pinned, "label": pinned, "local": False}] + pulled
 
         for m in pulled:
             self._model_combo.addItem(m["label"], m["tag"])
 
-        for gguf_path in discover_local_gguf_files():
-            tag = gguf_model_tag(gguf_path)
-            if tag in pulled_tags:
-                continue  # already imported — shown via its pulled entry above
-            self._model_combo.addItem(f"{gguf_path.stem} (import)", str(gguf_path))
+        # GGUF import runs this machine's ollama CLI on local paths, so it is local-only.
+        if llm_devices.current().is_local:
+            for gguf_path in discover_local_gguf_files():
+                tag = gguf_model_tag(gguf_path)
+                if tag in pulled_tags:
+                    continue  # already imported — shown via its pulled entry above
+                self._model_combo.addItem(f"{gguf_path.stem} (import)", str(gguf_path))
 
         if select_tag is not None:
             idx = self._model_combo.findData(select_tag)
+            if idx < 0:
+                # Carried-over tag isn't served here; index 0 would silently load whatever sorts first.
+                idx = self._model_combo.findData(fallback)
             if idx >= 0:
                 self._model_combo.setCurrentIndex(idx)
         self._model_combo.blockSignals(False)
-        if pulled:  # the default model if installed, else the first one
+        self._sync_think_toggle()
+        if self._model_combo.count():  # the default model if installed, else the first one
             self.model_changed.emit(self._model_combo.currentData())
-        else:
-            self.append_system_message(f"No Ollama models installed. Run `ollama pull {OLLAMA_MODEL}`.")
+        elif llm_devices.chat_available():
+            self.append_system_message(f"No models installed. Run `ollama pull {llm_devices.default_model()}`.")
+
+    def _sync_think_toggle(self):
+        """Only offer Think where the model can do it; an always-on button would just error."""
+        if not hasattr(self, "_think_btn"):
+            return  # populate runs once during construction, before the toggle exists
+        if not llm_devices.chat_available():
+            self._think_btn.set_supported(False, "Select a working device first")
+            return
+        tag = self.current_tag()
+        self._think_btn.set_supported(llm_devices.supports_thinking(tag))
+
+    def think_enabled(self) -> bool:
+        return self._think_btn.isChecked() and self._think_btn.isEnabled()
 
     def current_tag(self) -> str | None:
         return self._model_combo.currentData() if self._model_combo.count() else None
@@ -328,6 +546,8 @@ class ChatWidget(QFrame):
         if data.lower().endswith(".gguf"):
             self._start_import(data)
             return
+        # Thinking is per-model, so re-check on every change, not only on rebuild.
+        self._sync_think_toggle()
         self.model_changed.emit(data)
 
     def _start_import(self, gguf_path_str: str):
@@ -353,7 +573,7 @@ class ChatWidget(QFrame):
         self.set_enabled(True)
         self._model_combo.setEnabled(True)
         self.append_system_message(message)
-        self._populate_model_combo(select_tag=select_tag)
+        self._populate_model_combo(select_tag=select_tag, refresh=True)
 
     def _on_import_finished(self, tag: str):
         self._finish_import(f"Model imported as {tag}.", select_tag=tag)
@@ -497,6 +717,11 @@ class ChatWidget(QFrame):
         available = self._scroll.viewport().width() - margins.left() - margins.right()
         return max(120, int(available * _USER_BUBBLE_WIDTH_FRACTION))
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Deferred to first show: the stylesheet may be applied after this widget is built.
+        self._think_btn.match_height(self._model_combo)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         cap = self._user_bubble_max_width()
@@ -510,18 +735,36 @@ class ChatWidget(QFrame):
     def begin_assistant_message(self):
         self._assistant_buffer = ""
         self._assistant_bubble = None  # created lazily on the first chunk, so a
-        # response that goes straight to a tool call (no streamed text) never
-        # leaves an empty placeholder bubble behind.
+        # A turn ending in a tool call is never finalized, so close its reasoning here.
+        self._seal_thinking()
+
+    def append_thinking_chunk(self, chunk: str):
+        if self._thinking_bubble is None:
+            self._thinking_bubble = _ThinkingBubble()
+            self._add_row(self._thinking_bubble, "thinking")
+        self._thinking_bubble.append(chunk)
+        self._scroll_to_bottom()
 
     def append_assistant_chunk(self, chunk: str):
         self._assistant_buffer += chunk
+        # Models pad replies with trailing newlines, which would draw an empty bubble.
+        text = self._assistant_buffer.strip()
+        if not text:
+            return
         if self._assistant_bubble is None:
             self._assistant_bubble = self._add_bubble("assistant", "")
-        self._assistant_bubble.set_text(self._assistant_buffer)
+        self._assistant_bubble.set_text(text)
         self._scroll_to_bottom()
 
+    def _seal_thinking(self):
+        if self._thinking_bubble is not None:
+            self._thinking_bubble.seal()
+            self._thinking_bubble = None
+
     def finalize_assistant_message(self) -> str:
-        text = self._assistant_buffer
+        self._seal_thinking()
+        # Stripped, so a whitespace-only reply never reaches history.
+        text = self._assistant_buffer.strip()
         self._assistant_buffer = ""
         self._assistant_bubble = None
         return text

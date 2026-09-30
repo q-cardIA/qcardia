@@ -14,9 +14,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from utils import bindings
-from utils.app_config import CHAT_AVAILABLE, data_dir, set_data_dir
+from model.background_worker import CallableWorker
+from utils import bindings, llm_devices
+from utils.app_config import data_dir, set_data_dir
 from view.controls_dialog import ControlsDialog
+from view.theme import PopupComboBox, thin_loading_bar
+
 
 class WelcomeWidget(QWidget):
 
@@ -27,13 +30,16 @@ class WelcomeWidget(QWidget):
         self.setObjectName("welcomeRoot")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.parent = parent
+        self._device_worker = None
         self._build()
         self._size()
         self._connect()
+        # In the background: this used to run at import and stalled startup.
+        self._start_device_probe(llm_devices.LOCAL_DEVICE, llm_devices.FAST_PROBE_TIMEOUT)
 
     @property
     def assistant_disabled(self) -> bool:
-        return not (CHAT_AVAILABLE and self._toggle_llm_assistant.isChecked())
+        return not (llm_devices.chat_available() and self._toggle_llm_assistant.isChecked())
 
     @property
     def use_cardisort_cache(self) -> bool:
@@ -213,9 +219,35 @@ class WelcomeWidget(QWidget):
         options_layout.setContentsMargins(16, 12, 16, 12)
         options_layout.setSpacing(10)
 
-        self._toggle_llm_assistant = self._toggle_switch(default=True, enabled=CHAT_AVAILABLE)
-        if not CHAT_AVAILABLE:
-            self._toggle_llm_assistant.setToolTip("Ollama not detected")
+        # Defaults to this computer, so nobody has to touch this to start.
+        device_row = QHBoxLayout()
+        device_row.setSpacing(10)
+        self._device_combo = PopupComboBox()
+        self._device_combo.setProperty("role", "welcomeDeviceCombo")
+        for device in llm_devices.load_devices():
+            self._device_combo.addItem(device.label, device)
+            if device.note:
+                self._device_combo.setItemData(
+                    self._device_combo.count() - 1, device.note, Qt.ToolTipRole
+                )
+        device_label = QLabel("LLM device")
+        device_label.setProperty("role", "welcomeOptionLabel")
+        device_row.addWidget(self._device_combo, 1)
+        device_row.addWidget(device_label)
+        device_row.addStretch(1)
+        options_layout.addLayout(device_row)
+
+        # Directly under the combo, so the activity reads as belonging to that choice.
+        self._device_bar = thin_loading_bar()
+        options_layout.addWidget(self._device_bar)
+
+        self._device_status = QLabel("Checking…")
+        self._device_status.setProperty("role", "welcomeDeviceStatus")
+        self._device_status.setWordWrap(True)
+        options_layout.addWidget(self._device_status)
+
+        # Disabled until the first probe: an assistant that cannot answer helps nobody.
+        self._toggle_llm_assistant = self._toggle_switch(default=True, enabled=False)
         options_layout.addLayout(self._toggle_row(self._toggle_llm_assistant, "LLM assistant"))
 
         self._toggle_preproc_labels = self._toggle_switch(default=True)
@@ -330,6 +362,7 @@ class WelcomeWidget(QWidget):
             self.transition_signal.emit
         )
         self._chevron_btn.toggled.connect(self._on_chevron_toggled)
+        self._device_combo.currentIndexChanged.connect(self._on_device_selected)
         self._change_data_dir_btn.clicked.connect(self._on_change_data_dir)
         self._edit_controls_btn.clicked.connect(self._on_edit_controls)
         self.right_panel_community_pushbutton.clicked.connect(self.community_clicked)
@@ -340,6 +373,49 @@ class WelcomeWidget(QWidget):
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
+
+    # -- LLM device selection -------------------------------------------
+
+    def _on_device_selected(self, index: int):
+        device = self._device_combo.itemData(index)
+        if device is not None:
+            self._start_device_probe(device, llm_devices.DEVICE_PROBE_TIMEOUT)
+
+    def _start_device_probe(self, device, timeout: float):
+        """Validate off the GUI thread, holding Start: a dead host takes the full timeout."""
+        self._set_device_busy(True)
+        self._device_status.setText(f"Checking {device.label}…")
+        worker = CallableWorker(llm_devices.activate, device, timeout=timeout)
+        worker.finished_ok.connect(lambda result, d=device: self._on_device_probed(d, result))
+        worker.error.connect(lambda exc, d=device: self._on_device_probe_failed(d, exc))
+        # Held on self so the thread isn't garbage-collected mid-run.
+        self._device_worker = worker
+        worker.start()
+
+    def _set_device_busy(self, busy: bool):
+        self._device_combo.setEnabled(not busy)
+        self.left_panel_single_patient_pushbutton.setEnabled(not busy)
+        self._device_bar.setVisible(busy)
+
+    def _on_device_probed(self, device, result):
+        self._set_device_busy(False)
+        if result.ok:
+            self._device_status.setText(f"{device.label}: {result.detail}")
+        else:
+            # Name what is still in use: activate() leaves the previous device active.
+            self._device_status.setText(
+                f"{device.label} unavailable. {result.detail} "
+                f"Still using {llm_devices.current().label}."
+            )
+        enabled = llm_devices.chat_available()
+        self._toggle_llm_assistant.setEnabled(enabled)
+        if not enabled:
+            self._toggle_llm_assistant.setToolTip("No reachable Ollama server")
+
+    def _on_device_probe_failed(self, device, exc: Exception):
+        self._set_device_busy(False)
+        self._device_status.setText(f"{device.label} check failed: {exc}")
+        self._toggle_llm_assistant.setEnabled(llm_devices.chat_available())
 
     def _on_chevron_toggled(self, checked: bool):
         self._options_panel.setVisible(checked)
