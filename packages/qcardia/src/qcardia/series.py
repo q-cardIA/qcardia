@@ -1147,3 +1147,162 @@ class LGESeries(BaseSeries):
             self._run_model(wandb_run_path, image_type="psir")
 
         return self._segmentation_prediction
+
+
+class PerfusionSeries(BaseSeries):
+    """
+    A first-pass perfusion series (one stress or rest acquisition).
+
+    The arterial input function (AIF) images of a dual-sequence acquisition are
+    kept apart from the myocardial slices, in `aif_data`:
+
+    - Philips stores the AIF slice in the same series, at or near the location
+      of the basal slice but with a different acquisition (slice spacing, and
+      sometimes phase-encoding direction). It is found and moved out of
+      `slice_data`.
+    - Siemens stores each slice, and the low-resolution AIF, as a separate
+      series. Pass all the folders of the acquisition; their slices are
+      combined, and the AIF slice is found in the same way.
+
+    All frames are kept, including the proton-density and baseline frames.
+
+    Args:
+        folders (Path | list[Path]): The folder of the acquisition, or the
+            folders of its series (see `select_perfusion_series`).
+    """
+
+    def __init__(self, folders: Path | list[Path], batch_size: int = 50):
+        self.folders = [Path(folders)] if isinstance(folders, (str, Path)) else folders
+        super().__init__(self.folders[0], batch_size)
+        self.aif_data = self._extract_aif_slice()
+
+    def _load_data(self):
+        """
+        Load each folder as a BaseSeries and combine their slices, ordered by
+        slice position as in `BaseSeries._get_slices_from_positions`.
+        """
+        if len(self.folders) == 1:
+            return super()._load_data()
+
+        series = [BaseSeries(folder) for folder in self.folders]
+        frame_counts = {s.number_of_temporal_positions for s in series}
+        if len(frame_counts) > 1:
+            raise ValueError(
+                f"Perfusion series in {self.folders} have different numbers of "
+                f"frames: {sorted(frame_counts)}"
+            )
+        all_slices = sorted(
+            (data for s in series for data in s.slice_data.values()),
+            key=lambda data: data["slice_position"],
+            reverse=True,
+        )
+        slices_dict = {f"slice{i+1:02}": data for i, data in enumerate(all_slices)}
+        # The image size of the myocardial slices, which outnumber the AIF slice.
+        rows, columns = Counter(
+            (data["meta_data"][0].Rows, data["meta_data"][0].Columns)
+            for data in all_slices
+        ).most_common(1)[0][0]
+        return slices_dict, len(all_slices), frame_counts.pop(), rows, columns
+
+    @staticmethod
+    def _acquisition_signature(meta) -> tuple:
+        return (
+            int(meta.Rows),
+            int(meta.Columns),
+            tuple(float(x) for x in meta.PixelSpacing),
+            # The Philips AIF slice often has the same phase encoding and
+            # matrix as the myocardial slices, but its own slice spacing.
+            str(getattr(meta, "SpacingBetweenSlices", "")),
+            str(getattr(meta, "InPlanePhaseEncodingDirection", "")),
+            tuple(getattr(meta, "AcquisitionMatrix", ())),
+        )
+
+    def _extract_aif_slice(self) -> dict | None:
+        """
+        Move the slice whose acquisition differs from all other slices out of
+        `slice_data` and return it. Returns None if there is no such slice.
+        """
+        keys = list(self.slice_data)
+        signatures = [
+            self._acquisition_signature(self.slice_data[k]["meta_data"][0])
+            for k in keys
+        ]
+        counts = Counter(signatures)
+        if len(keys) < 3 or len(counts) != 2 or min(counts.values()) != 1:
+            if len(counts) > 1:
+                print(
+                    f"    Warning: slices in {self.folder} have {len(counts)} "
+                    f"different acquisitions; no AIF slice extracted."
+                )
+            return None
+
+        aif_signature = min(counts, key=counts.get)
+        aif_key = keys[signatures.index(aif_signature)]
+        aif_data = self.slice_data[aif_key]
+        myocardial_slices = [self.slice_data[k] for k in keys if k != aif_key]
+        self.slice_data = {
+            f"slice{i+1:02}": data for i, data in enumerate(myocardial_slices)
+        }
+        self.number_of_slices = len(myocardial_slices)
+        return aif_data
+
+    @staticmethod
+    def _dicom_time_to_seconds(dicom_time) -> float:
+        """Convert a DICOM TM value (HHMMSS.FFFFFF) to seconds after midnight."""
+        dicom_time = str(dicom_time)
+        return (
+            3600 * int(dicom_time[0:2])
+            + 60 * int(dicom_time[2:4])
+            + float(dicom_time[4:])
+        )
+
+    def _get_slice_times(self, slice_data: dict) -> np.ndarray:
+        """
+        The time of each frame of a slice, in seconds after its first frame.
+        Siemens gives one ContentTime for all frames, so AcquisitionTime is used,
+        and ContentTime only when AcquisitionTime does not change.
+        """
+        for tag in ("AcquisitionTime", "ContentTime"):
+            values = [getattr(meta, tag, None) for meta in slice_data["meta_data"]]
+            if None in values or len(set(values)) == 1:
+                continue
+            times = np.array([self._dicom_time_to_seconds(v) for v in values])
+            # A scan that continues past midnight starts again at zero.
+            return np.mod(times - times[0], 24 * 3600)
+        raise ValueError(f"No frame times in {self.folder}")
+
+    def get_times(self) -> np.ndarray:
+        """
+        Get the time of each frame of the myocardial slices.
+
+        Returns:
+            np.ndarray: The times in seconds after the first frame of each
+                slice, shape (Z, T).
+        """
+        return np.asarray(
+            [self._get_slice_times(data) for data in self.slice_data.values()]
+        )
+
+    def get_aif_times(self) -> np.ndarray | None:
+        """
+        Get the time of each frame of the AIF slice.
+
+        Returns:
+            np.ndarray: The times in seconds after the first AIF frame, shape (T,),
+                or None if there is no AIF slice.
+        """
+        if self.aif_data is None:
+            return None
+        return self._get_slice_times(self.aif_data)
+
+    def get_aif_array(self) -> np.ndarray | None:
+        """
+        Get the images of the AIF slice.
+
+        Returns:
+            np.ndarray: The AIF images, shape (T, H, W), or None if there is no
+                AIF slice.
+        """
+        if self.aif_data is None:
+            return None
+        return np.asarray(self.aif_data["pixel_array"])
