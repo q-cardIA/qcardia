@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from utils import study_log
 from utils.windowing import window_to_uint8
 from view.custom_graphics_view import CustomQGraphicsView
 from view.loading_overlay import LoadingOverlay
@@ -205,6 +206,7 @@ class CentralDisplayAreaWidget(QWidget):
         container = _PanelDropContainer(idx)
         container.series_dropped.connect(self._on_panel_series_dropped)
         container.setProperty("role", "viewerCard")
+        container.setObjectName(f"panel_{idx}")
         vbox = QVBoxLayout(container)
         vbox.setContentsMargins(2, 2, 2, 2)
         vbox.setSpacing(2)
@@ -347,6 +349,7 @@ class CentralDisplayAreaWidget(QWidget):
     def _on_panel_series_dropped(self, panel_idx: int, series_key: str):
         if self.is_series_registered(series_key):
             self.set_panel_series(panel_idx, series_key)
+            study_log.log("series_dropped", panel=panel_idx, series=series_key)
 
     def set_segmentation(self, series_key: str, seg_volume: np.ndarray):
         self._segmentations[series_key] = seg_volume

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
+from utils import study_log
 from utils.hanging_protocols import PERF_REST_KEY, PERF_STRESS_KEY, PRESETS, build_perfusion_preset
 from view.series_browser_widget import SeriesCardInfo
 
@@ -18,6 +19,7 @@ class DICOMController:
         # Runs one at a time, first entry is running: several at once doubled peak memory (#11).
         self._seg_queue: list[str] = []
         self._seg_worker: CallableWorker | None = None
+        self._seg_spans: dict[str, study_log.Span] = {}
 
         self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
@@ -42,10 +44,13 @@ class DICOMController:
         self._current_subject_folder = Path(folder_path)
         self.view.show_loading(f"Loading {Path(folder_path).name}…")
         self._load_worker = CallableWorker(self.model.load_patient, folder_path)
+        span = study_log.Span("load_subject", subject=Path(folder_path).name)
         self._load_worker.finished_ok.connect(
             lambda result: self._on_patient_loaded(result, on_complete)
         )
         self._load_worker.error.connect(lambda exc: self._on_patient_load_error(exc, on_complete))
+        self._load_worker.finished_ok.connect(lambda result: span.end(series=sorted(result.loaded)))
+        self._load_worker.error.connect(lambda exc: span.end(error=str(exc)))
         # `finished`, not `finished_ok`/`error`: those fire before the thread
         # actually stops, so clearing the reference there races teardown.
         self._load_worker.finished.connect(self._clear_load_worker)
@@ -103,12 +108,14 @@ class DICOMController:
         try:
             info = self.model.load_series_for_key(card_info.path, new_key)
         except Exception as e:
+            study_log.log("reassign_series", series_folder=card_info.path.name, key=new_key, error=str(e))
             logging.error(f"Reassign failed: {e}")
             self.view.show_error(
                 "Reassign Failed", f"Could not load this series as {new_key}:\n{e}"
             )
             return
 
+        study_log.log("reassign_series", series_folder=card_info.path.name, key=new_key)
         self._register(new_key, info)
         self._widget.refresh_panels(new_key)
 
@@ -170,6 +177,7 @@ class DICOMController:
         if series_key in self._seg_queue:
             return False
         self._seg_queue.append(series_key)
+        self._seg_spans[series_key] = study_log.Span("segmentation", series=series_key, ahead=len(self._seg_queue) - 1)
         self._widget.show_segmentation_loading(series_key, "Queued…")
         if len(self._seg_queue) == 1:
             self._start_segmentation()
@@ -179,6 +187,10 @@ class DICOMController:
         key = self._seg_queue[0]
         self._widget.show_segmentation_loading(key, "Segmenting…")
         self._seg_worker = CallableWorker(self.model.segment, key)
+        span = self._seg_spans.pop(key)
+        span.mark("running")
+        self._seg_worker.finished_ok.connect(lambda _: span.end())
+        self._seg_worker.error.connect(lambda exc: span.end(error=str(exc)))
         self._seg_worker.finished_ok.connect(lambda result: self._on_segmentation_done(key, result))
         self._seg_worker.error.connect(lambda exc: self._on_segmentation_error(key, exc))
         self._seg_worker.finished.connect(self._on_segmentation_finished)
@@ -238,6 +250,7 @@ class DICOMController:
                 self._widget.set_panel_series(panel.idx, panel.key, axis=panel.axis, slice_idx=z)
             else:
                 self._widget.set_panel_empty(panel.idx)
+        study_log.log("layout", preset=name, panels=self._widget.panel_assignments())
         return filled, total
 
     def _preset_slice(self, panel, n_slots: int) -> int | None:
