@@ -1,7 +1,7 @@
 # qcardia
 
 Code for an AI-based quantitative cardiac image analysis package. Provides
-series classes (`CineSeries`, `LGESeries`), cardisort-based sequence
+series classes (`CineSeries`, `LGESeries`, `PerfusionSeries`), cardisort-based sequence
 classification/disambiguation, and inference for the plain, context-aware and
 LA-conditioned segmentation models.
 
@@ -154,4 +154,19 @@ ef = cine.compute_ejection_fraction(lv_vol)
 lge = LGESeries(Path("/path/to/LGE/DICOM"))
 lge_seg = lge.predict_segmentation(Path("/path/to/wandb/run"))
 lge.save_predictions(Path("/path/to/output"))
+
+# Load perfusion data. select_perfusion_series takes the directories that
+# cardisort labelled PERF/TestPERF, removes the test runs, and gives the
+# directories of the stress run (the earlier one) and the rest run. Siemens
+# stores each slice and the AIF as a separate series, so a run can have more
+# than one directory.
+from qcardia.disambiguate import select_perfusion_series
+from qcardia.series import PerfusionSeries
+
+runs = select_perfusion_series(perfusion_dirs)  # {"stress": [...], "rest": [...]}
+stress = PerfusionSeries(runs["stress"])
+images = stress._get_array()      # myocardial slices, (Z, T, H, W)
+times = stress.get_times()        # seconds after the first frame, (Z, T)
+aif = stress.get_aif_array()      # AIF slice, (T, H, W), or None
+aif_times = stress.get_aif_times()
 ```

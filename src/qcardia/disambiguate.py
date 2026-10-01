@@ -13,8 +13,10 @@ the intended series instead of an arbitrary one.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
+import numpy as np
 import pydicom
 import requests
 
@@ -128,3 +130,94 @@ def disambiguate_duplicates(
             f"expected one of {candidate_names}"
         )
     return result
+
+
+# Cardisort labels that a perfusion series (a stress, rest or test run, or one
+# slice or the AIF of a run that Siemens stores as separate series) can get.
+PERFUSION_SEQUENCE_NAMES = {"PERF", "TestPERF"}
+# A run with fewer dynamics than this fraction of the longest run is a test run.
+TEST_RUN_DYNAMICS_FRACTION = 0.5
+
+
+def _dicom_time_to_seconds(dicom_time) -> float:
+    dicom_time = str(dicom_time)
+    return 3600 * int(dicom_time[0:2]) + 60 * int(dicom_time[2:4]) + float(dicom_time[4:])
+
+
+def _summarize_perfusion_dir(sequence_dir: Path) -> dict | None:
+    """Header information used to group perfusion series into runs, or None if
+    the directory has no dynamic images that a series class can load."""
+    images_per_slice = Counter()
+    acquisition_times = []
+    for f in sequence_dir.iterdir():
+        if not f.is_file() or f.name.startswith(".") or "dicomdir" in f.name.lower():
+            continue
+        try:
+            ds = pydicom.dcmread(f, stop_before_pixels=True)
+        except Exception:
+            continue
+        # Enhanced (multi-frame) images have no per-file position, and
+        # BaseSeries cannot load them.
+        if "ImagePositionPatient" not in ds or "AcquisitionTime" not in ds:
+            continue
+        orientation = np.asarray(ds.ImageOrientationPatient, dtype=float)
+        position = float(
+            np.dot(ds.ImagePositionPatient, np.cross(orientation[:3], orientation[3:]))
+        )
+        # The images of one perfusion slice share a position and a trigger
+        # time. The Philips AIF slice can share its position with the basal
+        # slice, but not its trigger time.
+        images_per_slice[(round(position, 1), getattr(ds, "TriggerTime", None))] += 1
+        acquisition_times.append(_dicom_time_to_seconds(ds.AcquisitionTime))
+
+    # Cine frames, or single anatomy images, give one image per group.
+    if not images_per_slice or max(images_per_slice.values()) == 1:
+        return None
+    return {
+        "dir": sequence_dir,
+        "n_dynamics": max(images_per_slice.values()),
+        "start_time": min(acquisition_times),
+        "end_time": max(acquisition_times),
+    }
+
+
+def select_perfusion_series(perfusion_dirs: list[Path]) -> dict:
+    """Finds the stress and rest perfusion runs among the directories that
+    cardisort labelled as perfusion.
+
+    Directories whose acquisition times overlap belong to the same run (Siemens
+    stores each slice and the AIF of a run as a separate series). Test runs are
+    much shorter than the others, and stress is acquired before rest.
+
+    Returns:
+        {"stress": [Path, ...], "rest": [Path, ...]}, the directories of each
+        run, or {} if there are not exactly two runs after the test runs are
+        removed.
+    """
+    summaries = [_summarize_perfusion_dir(d) for d in perfusion_dirs]
+    summaries = sorted(
+        (s for s in summaries if s is not None), key=lambda s: s["start_time"]
+    )
+
+    runs = []
+    for s in summaries:
+        if runs and s["start_time"] <= runs[-1]["end_time"]:
+            runs[-1]["dirs"].append(s["dir"])
+            runs[-1]["end_time"] = max(runs[-1]["end_time"], s["end_time"])
+            runs[-1]["n_dynamics"] = max(runs[-1]["n_dynamics"], s["n_dynamics"])
+        else:
+            runs.append({**s, "dirs": [s["dir"]]})
+    if not runs:
+        return {}
+
+    longest = max(run["n_dynamics"] for run in runs)
+    runs = [r for r in runs if r["n_dynamics"] >= TEST_RUN_DYNAMICS_FRACTION * longest]
+    if len(runs) != 2:
+        print(
+            f"    Warning: expected a stress and a rest perfusion run, found "
+            f"{len(runs)}: {[[d.name for d in r['dirs']] for r in runs]}; "
+            f"perfusion skipped."
+        )
+        return {}
+
+    return {role: run["dirs"] for role, run in zip(("stress", "rest"), runs)}
