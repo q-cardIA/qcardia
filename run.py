@@ -9,8 +9,13 @@ from qcardia.cardisort import (
     load_cardisort_model,
     load_series_datasets,
 )
-from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
-from qcardia.series import CineSeries, LGESeries
+from qcardia.disambiguate import (
+    PERFUSION_SEQUENCE_NAMES,
+    disambiguate_duplicates,
+    select_perfusion_series,
+    summarize_sequence_dir,
+)
+from qcardia.series import CineSeries, LGESeries, PerfusionSeries
 
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "new_cardisort"
 LGE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-seg"
@@ -48,8 +53,18 @@ for patient in patient_list[:]:
     for sequence_dir, class_label in sequence_classifications.items():
         dirs_by_class[class_label].append(sequence_dir)
 
+    # Perfusion needs more than one series (stress and rest, and on Siemens a
+    # series per slice), so it is selected by its own rules, not by the LLM.
+    perfusion_dirs = [
+        sequence_dir
+        for sequence_dir, (sequence_name, _) in sequence_classifications.items()
+        if sequence_name in PERFUSION_SEQUENCE_NAMES
+    ]
+
     primary_dirs = {}
     for class_label, dirs in dirs_by_class.items():
+        if class_label[0] in PERFUSION_SEQUENCE_NAMES:
+            continue
         if len(dirs) == 1:
             primary_dirs[dirs[0]] = class_label
             continue
@@ -100,3 +115,12 @@ for patient in patient_list[:]:
     #     lge_segmentation = lge_seq.predict_segmentation(LGE_SEG_WANDB_RUN_PATH)
     #     lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
     #     print(f"  {lge_dir} -> {lge_segmentation.shape}")
+
+    # No perfusion models yet: load the runs only.
+    for role, perf_dirs in select_perfusion_series(perfusion_dirs).items():
+        perf_seq = PerfusionSeries(perf_dirs)
+        aif = perf_seq.get_aif_array()
+        print(
+            f"  {role}: {[d.name for d in perf_dirs]} -> "
+            f"{perf_seq._get_array().shape}, AIF {None if aif is None else aif.shape}"
+        )
