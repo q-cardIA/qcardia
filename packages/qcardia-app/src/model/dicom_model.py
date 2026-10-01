@@ -16,8 +16,13 @@ from qcardia.cardisort import (
     load_cardisort_model,
     load_series_datasets,
 )
-from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
-from qcardia.series import BaseSeries, CineSeries, LGESeries
+from qcardia.disambiguate import (
+    PERFUSION_SEQUENCE_NAMES,
+    disambiguate_duplicates,
+    select_perfusion_series,
+    summarize_sequence_dir,
+)
+from qcardia.series import BaseSeries, CineSeries, LGESeries, PerfusionSeries
 
 from model.subject_labels import (
     SeriesLabel,
@@ -31,6 +36,7 @@ from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
 CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
+PERFUSION_RUN_KEYS = {"stress": "PERF_STRESS_SAX", "rest": "PERF_REST_SAX"}
 
 
 @dataclass
@@ -98,6 +104,7 @@ class DICOMModel:
         self.use_segmentation_cache = True
         self.subject_folder: Path | None = None
         self._series_dirs: dict[str, Path] = {}
+        self._perfusion_dirs: dict[str, list[Path]] = {}
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -135,6 +142,10 @@ class DICOMModel:
         self.series[series_key] = CineSeries(Path(folder_path), batch_size=10)
         if series_key == "CINE_SAX":
             self.folder_path = Path(folder_path)
+        return self._process_temporal_volumes(series_key)
+
+    def load_perfusion_series(self, folders: list[Path], series_key: str):
+        self.series[series_key] = PerfusionSeries(folders)
         return self._process_temporal_volumes(series_key)
 
     def load_lge_series(self, folder_path, series_key: str):
@@ -454,6 +465,7 @@ class DICOMModel:
     def _group_and_resolve(
         self, descriptors: list[SequenceDescriptor], folder_path, ignore_cache: bool = False
     ) -> tuple[dict[str, Path], dict[str, dict]]:
+        self._assign_perfusion_keys(descriptors)
         dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
         for d in descriptors:
             if d.key is not None:
@@ -467,6 +479,12 @@ class DICOMModel:
         resolved: dict[str, dict] = {}
         for key, group in dirs_by_key.items():
             dirs = [d.path for d in group]
+            if key in self._perfusion_dirs:
+                # Siemens stores each slice of a run as its own series: all of them make up the run.
+                classified[key] = dirs[0]
+                for d in group:
+                    d.is_primary = True
+                continue
             primary, confident = self._resolve_primary_dir(key, dirs, primary_by_key)
             classified[key] = primary
             for d in group:
@@ -476,6 +494,22 @@ class DICOMModel:
                 resolved[key] = {"candidates": sorted(p.name for p in dirs), "primary": primary.name}
 
         return classified, resolved
+
+    def _assign_perfusion_keys(self, descriptors: list[SequenceDescriptor]) -> None:
+        """Groups the perfusion dirs into stress and rest runs; test runs and unmatched dirs get no key."""
+        perfusion = [d for d in descriptors if d.sequence_name in PERFUSION_SEQUENCE_NAMES]
+        for d in perfusion:
+            d.key = None
+        try:
+            runs = select_perfusion_series([d.path for d in perfusion]) if perfusion else {}
+        except Exception as e:
+            logging.warning(f"Could not group the perfusion series into stress and rest runs: {e}")
+            runs = {}
+
+        self._perfusion_dirs = {PERFUSION_RUN_KEYS[role]: dirs for role, dirs in runs.items()}
+        key_by_dir = {p: key for key, dirs in self._perfusion_dirs.items() for p in dirs}
+        for d in perfusion:
+            d.key = key_by_dir.get(d.path)
 
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
         descriptors, _ = self._describe_patient_folder(folder_path)
@@ -540,6 +574,9 @@ class DICOMModel:
         self._series_dirs[key] = Path(seq_dir)
         if key.startswith("CINE_"):
             volume, num_frames = self.load_cine_series(seq_dir, key)
+            info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
+        elif key.startswith("PERF_"):
+            volume, num_frames = self.load_perfusion_series(self._perfusion_dirs.get(key, [seq_dir]), key)
             info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
         else:
             volume, _slice_positions = self.load_lge_series(seq_dir, key)
