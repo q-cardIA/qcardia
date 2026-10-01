@@ -651,6 +651,87 @@ QLabel[role="welcomeOptionLabel"] {
 	background-color: transparent;
 }
 
+QComboBox[role="welcomeDeviceCombo"] {
+	font-size: 12px;
+	padding: 3px;
+	padding-left: 8px;
+}
+
+/* The global popup rule pads the whole view, leaving a short list barely one row. */
+QComboBox[role="welcomeDeviceCombo"] QAbstractItemView,
+QComboBox[role="chatCombo"] QAbstractItemView {
+	padding: 2px;
+	outline: none;
+	/* Accent colour is too loud for a plain name list; let the highlight do the work. */
+	color: rgb(255, 255, 255);
+	selection-background-color: rgb(52, 59, 72);
+}
+QComboBox[role="welcomeDeviceCombo"] QAbstractItemView::item,
+QComboBox[role="chatCombo"] QAbstractItemView::item {
+	min-height: 24px;
+	padding-left: 6px;
+}
+
+/* Thinking toggle, sharing a row with the model picker. Same fill, border and radius as
+   the combo beside it so the two read as one control pair; width is set in code from the
+   label's own metrics, so nothing here may constrain it. */
+QPushButton[role="chatThinkToggle"] {
+	background-color: rgb(27, 29, 35);
+	border: 2px solid rgb(33, 37, 43);
+	border-radius: 5px;
+	color: rgb(113, 126, 149);
+	padding: 5px 0px;
+	font-size: 12px;
+}
+QPushButton[role="chatThinkToggle"]:hover:!checked:enabled {
+	border: 2px solid rgb(64, 71, 88);
+	color: rgb(180, 180, 190);
+}
+/* On: the app's accent, so it is obvious at a glance that replies now cost thinking time. */
+QPushButton[role="chatThinkToggle"]:checked {
+	background-color: rgb(189, 147, 249);
+	border: 2px solid rgb(189, 147, 249);
+	color: rgb(255, 255, 255);
+}
+QPushButton[role="chatThinkToggle"]:checked:hover {
+	background-color: rgb(203, 166, 251);
+	border: 2px solid rgb(203, 166, 251);
+}
+/* Greyed out for a model with no thinking capability: Ollama rejects the request. */
+QPushButton[role="chatThinkToggle"]:disabled {
+	background-color: rgb(27, 29, 35);
+	border: 2px solid rgb(30, 33, 39);
+	color: rgb(70, 78, 92);
+}
+
+/* Reasoning, folded away like a tool call: present but never mistaken for the answer. */
+QFrame[role="chatBubbleThinking"] {
+	background-color: rgb(30, 33, 39);
+	border: none;
+	border-radius: 6px;
+}
+
+/* Hairline indicator: ~3px so it reads as an underline, not a progress widget. */
+QProgressBar[role="thinLoadingBar"] {
+	background-color: rgb(33, 37, 43);
+	border: none;
+	border-radius: 1px;
+	min-height: 3px;
+	max-height: 3px;
+}
+QProgressBar[role="thinLoadingBar"]::chunk {
+	background-color: rgb(255, 121, 198);
+	border-radius: 1px;
+}
+
+/* Probe result for the selected device: status, not another control. */
+QLabel[role="welcomeDeviceStatus"] {
+	color: rgb(140, 140, 152);
+	font-size: 11px;
+	background-color: transparent;
+	padding-left: 2px;
+}
+
 QPushButton[role="welcomeToggleSwitch"] {
 	background-color: rgb(52, 59, 72);
 	border: 1px solid rgb(64, 71, 88);

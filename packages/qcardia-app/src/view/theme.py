@@ -1,11 +1,50 @@
 from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QComboBox, QListView, QProgressBar
 
 
 def _rgb(r, g, b) -> QColor:
     return QColor(r, g, b)
+
+
+def thin_loading_bar() -> QProgressBar:
+    """Hairline activity strip for under a control. Indeterminate: Ollama reports no
+    load progress, so a percentage would be invented."""
+    bar = QProgressBar()
+    bar.setProperty("role", "thinLoadingBar")
+    bar.setRange(0, 0)
+    bar.setTextVisible(False)
+    bar.setFixedHeight(3)
+    bar.hide()
+    return bar
+
+
+class PopupComboBox(QComboBox):
+    """Combo whose popup shows its items without scrolling.
+
+    Qt sizes the popup from the view's size hint, which this app's padded
+    QAbstractItemView rule can collapse to one row. Setting a minimum from the row
+    count is a floor, not a ceiling, so a list past MAX_ROWS still scrolls.
+    """
+
+    MAX_ROWS = 12
+    _FALLBACK_ROW_H = 24
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # A real QListView honours the ::item metrics in theme.qss; the default does not.
+        self.setView(QListView())
+        self.setMaxVisibleItems(self.MAX_ROWS)
+
+    def showPopup(self):
+        rows = min(self.count(), self.MAX_ROWS)
+        if rows:
+            view = self.view()
+            row_h = view.sizeHintForRow(0) or self._FALLBACK_ROW_H
+            # Plus the view's own top/bottom inset, so the last row isn't clipped.
+            view.setMinimumHeight(rows * row_h + 10)
+        super().showPopup()
 
 
 def _build_palette() -> QPalette:
