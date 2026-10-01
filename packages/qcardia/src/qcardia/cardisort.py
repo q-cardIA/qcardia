@@ -246,7 +246,7 @@ def build_cardisort_input(
     ).squeeze(1)  # (n_channels, target_h, target_w)
 
     mean = resampled.mean(dim=(1, 2), keepdim=True)
-    std = resampled.std(dim=(1, 2), keepdim=True)
+    std = resampled.std(dim=(1, 2), keepdim=True).clamp_min(1e-6)
     standardized = (resampled - mean) / std
     return standardized.unsqueeze(0)  # (1, n_channels, target_h, target_w)
 
