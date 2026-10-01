@@ -10,11 +10,13 @@ from qcardia.cardisort import (
     load_series_datasets,
 )
 from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
-from qcardia.series import LGESeries
+from qcardia.series import CineSeries, LGESeries
 
-CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cardisort"
+CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "new_cardisort"
 LGE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-seg"
-PATH_TO_DATASET = Path.cwd() / "data copy"
+CINE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cine-seg"
+LAX_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "CINE_4CH"
+PATH_TO_DATASET = Path.cwd() / "data"
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
@@ -52,9 +54,7 @@ for patient in patient_list[:]:
             primary_dirs[dirs[0]] = class_label
             continue
 
-        candidates = [
-            summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs
-        ]
+        candidates = [summarize_sequence_dir(d, load_series_datasets(d)) for d in dirs]
         result = disambiguate_duplicates(class_label, candidates)
         # for assessment in result["assessments"]:
         #     print(
@@ -64,23 +64,39 @@ for patient in patient_list[:]:
         primary_dir = next(d for d in dirs if d.name == result["primary_series"])
         primary_dirs[primary_dir] = class_label
 
-    cine_dirs = [
-        sequence_dir
-        for sequence_dir, (sequence_name, _) in primary_dirs.items()
-        if sequence_name == "CINE"
-    ]
-
-    db_lge_sax_dirs = [
+    cine_sax_dirs = [
         sequence_dir
         for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
-        if sequence_name == "DBLGE" and plane_name == "SAX"
+        if sequence_name == "CINE" and plane_name == "SAX"
     ]
-    for lge_dir in db_lge_sax_dirs:
-        lge_seq = LGESeries(lge_dir)
-        lge_segmentation = lge_seq.predict_segmentation(
-            LGE_SEG_WANDB_RUN_PATH
+
+    # LA-conditioned cine models read the 4CH view alongside the short axis.
+    cine_4ch_dir = next(
+        (
+            sequence_dir
+            for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
+            if sequence_name == "CINE" and plane_name == "4CH"
+        ),
+        None,
+    )
+
+    for cine_dir in cine_sax_dirs:
+        cine_seq = CineSeries(cine_dir)
+        cine_segmentation = cine_seq.predict_segmentation(
+            CINE_SEG_WANDB_RUN_PATH,
+            lax_dicom_dir=cine_4ch_dir,
+            lax_model_path=LAX_SEG_WANDB_RUN_PATH,
         )
-        lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
-        print(f"  {lge_dir} -> {lge_segmentation.shape}")
+        cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
+        print(f"  {cine_dir} -> {cine_segmentation.shape}")
 
-
+    # db_lge_sax_dirs = [
+    #     sequence_dir
+    #     for sequence_dir, (sequence_name, plane_name) in primary_dirs.items()
+    #     if sequence_name == "DBLGE" and plane_name == "SAX"
+    # ]
+    # for lge_dir in db_lge_sax_dirs:
+    #     lge_seq = LGESeries(lge_dir)
+    #     lge_segmentation = lge_seq.predict_segmentation(LGE_SEG_WANDB_RUN_PATH)
+    #     lge_seq.save_predictions(Path(f"{lge_dir}_segmentation"))
+    #     print(f"  {lge_dir} -> {lge_segmentation.shape}")
