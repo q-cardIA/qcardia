@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+# In DICOM's patient coordinates (LPS) the heart's apex points left, anterior and inferior.
+_APEX_DIRECTION = np.array([1.0, -1.0, -1.0]) / np.sqrt(3.0)
+
 
 @dataclass
 class VolumeGeometry:
@@ -92,9 +95,20 @@ class VolumeGeometry:
         """Scalar position of slice_idx along the stack normal (mm)."""
         return float(np.dot(self.ipp_list[int(slice_idx)], self.normal))
 
+    def apex_to_base(self) -> list[int]:
+        """Slice indices of a short-axis stack, from the apex to the base."""
+        toward_apex = [float(np.dot(ipp, _APEX_DIRECTION)) for ipp in self.ipp_list]
+        return sorted(range(len(self.ipp_list)), key=lambda i: -toward_apex[i])
+
     # ------------------------------------------------------------------
     # Multi-panel utilities
     # ------------------------------------------------------------------
+
+    def nearest_slice(self, other: VolumeGeometry, z_idx: int) -> int | None:
+        """The slice of other that is closest to the centre of slice z_idx."""
+        centre = self.pixel_to_world((self.n_rows - 1) / 2, (self.n_cols - 1) / 2, z_idx)
+        hit = other.world_to_pixel(centre)
+        return hit[2] if hit is not None else None
 
     def is_parallel_to(self, other: VolumeGeometry, tol: float = 0.05) -> bool:
         """True if the two volumes have nearly the same slice orientation."""

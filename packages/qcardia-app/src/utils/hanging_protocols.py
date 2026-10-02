@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+
+PERF_STRESS_KEY = "PERF_STRESS_SAX"
+PERF_REST_KEY = "PERF_REST_SAX"
+PERF_KEY = "PERF_SAX"  # a perfusion run that is neither stress nor rest
 
 
 @dataclass
@@ -9,6 +14,9 @@ class PanelAssignment:
     key: str
     axis: str = "transverse"
     slice_slot: int | None = None
+    # Show the slice nearest, in world coordinates, to the same slot's slice of the first of these
+    # series that is loaded.
+    match_keys: tuple[str, ...] = ()
 
 
 @dataclass
@@ -18,6 +26,19 @@ class Preset:
     panels: list[PanelAssignment] = field(default_factory=list)
     # Trigger phrases the chat assistant recognizes (see llm.prompt._preset_rules).
     triggers: list[str] = field(default_factory=list)
+    # Rows with none of their series loaded are left out, e.g. the rest row when only stress exists.
+    drop_empty_rows: bool = False
+
+    def for_loaded(self, is_loaded: Callable[[str], bool]) -> Preset:
+        if not self.drop_empty_rows:
+            return self
+        cols = self.grid[1]
+        kept = [row for row in range(self.grid[0])
+                if any(is_loaded(p.key) for p in self.panels if p.idx // cols == row)]
+        new_row = {row: i for i, row in enumerate(kept)}
+        panels = [replace(p, idx=new_row[p.idx // cols] * cols + p.idx % cols)
+                  for p in self.panels if p.idx // cols in new_row]
+        return replace(self, grid=(len(kept), cols), panels=panels)
 
 
 PRESETS: dict[str, Preset] = {
@@ -73,22 +94,30 @@ PRESETS: dict[str, Preset] = {
             "detailed function", "complete functional assessment",
         ],
     ),
+    # A row per perfusion run, its slices from apex to base, and below them the nearest LGE slices.
+    "perfusion": Preset(
+        label="Perfusion",
+        grid=(4, 3),
+        panels=[
+            PanelAssignment(row * 3 + slot, key, slice_slot=slot,
+                            match_keys=(PERF_STRESS_KEY, PERF_REST_KEY, PERF_KEY) if key == "LGE_SAX" else ())
+            for row, key in enumerate((PERF_STRESS_KEY, PERF_REST_KEY, PERF_KEY, "LGE_SAX"))
+            for slot in range(3)
+        ],
+        triggers=[
+            "perfusion", "stress perfusion", "ischaemia", "inducible ischaemia", "CAD",
+            "coronary artery disease", "adenosine", "stress test", "perfusion defect",
+            "myocardial perfusion", "perfusion and scar",
+        ],
+        drop_empty_rows=True,
+    ),
 }
-
-# Not a static PRESETS entry — its grid depends on stress/rest presence, see build_perfusion_preset.
-PERFUSION_TRIGGERS = [
-    "perfusion", "stress perfusion", "ischaemia", "inducible ischaemia", "CAD",
-    "coronary artery disease", "adenosine", "stress test", "perfusion defect",
-    "myocardial perfusion", "perfusion and scar",
-]
 
 PRESET_BUTTON_ORDER = ["functional", "functional_complex", "viability", "perfusion"]
 
 
 _LGE_KEYS = ("LGE_SAX", "LGE_2CH", "LGE_3CH", "LGE_4CH")
-PERF_STRESS_KEY = "PERF_STRESS_SAX"
-PERF_REST_KEY = "PERF_REST_SAX"
-_PERFUSION_KEYS = (PERF_STRESS_KEY, PERF_REST_KEY, "PERF_SAX")
+_PERFUSION_KEYS = (PERF_STRESS_KEY, PERF_REST_KEY, PERF_KEY)
 
 
 def available_presets(loaded_series: set[str]) -> list[str]:
@@ -105,45 +134,3 @@ def available_presets(loaded_series: set[str]) -> list[str]:
         names.append("perfusion")
     return names
 
-
-def build_perfusion_preset(
-    has_stress: bool, has_rest: bool, fallback_key: str = "PERF_SAX"
-) -> Preset:
-    """Perfusion grid depends on which acquisitions are present, so it's built
-    on demand rather than looked up in PRESETS."""
-    if has_stress and has_rest:
-        return Preset(
-            label="Perfusion",
-            grid=(3, 3),
-            panels=[
-                PanelAssignment(0, PERF_STRESS_KEY),
-                PanelAssignment(1, PERF_STRESS_KEY),
-                PanelAssignment(2, PERF_STRESS_KEY),
-                PanelAssignment(3, PERF_REST_KEY),
-                PanelAssignment(4, PERF_REST_KEY),
-                PanelAssignment(5, PERF_REST_KEY),
-                PanelAssignment(6, "LGE_SAX"),
-                PanelAssignment(7, "LGE_SAX"),
-                PanelAssignment(8, "LGE_SAX"),
-            ],
-        )
-
-    if has_rest:
-        perf_key = PERF_REST_KEY
-    elif has_stress:
-        perf_key = PERF_STRESS_KEY
-    else:
-        perf_key = fallback_key
-
-    return Preset(
-        label="Perfusion",
-        grid=(2, 3),
-        panels=[
-            PanelAssignment(0, perf_key),
-            PanelAssignment(1, perf_key),
-            PanelAssignment(2, perf_key),
-            PanelAssignment(3, "LGE_SAX"),
-            PanelAssignment(4, "LGE_SAX"),
-            PanelAssignment(5, "LGE_SAX"),
-        ],
-    )

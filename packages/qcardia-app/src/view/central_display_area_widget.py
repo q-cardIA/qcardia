@@ -34,6 +34,9 @@ class _Panel:
     loading_overlay: LoadingOverlay
 
 
+CINE_TIME_AXIS = "CINE"
+
+
 class _PanelDropContainer(QWidget):
     """Grid-cell container that accepts a dragged series card and re-emits its key."""
 
@@ -61,6 +64,7 @@ class _PanelDropContainer(QWidget):
 class CentralDisplayAreaWidget(QWidget):
     time_step_requested = Signal(int)
     play_toggle_requested = Signal()
+    time_axis_changed = Signal(int, int)  # (frames, frame) of the time axis the time slider now drives
 
     def __init__(self, parent=None):
         super().__init__()
@@ -96,7 +100,9 @@ class CentralDisplayAreaWidget(QWidget):
         self._pending_crosshair: tuple[int, int, int] | None = None  # latest drag point, applied once per event loop
         self._pending_window: dict[str, tuple[float, float]] = {}
 
-        self.current_time_index: int = 0
+        # The cines share one time axis; each perfusion run has its own, as its frame count differs.
+        self._time_index: dict[str, int] = {}
+        self._time_axis = CINE_TIME_AXIS
 
         # Live panel widgets (rebuilt by set_grid_size)
         self._panels: list[_Panel] = []
@@ -201,6 +207,7 @@ class CentralDisplayAreaWidget(QWidget):
             if self._panel_series_key[i] is not None:
                 self._panels[i].viewer.new_series(self._view_of(i))
                 self._update_panel(i)
+        self._show_cine_time_if_unseen()
 
     def _make_panel(self, idx: int) -> _Panel:
         container = _PanelDropContainer(idx)
@@ -241,6 +248,7 @@ class CentralDisplayAreaWidget(QWidget):
         viewer.action_requested.connect(lambda a, n, i=idx: self._on_viewer_action(i, a, n))
         viewer.window_dragged.connect(lambda dx, dy, i=idx: self._on_window_drag(i, dx, dy))
         viewer.view_changed.connect(lambda *view, i=idx: self._on_view_changed(i, view))
+        viewer.focused.connect(lambda i=idx: self._select_time_axis(i))
 
         vbox.addLayout(hdr)
         vbox.addWidget(slider)
@@ -282,6 +290,8 @@ class CentralDisplayAreaWidget(QWidget):
             store.clear()
         self._world_crosshair = None
         self._group_views.clear()
+        self._time_index.clear()
+        self._time_axis = CINE_TIME_AXIS
 
     def refresh_panels(self, series_key: str | None = None):
         """Show each panel's series again (only series_key's panels, if given); empty panels whose series is gone."""
@@ -326,6 +336,7 @@ class CentralDisplayAreaWidget(QWidget):
 
         self._panels[panel_idx].title_label.setText(f"{series_key} / {axis}")
         self._update_panel(panel_idx)
+        self._show_cine_time_if_unseen()
 
     def set_panel_empty(self, panel_idx: int):
         if panel_idx < 0 or panel_idx >= self.n_panels:
@@ -337,6 +348,7 @@ class CentralDisplayAreaWidget(QWidget):
         p.slider.setEnabled(False)
         p.slider.setVisible(False)
         p.viewer.clear_display()
+        self._show_cine_time_if_unseen()
 
     def get_thumbnail(self, series_key: str) -> np.ndarray | None:
         """Representative 2D uint8 slice (center transverse slice, t=0) for a browser card."""
@@ -372,12 +384,41 @@ class CentralDisplayAreaWidget(QWidget):
             if self._panel_series_key[i] == series_key:
                 self._panels[i].loading_overlay.hide_overlay()
 
+    @property
+    def current_time_index(self) -> int:
+        """The cines' frame."""
+        return self._time_index.get(CINE_TIME_AXIS, 0)
+
+    @staticmethod
+    def time_axis(series_key: str) -> str:
+        return series_key if series_key.startswith("PERF_") else CINE_TIME_AXIS
+
+    def n_frames(self, time_axis: str) -> int:
+        return max((vol.shape[0] for key, vol in self._volumes.items()
+                    if self._is_temporal.get(key) and self.time_axis(key) == time_axis), default=0)
+
     def set_time_index(self, t: int):
-        self.current_time_index = t
+        """Show frame t of the time axis that the time slider drives."""
+        self._time_index[self._time_axis] = t
         for i in range(self.n_panels):
             key = self._panel_series_key[i]
-            if key and self._is_temporal.get(key, False):
+            if key and self._is_temporal.get(key, False) and self.time_axis(key) == self._time_axis:
                 self._update_panel(i)
+
+    def _show_cine_time_if_unseen(self):
+        """Once no panel shows the perfusion run the time slider drives, it drives the cines again."""
+        if self._time_axis != CINE_TIME_AXIS and not any(
+                key and self.time_axis(key) == self._time_axis for key in self._panel_series_key):
+            self._time_axis = CINE_TIME_AXIS
+            self.time_axis_changed.emit(self.n_frames(CINE_TIME_AXIS), self.current_time_index)
+
+    def _select_time_axis(self, panel_idx: int):
+        """The time slider follows the panel last used: a perfusion run's own axis, else the cines'."""
+        key = self._panel_series_key[panel_idx]
+        axis = self.time_axis(key) if key and self._is_temporal.get(key) else CINE_TIME_AXIS
+        if axis != self._time_axis:
+            self._time_axis = axis
+            self.time_axis_changed.emit(self.n_frames(axis), self._time_index.get(axis, 0))
 
     # ── Slice/axis helpers ────────────────────────────────────────────────
 
@@ -421,7 +462,7 @@ class CentralDisplayAreaWidget(QWidget):
         return None
 
     def _time_of(self, series_key: str) -> int:
-        return self.current_time_index if self._is_temporal.get(series_key) else 0
+        return self._time_index.get(self.time_axis(series_key), 0) if self._is_temporal.get(series_key) else 0
 
     def _display(self, series_key: str, slice_2d: np.ndarray) -> np.ndarray:
         return window_to_uint8(slice_2d, *self._windows[series_key])
@@ -613,6 +654,7 @@ class CentralDisplayAreaWidget(QWidget):
     # ── Viewer input ─────────────────────────────────────────────────────
 
     def _on_viewer_action(self, panel_idx: int, action: str, amount: int):
+        self._select_time_axis(panel_idx)  # a wheel scroll can come without focus
         key = self._panel_series_key[panel_idx]
         if (action == "slice" and key and self._is_temporal.get(key)
                 and self._n_slices(key, self._panel_axis[panel_idx]) <= 1):
