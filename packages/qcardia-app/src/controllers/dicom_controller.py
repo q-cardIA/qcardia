@@ -25,11 +25,21 @@ class DICOMController:
 
         self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
-        self.view.lge_seg_button_signal.connect(self.run_lge_segmentation)
+        self.view.segmentable_series = (*self.model.cine_modalities, "LGE_SAX")
         self.view.save_button_signal.connect(self.save_segmentation)
         self.view.time_frame_changed_signal.connect(self.set_time_frame)
         self.view.preset_requested_signal.connect(self.apply_preset)
         self.view.reclassify_requested_signal.connect(self.reassign_series)
+
+    def is_busy(self) -> bool:
+        return self._load_worker is not None or self._seg_worker is not None or bool(self._seg_queue)
+
+    def reset_session(self):
+        """Back at the start screen: nothing of the last patient may reach the next session."""
+        self._last_result = None
+        self._current_subject_folder = None
+        self._seg_spans.clear()
+        self.model.clear_patient()
 
     @property
     def _widget(self):
@@ -86,6 +96,7 @@ class DICOMController:
         self._widget.refresh_panels()
         self._last_result = result
         self.view.series_browser_widget.populate(self._build_browser_cards(result))
+        self.view.sidebar.show_patient(self._current_subject_folder.name, len(result.loaded))
 
         self.current_time_index = 0
         self.view.update_time_slider_range(self._widget.n_frames(CINE_TIME_AXIS))
@@ -131,6 +142,7 @@ class DICOMController:
 
         self._last_result.loaded[new_key] = info
         self.view.series_browser_widget.populate(self._build_browser_cards(self._last_result))
+        self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
 
     def _register(self, key: str, info: dict):
         self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],

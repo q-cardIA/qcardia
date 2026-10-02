@@ -44,6 +44,14 @@ class ChatController:
         self.view.chat_widget.device_changed.connect(self._on_device_changed)
         self.view.chat_widget.think_changed.connect(self._on_think_changed)
 
+    def is_busy(self) -> bool:
+        """A thread of this controller or its chat panel is still running; dropping it would abort."""
+        chat = self.view.chat_widget
+        threads = [self._worker, self._warmup_worker, self._model_load_worker, *self._live_workers,
+                   getattr(chat, "_import_worker", None), getattr(chat, "_device_switch_worker", None),
+                   getattr(chat, "_mic_worker", None), getattr(chat, "_transcription_worker", None)]
+        return any(t is not None and t.isRunning() for t in threads)
+
     def _on_model_changed(self, model_name: str):
         self._llm_model = model_name
         self._preload_selected_model()

@@ -154,3 +154,6 @@ tests/llm/results/
 prototypes/evidence_gathering/findings/
 
 logs/
+
+# UI screenshots from tests/ui/screenshots.py
+screenshots/

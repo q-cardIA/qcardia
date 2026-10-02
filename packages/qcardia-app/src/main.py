@@ -57,7 +57,18 @@ def main():
         model.use_cardisort_cache = main_window.welcome_widget.use_cardisort_cache
         model.use_segmentation_cache = main_window.welcome_widget.use_segmentation_cache
 
-    main_window.welcome_widget.transition_signal.connect(_configure_preprocessing)
+    main_window.session_started.connect(_configure_preprocessing)
+    main_window.session_ended.connect(controller.reset_session)
+
+    def _session_busy() -> str | None:
+        if controller.is_busy():
+            return "A patient is still loading or being segmented."
+        chat = getattr(main_window, "_chat_controller", None)
+        if chat is not None and chat.is_busy():
+            return "The assistant is still working."
+        return None
+
+    main_window.session_busy = _session_busy
 
     def _start_study_log():
         welcome = main_window.welcome_widget
@@ -77,7 +88,8 @@ def main():
             subprocess.Popen([sys.executable, str(APP_DIR / "tests" / "study" / "study_report.py"), str(path)],
                              creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    main_window.welcome_widget.transition_signal.connect(_start_study_log)
+    main_window.session_started.connect(_start_study_log)
+    main_window.session_ended.connect(_end_study_log)
     app.aboutToQuit.connect(_end_study_log)
 
     # Deferred, not checked at import: the LLM device is picked on the welcome screen.
@@ -85,12 +97,13 @@ def main():
         if main_window.welcome_widget.assistant_disabled:
             return
         main_window._chat_controller = ChatController(main_window, controller, model)
-        if VOICE_AVAILABLE:
+        # Once per app: a second session must not drop a preload that is still running.
+        if VOICE_AVAILABLE and getattr(main_window, "_voice_preload_worker", None) is None:
             # Off the GUI thread, so the first push-to-talk isn't a cold model load.
             main_window._voice_preload_worker = CallableWorker(TranscriptionWorker.preload_model)
             main_window._voice_preload_worker.start()
 
-    main_window.welcome_widget.transition_signal.connect(_wire_chat)
+    main_window.session_started.connect(_wire_chat)
 
     main_window.show()
 

@@ -602,6 +602,16 @@ class DICOMModel:
         sample = volume[::4] if volume.ndim == 4 else volume
         return window or percentile_window(sample, 1, 99) or (float(volume.min()) + 0.5, 1.0)
 
+    def clear_patient(self):
+        """Forget the loaded patient, so a new session cannot save or show its series."""
+        self.series = {}
+        self._series_dirs = {}
+        self._perfusion_dirs = {}
+        self.subject_folder = None
+        self.folder_path = None
+        self.num_time_frames = 0
+        self.slice_positions = []
+
     def load_patient(self, folder_path) -> PatientLoadResult:
         folder_path = Path(folder_path)
         self.subject_folder = folder_path

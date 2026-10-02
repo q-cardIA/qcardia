@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from utils import bindings
+from view import theme
 
 # Actions the viewer handles itself; the rest go to the display area as (action, amount).
 _KEY_ACTIONS = {
@@ -28,10 +29,10 @@ _REPEATING = {"slice_prev", "slice_next", "frame_prev", "frame_next", "zoom_in",
 
 
 @cache
-def _icon(draw) -> QIcon:
-    """16 px line icon, grey when off and blue when on; draw paints it in a 32 x 32 box."""
+def _icon(draw, off: str, on: str) -> QIcon:
+    """16 px line icon in the off and on colours; draw paints it in a 32 x 32 box."""
     icon = QIcon()
-    for state, color in ((QIcon.Off, QColor(150, 158, 170)), (QIcon.On, QColor(137, 167, 207))):
+    for state, color in ((QIcon.Off, QColor(off)), (QIcon.On, QColor(on))):
         pixmap = QPixmap(32, 32)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -94,12 +95,6 @@ class CustomQGraphicsView(QGraphicsView):
         self._contour_drag_influence_radius = 42.0
         self._contour_drag_falloff_sigma = 18.0
         self._edit_tool = "move"
-        self._crosshair_color = QColor(137, 167, 207)
-        self._class_colors = {
-            1: QColor(213, 160, 122),
-            2: QColor(90, 111, 141),
-            3: QColor(137, 167, 207),
-        }
 
         self._zoom = 1.0  # relative to fit-to-panel
         self._center: QPointF | None = None  # scene point at the panel centre; None = image centre
@@ -120,6 +115,8 @@ class CustomQGraphicsView(QGraphicsView):
         self.__set_interface()
         self.__set_stylesheets()
         self.__set_panel_toggles()
+        self.__apply_theme()
+        theme.notifier.changed.connect(self.__apply_theme)
         bindings.track_held_keys()
 
     def __set_interface(self):
@@ -139,14 +136,21 @@ class CustomQGraphicsView(QGraphicsView):
         self.image_item.setTransformationMode(Qt.SmoothTransformation)
         self.scene.addItem(self.image_item)
 
-        pen = QPen(self._crosshair_color, 1)
-        pen.setDashPattern([6, 6])  # equal dash and gap
-        pen.setCosmetic(True)
-        self.vertical_line = self.scene.addLine(0, 0, 0, 0, pen)
-        self.horizontal_line = self.scene.addLine(0, 0, 0, 0, pen)
+        self.vertical_line = self.scene.addLine(0, 0, 0, 0)
+        self.horizontal_line = self.scene.addLine(0, 0, 0, 0)
         for line in (self.vertical_line, self.horizontal_line):
             line.setZValue(100)
             line.setVisible(False)
+
+    def __apply_theme(self):
+        pen = QPen(theme.color("accent"), 1)
+        pen.setDashPattern([6, 6])  # equal dash and gap
+        pen.setCosmetic(True)
+        for line in (self.vertical_line, self.horizontal_line):
+            line.setPen(pen)
+        off, on = theme.color("text_muted").name(), theme.color("accent").name()
+        for button, draw in self._toggle_draws:
+            button.setIcon(_icon(draw, off, on))
 
     def __set_stylesheets(self):
         self.setProperty("role", "imageViewport")
@@ -163,7 +167,6 @@ class CustomQGraphicsView(QGraphicsView):
                                   ("contours", "Show contours in this panel", _draw_contours)):
             button = QToolButton(self)
             button.setCheckable(True)
-            button.setIcon(_icon(draw))
             button.setIconSize(QSize(16, 16))
             button.setFixedSize(20, 20)
             key = bindings.current().get(action)
@@ -173,6 +176,7 @@ class CustomQGraphicsView(QGraphicsView):
             button.clicked.connect(lambda _=False, a=action: self.action_requested.emit(a, 0))
             buttons.append(button)
         self._link_button, self._contour_button = buttons
+        self._toggle_draws = list(zip(buttons, (_draw_link, _draw_contours)))
         self._link_fade = QGraphicsOpacityEffect(self._link_button)
         self._link_button.setGraphicsEffect(self._link_fade)
         self._contour_button.setChecked(True)
@@ -417,6 +421,8 @@ class CustomQGraphicsView(QGraphicsView):
 
     # ── Crosshair ─────────────────────────────────────────────────────────
 
+    crosshair_shown = True  # View > Crosshair, shared by every panel
+
     def updateCrosshairPosition(self, x, y):
         """Crosshair at scene (image) point x, y, spanning the image."""
         w, h = self.image_2d_w, self.image_2d_h
@@ -424,8 +430,12 @@ class CustomQGraphicsView(QGraphicsView):
         self.crosshair_pos = (x, y)
         self.vertical_line.setLine(x, 0, x, h)
         self.horizontal_line.setLine(0, y, w, y)
-        self.vertical_line.setVisible(True)
-        self.horizontal_line.setVisible(True)
+        self.show_crosshair(CustomQGraphicsView.crosshair_shown)
+
+    def show_crosshair(self, shown: bool):
+        """The position keeps following clicks while hidden, so it reappears in the right place."""
+        for line in (self.vertical_line, self.horizontal_line):
+            line.setVisible(shown and self.crosshair_pos is not None)
 
     def clear_display(self):
         self.image_2d_h = 0
@@ -875,9 +885,7 @@ class CustomQGraphicsView(QGraphicsView):
             return
         for idx, contour in enumerate(self._contour_definitions):
             path_item = QGraphicsPathItem()
-            pen = QPen(
-                self._class_colors.get(contour["class_id"], QColor(255, 255, 255))
-            )
+            pen = QPen(theme.label_color(contour["class_id"]))
             pen.setWidthF(self.__contour_pen_width())
             pen.setCosmetic(True)  # width in screen pixels, updated on zoom
             pen.setJoinStyle(Qt.RoundJoin)

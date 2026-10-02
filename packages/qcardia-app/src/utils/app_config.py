@@ -26,6 +26,11 @@ ICON_PATH: Path = APP_DIR / "assets" / "images" / "q-cardIA.png"
 DEFAULT_DATA_DIR: Path = WORKSPACE_DIR / "data"
 SETTINGS = QSettings("q-cardIA", "qcardia-app")
 
+COMMUNITY_URL = "https://github.com/q-cardIA"
+REPO_URL = "https://github.com/q-cardIA/qcardia"
+WIKI_URL = f"{REPO_URL}/wiki"
+ISSUES_URL = f"{REPO_URL}/issues"
+
 
 def data_dir() -> Path:
     return Path(SETTINGS.value("data_dir", str(DEFAULT_DATA_DIR)))

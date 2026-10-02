@@ -116,6 +116,10 @@ PRESETS: dict[str, Preset] = {
 PRESET_BUTTON_ORDER = ["functional", "functional_complex", "viability", "perfusion"]
 
 
+def preset_label(name: str) -> str:
+    return PRESETS[name].label if name in PRESETS else name.title()
+
+
 _LGE_KEYS = ("LGE_SAX", "LGE_2CH", "LGE_3CH", "LGE_4CH")
 _PERFUSION_KEYS = (PERF_STRESS_KEY, PERF_REST_KEY, PERF_KEY)
 
