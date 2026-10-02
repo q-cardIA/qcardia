@@ -1,10 +1,11 @@
 import logging
+from collections import Counter
 from pathlib import Path
 
 from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
 from utils import study_log
-from utils.hanging_protocols import PERF_REST_KEY, PERF_STRESS_KEY, PRESETS, build_perfusion_preset
+from utils.hanging_protocols import PRESETS, PanelAssignment
 from view.series_browser_widget import SeriesCardInfo
 
 
@@ -221,22 +222,15 @@ class DICOMController:
 
     def apply_preset(self, name: str) -> tuple[int, int] | None:
         """Returns (panels_filled, panels_total), or None for an unknown preset name."""
-        if name == "perfusion":
-            avail = set(self.model.series.keys())
-            preset = build_perfusion_preset(
-                has_stress=PERF_STRESS_KEY in avail,
-                has_rest=PERF_REST_KEY in avail,
-            )
-        else:
-            preset = PRESETS.get(name)
-
+        preset = PRESETS.get(name)
         if preset is None:
             logging.warning(f"apply_preset: unknown preset {name!r}")
             return None
+        preset = preset.for_loaded(self._widget.is_series_registered)
 
         total = len(preset.panels)
-        n_slots = sum(p.slice_slot is not None for p in preset.panels)
-        slices = [self._preset_slice(p, n_slots) for p in preset.panels]
+        slots = Counter(p.key for p in preset.panels if p.slice_slot is not None)
+        slices = [self._preset_slice(p, slots) for p in preset.panels]
         filled = sum(z is not None for z in slices)
         if filled == 0:
             # Leave the current grid/panels untouched — a total no-op should
@@ -253,16 +247,30 @@ class DICOMController:
         study_log.log("layout", preset=name, panels=self._widget.panel_assignments())
         return filled, total
 
-    def _preset_slice(self, panel, n_slots: int) -> int | None:
-        """Slice to show in a preset panel, or None to leave it empty."""
+    def _preset_slice(self, panel, slots: Counter) -> int | None:
+        """Slice to show in a preset panel, or None to leave it empty. Slots go from apex to base."""
         if not self._widget.is_series_registered(panel.key):
             return None
         n = self._widget.n_slices(panel.key, panel.axis)
         if panel.slice_slot is None:
             return n // 2
+        geom = self.model.get_geometry(panel.key) if panel.axis == "transverse" else None
+        if geom is not None and len(geom.ipp_list) != n:
+            geom = None
+        match_key = next((k for k in panel.match_keys if self._widget.is_series_registered(k)), None)
+        if match_key is not None and geom is not None:
+            ref_z = self._preset_slice(PanelAssignment(panel.idx, match_key, panel.axis, panel.slice_slot), slots)
+            ref_geom = self.model.get_geometry(match_key)
+            if ref_z is not None and ref_geom is not None:
+                return ref_geom.nearest_slice(geom, ref_z)
+        n_slots = slots[panel.key]
         if n >= n_slots:  # spread over the stack, steps of at least one slice
-            return round(panel.slice_slot * (n - 1) / max(n_slots - 1, 1))
-        return panel.slice_slot if panel.slice_slot < n else None
+            i = round(panel.slice_slot * (n - 1) / max(n_slots - 1, 1))
+        elif panel.slice_slot < n:
+            i = panel.slice_slot
+        else:
+            return None
+        return geom.apex_to_base()[i] if geom is not None else i
 
     def set_time_frame(self, time_index):
         self.current_time_index = time_index
