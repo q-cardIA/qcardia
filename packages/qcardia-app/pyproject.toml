@@ -26,7 +26,7 @@ dependencies = [
 # qcardia-models/qcardia-data aren't imported here directly — they resolve
 # transitively through qcardia's own dependency spec, so nothing to override.
 [tool.uv.sources]
-qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "lax-context-aware-inference" }
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "add-perfusion" }
 
 [tool.uv]
 environments = ["sys_platform == 'win32'", "sys_platform != 'win32'"]

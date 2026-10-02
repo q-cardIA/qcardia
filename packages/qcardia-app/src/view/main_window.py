@@ -192,6 +192,7 @@ class MainWindow(QMainWindow):
         time_layout.addWidget(self.time_label)
         time_layout.addWidget(self.time_slider)
         self.display_area_widget.time_step_requested.connect(self.step_time_frame)
+        self.display_area_widget.time_axis_changed.connect(self.show_time_axis)
         self.display_area_widget.play_toggle_requested.connect(self.toggle_cine)
 
         self.top_bar = QWidget()
@@ -507,11 +508,17 @@ class MainWindow(QMainWindow):
         self.save_button_signal.emit()
 
     def update_time_slider_range(self, num_frames):
+        self.show_time_axis(num_frames, 0)
+
+    def show_time_axis(self, num_frames: int, frame: int):
+        """Let the time slider drive another time axis (the cines, or a perfusion run) at its frame."""
         self._play_timer.stop()
-        self.time_slider.setMaximum(num_frames - 1)
-        self.time_slider.setValue(0)
+        self.time_slider.blockSignals(True)  # the display already shows this frame
+        self.time_slider.setMaximum(max(num_frames - 1, 0))
+        self.time_slider.setValue(frame)
+        self.time_slider.blockSignals(False)
         self.time_slider.setEnabled(num_frames > 1)
-        self.time_label.setText(f"Time Frame: 1 / {num_frames}")
+        self.time_label.setText(f"Time Frame: {frame + 1} / {num_frames}")
 
     def step_time_frame(self, step: int):
         n = self.time_slider.maximum() + 1
