@@ -31,12 +31,14 @@ from model.subject_labels import (
     save_labels,
     update_primary,
 )
+from utils.hanging_protocols import PERF_REST_KEY, PERF_STRESS_KEY
 from utils.windowing import dicom_window, percentile_window, window_to_uint8
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
 CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
-PERFUSION_RUN_KEYS = {"stress": "PERF_STRESS_SAX", "rest": "PERF_REST_SAX"}
+PERFUSION_RUN_KEYS = {"stress": PERF_STRESS_KEY, "rest": PERF_REST_KEY}
+PERFUSION_CACHE_KEY = "PERF"
 
 
 @dataclass
@@ -465,18 +467,20 @@ class DICOMModel:
     def _group_and_resolve(
         self, descriptors: list[SequenceDescriptor], folder_path, ignore_cache: bool = False
     ) -> tuple[dict[str, Path], dict[str, dict]]:
-        self._assign_perfusion_keys(descriptors)
-        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
-        for d in descriptors:
-            if d.key is not None:
-                dirs_by_key[d.key].append(d)
-
         use_cache = self.use_cardisort_cache and not ignore_cache
         cached = load_labels(folder_path) if use_cache else None
         primary_by_key = cached.primary_by_key if cached is not None else {}
 
         classified: dict[str, Path] = {}
         resolved: dict[str, dict] = {}
+        perfusion_entry = self._assign_perfusion_keys(descriptors, primary_by_key)
+        if perfusion_entry is not None:
+            resolved[PERFUSION_CACHE_KEY] = perfusion_entry
+
+        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
+        for d in descriptors:
+            if d.key is not None:
+                dirs_by_key[d.key].append(d)
         for key, group in dirs_by_key.items():
             dirs = [d.path for d in group]
             if key in self._perfusion_dirs:
@@ -495,21 +499,26 @@ class DICOMModel:
 
         return classified, resolved
 
-    def _assign_perfusion_keys(self, descriptors: list[SequenceDescriptor]) -> None:
-        """Groups the perfusion dirs into stress and rest runs; test runs and unmatched dirs get no key."""
+    def _assign_perfusion_keys(self, descriptors: list[SequenceDescriptor], primary_by_key: dict) -> dict | None:
+        """Gives the dirs of the stress and rest runs their keys; test runs and unmatched dirs get none.
+        The keys are cached with the series, so a cached grouping holds while its candidates match."""
         perfusion = [d for d in descriptors if d.sequence_name in PERFUSION_SEQUENCE_NAMES]
-        for d in perfusion:
-            d.key = None
-        try:
-            runs = select_perfusion_series([d.path for d in perfusion]) if perfusion else {}
-        except Exception as e:
-            logging.warning(f"Could not group the perfusion series into stress and rest runs: {e}")
-            runs = {}
+        entry = {"candidates": sorted(d.path.name for d in perfusion)} if perfusion else None
+        if entry is not None and primary_by_key.get(PERFUSION_CACHE_KEY) != entry:
+            try:
+                runs = select_perfusion_series([d.path for d in perfusion])
+            except Exception as e:
+                logging.warning(f"Could not group the perfusion series into stress and rest runs: {e}")
+                runs, entry = {}, None  # a failure must not be cached, or it can never be revisited
+            key_by_dir = {p: PERFUSION_RUN_KEYS[role] for role, dirs in runs.items() for p in dirs}
+            for d in perfusion:
+                d.key = key_by_dir.get(d.path)
 
-        self._perfusion_dirs = {PERFUSION_RUN_KEYS[role]: dirs for role, dirs in runs.items()}
-        key_by_dir = {p: key for key, dirs in self._perfusion_dirs.items() for p in dirs}
+        self._perfusion_dirs = defaultdict(list)
         for d in perfusion:
-            d.key = key_by_dir.get(d.path)
+            if d.key is not None:
+                self._perfusion_dirs[d.key].append(d.path)
+        return entry
 
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
         descriptors, _ = self._describe_patient_folder(folder_path)
@@ -599,8 +608,12 @@ class DICOMModel:
         descriptors, from_cache = self._describe_patient_folder(folder_path)
         classified, primary_by_key = self._group_and_resolve(descriptors, folder_path)
 
-        if not from_cache and self.use_cardisort_cache:
-            self._cache_labels(folder_path, descriptors, primary_by_key)
+        if self.use_cardisort_cache:
+            cached = load_labels(folder_path) if from_cache else None
+            if cached is None:
+                self._cache_labels(folder_path, descriptors, primary_by_key)
+            elif any(cached.primary_by_key.get(k) != v for k, v in primary_by_key.items()):
+                self._cache_labels(folder_path, descriptors, {**cached.primary_by_key, **primary_by_key})
 
         loaded: dict[str, dict] = {}
         for key, seq_dir in classified.items():
