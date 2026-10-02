@@ -12,6 +12,7 @@ Classes:
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -30,6 +31,7 @@ from skimage.measure import find_contours
 from torch.nn import functional as F
 
 import qcardia.utils as utils
+from qcardia.disambiguate import is_phase_image
 from qcardia.inference import (
     InferenceConfig,
     InferencePredictor,
@@ -1306,3 +1308,140 @@ class PerfusionSeries(BaseSeries):
         if self.aif_data is None:
             return None
         return np.asarray(self.aif_data["pixel_array"])
+
+
+class FlowSeries(BaseSeries):
+    """
+    A 2D phase-contrast flow acquisition: one slice, with a magnitude and a
+    through-plane velocity image for each frame of the heart cycle.
+
+    - Philips stores one series with the magnitude (ImageType `M_FFE`), a
+      modulus (`M_PCA`, not used) and the phase, which the Real World Value
+      Mapping maps to cm/s.
+    - Siemens stores a reference (`M`), a modulus (`MAG`, not used) and a phase
+      (`P`) series. The VENC is in the sequence name (`*fl2d1_v150in` is
+      150 cm/s), and the phase maps -VENC..+VENC over the stored range.
+
+    `slice_data` holds the magnitude images, so they load like a cine;
+    `velocity_data` holds the velocities in cm/s, in the same frame order. The
+    sign is as the scanner stores it.
+
+    Args:
+        folders (Path | list[Path]): The folder of the acquisition, or the
+            folders of its series (see `select_flow_series`).
+    """
+
+    _MAGNITUDE_TYPES = ("M_FFE", "M")  # Philips, Siemens
+
+    def __init__(self, folders: Path | list[Path], batch_size: int = 50):
+        self.folders = [Path(folders)] if isinstance(folders, (str, Path)) else folders
+        super().__init__(self.folders[0], batch_size)
+
+    @staticmethod
+    def _image_kind(ds) -> str | None:
+        """"phase", a magnitude type from _MAGNITUDE_TYPES, or None."""
+        if is_phase_image(ds):
+            return "phase"
+        image_type = [str(v).upper() for v in ds.get("ImageType", [])]
+        return next((t for t in FlowSeries._MAGNITUDE_TYPES if t in image_type[2:3]), None)
+
+    @staticmethod
+    def _venc(ds) -> float | None:
+        """The velocity encoding in cm/s, or None if it cannot be read."""
+        philips = ds.get((0x2001, 0x101A))  # PC Velocity, one value per direction
+        if philips is not None:
+            return float(max(abs(float(v)) for v in philips.value))
+        match = re.search(r"_v(\d+)", str(ds.get("SequenceName", "")))
+        return float(match.group(1)) if match else None
+
+    @staticmethod
+    def _velocity(ds, venc: float) -> np.ndarray:
+        """The phase image of ds in cm/s."""
+        pixels = ds.pixel_array.astype(np.float32)
+        for item in ds.get("RealWorldValueMappingSequence", []):  # Philips
+            units = item.get("MeasurementUnitsCodeSequence")
+            if units and str(units[0].get("CodeValue", "")).lower() == "cm/s":
+                return pixels * float(item.RealWorldValueSlope) + float(item.RealWorldValueIntercept)
+        # Siemens: rescaled, the phase spans -2^BitsStored..+2^BitsStored.
+        rescaled = pixels * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+        return rescaled / 2 ** int(ds.BitsStored) * venc
+
+    def _load_data(self):
+        """
+        Read the images of all folders, split them into magnitude and phase,
+        and order both by trigger time. An image that is in two folders (a
+        series exported twice) is read once.
+        """
+        images = {}
+        seen = set()
+        for folder in self.folders:
+            for f in natsorted(folder.iterdir()):
+                if not f.is_file() or f.stem.startswith(".") or "dicomdir" in str(f).lower():
+                    continue
+                ds = pydicom.dcmread(f)
+                uid = ds.get("SOPInstanceUID")
+                if uid is not None and uid in seen:
+                    continue
+                seen.add(uid)
+                kind = self._image_kind(ds) if "PixelData" in ds else None
+                if kind is not None:
+                    images.setdefault(kind, []).append(ds)
+
+        magnitude_type = next((t for t in self._MAGNITUDE_TYPES if t in images), None)
+        if "phase" not in images or magnitude_type is None:
+            raise ValueError(
+                f"No phase and magnitude images in {self.folders}; found {sorted(images)}"
+            )
+        phase = sorted(images["phase"], key=lambda ds: float(ds.TriggerTime))
+        magnitude = sorted(images[magnitude_type], key=lambda ds: float(ds.TriggerTime))
+        if len(phase) != len(magnitude):
+            raise ValueError(
+                f"Flow series in {self.folders} have {len(magnitude)} magnitude and "
+                f"{len(phase)} phase images"
+            )
+
+        self.venc = self._venc(phase[0])
+        if self.venc is None:
+            raise ValueError(f"No velocity encoding found in {self.folders}")
+        self.velocity_data = {
+            "velocity_array": [self._velocity(ds, self.venc) for ds in phase],
+            "meta_data": phase,
+        }
+        _, positions = self._get_slices_from_positions(
+            [magnitude[0].ImagePositionPatient], [magnitude[0].ImageOrientationPatient]
+        )
+        slices_dict = {
+            "slice01": {
+                "pixel_array": [ds.pixel_array for ds in magnitude],
+                "slice_position": positions[0],
+                "meta_data": magnitude,
+            }
+        }
+        return slices_dict, 1, len(magnitude), magnitude[0].Rows, magnitude[0].Columns
+
+    def get_times(self) -> np.ndarray:
+        """
+        Get the time of each frame in the heart cycle.
+
+        Returns:
+            np.ndarray: The trigger times in seconds, shape (T,).
+        """
+        return np.asarray([float(ds.TriggerTime) for ds in self.slice_data["slice01"]["meta_data"]]) / 1000
+
+    def get_velocity_array(self) -> np.ndarray:
+        """
+        Get the through-plane velocities.
+
+        Returns:
+            np.ndarray: The velocities in cm/s, shape (T, H, W).
+        """
+        return np.asarray(self.velocity_data["velocity_array"])
+
+    def get_magnitude_array(self) -> np.ndarray:
+        """
+        Get the magnitude images.
+
+        Returns:
+            np.ndarray: The magnitude images, shape (T, H, W).
+        """
+        return np.asarray(self.slice_data["slice01"]["pixel_array"])

@@ -221,3 +221,98 @@ def select_perfusion_series(perfusion_dirs: list[Path]) -> dict:
         return {}
 
     return {role: run["dirs"] for role, run in zip(("stress", "rest"), runs)}
+
+
+FLOW_SEQUENCE_NAME = "PC"
+FLOW_VESSELS = {"AORTA": "aorta", "MPA": "pulmonary"}  # cardisort plane -> vessel
+# Siemens starts the series of one acquisition (reference, magnitude, phase) milliseconds apart.
+FLOW_SAME_ACQUISITION_SECONDS = 2.0
+
+
+def is_phase_image(ds) -> bool:
+    """The velocity image of a flow acquisition: P is the third (Siemens) or
+    fourth (Philips) value of ImageType."""
+    return "P" in [str(v).upper() for v in ds.get("ImageType", [])][2:4]
+
+
+def _has_phase_images(dirs: list[Path]) -> bool:
+    for d in dirs:
+        for f in d.iterdir():
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            try:
+                ds = pydicom.dcmread(f, stop_before_pixels=True, specific_tags=["ImageType"])
+            except Exception:
+                continue
+            if is_phase_image(ds):
+                return True
+    return False
+
+
+def _summarize_flow_dir(sequence_dir: Path) -> dict | None:
+    """The slice geometry and acquisition time of a series, from its first
+    image, or None if it has no image with a position."""
+    for f in sorted(sequence_dir.iterdir()):
+        if not f.is_file() or f.name.startswith(".") or "dicomdir" in f.name.lower():
+            continue
+        try:
+            ds = pydicom.dcmread(f, stop_before_pixels=True)
+        except Exception:
+            continue
+        if "ImagePositionPatient" not in ds or "AcquisitionTime" not in ds:
+            continue
+        return {
+            "geometry": (
+                tuple(round(float(v), 1) for v in ds.ImagePositionPatient),
+                tuple(round(float(v), 3) for v in ds.ImageOrientationPatient),
+            ),
+            "time": _dicom_time_to_seconds(ds.AcquisitionTime),
+        }
+    return None
+
+
+def _same_acquisition(a: dict, b: dict) -> bool:
+    return a["geometry"] == b["geometry"] and abs(a["time"] - b["time"]) <= FLOW_SAME_ACQUISITION_SECONDS
+
+
+def select_flow_series(labels: dict[Path, tuple[str | None, str | None]]) -> dict:
+    """Finds the phase-contrast flow acquisition of each vessel.
+
+    Siemens stores one acquisition as three series (reference, magnitude and
+    phase), and cardisort can label only some of them PC. So each PC series
+    starts an acquisition, and every series with the same slice and about the
+    same acquisition time joins it, whatever its label. The vessel is the
+    plane most of its PC series are labelled with. Acquisitions without phase
+    images (e.g. a valve cine labelled PC) are skipped, and when a vessel was
+    acquired more than once, the latest acquisition is kept.
+
+    Args:
+        labels: cardisort's (sequence_name, plane_name) for each series
+            directory of the subject.
+
+    Returns:
+        {"aorta": [Path, ...], "pulmonary": [Path, ...]}, the directories of
+        each vessel's acquisition, for the vessels that were found.
+    """
+    if not any(sequence == FLOW_SEQUENCE_NAME for sequence, _ in labels.values()):
+        return {}
+    summaries = {d: _summarize_flow_dir(d) for d in labels}
+    summaries = {d: s for d, s in summaries.items() if s is not None}
+
+    acquisitions = []
+    for d, (sequence, plane) in labels.items():
+        if sequence != FLOW_SEQUENCE_NAME or d not in summaries:
+            continue
+        acq = next((a for a in acquisitions if _same_acquisition(a, summaries[d])), None)
+        if acq is None:
+            acq = {**summaries[d], "votes": Counter()}
+            acquisitions.append(acq)
+        if plane in FLOW_VESSELS:
+            acq["votes"][FLOW_VESSELS[plane]] += 1
+
+    selected = {}
+    for acq in sorted(acquisitions, key=lambda a: a["time"]):
+        dirs = sorted(d for d, s in summaries.items() if _same_acquisition(acq, s))
+        if acq["votes"] and _has_phase_images(dirs):
+            selected[acq["votes"].most_common(1)[0][0]] = dirs  # a later acquisition replaces an earlier one
+    return selected
