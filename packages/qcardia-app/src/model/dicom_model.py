@@ -16,8 +16,13 @@ from qcardia.cardisort import (
     load_cardisort_model,
     load_series_datasets,
 )
-from qcardia.disambiguate import disambiguate_duplicates, summarize_sequence_dir
-from qcardia.series import BaseSeries, CineSeries, LGESeries
+from qcardia.disambiguate import (
+    PERFUSION_SEQUENCE_NAMES,
+    disambiguate_duplicates,
+    select_perfusion_series,
+    summarize_sequence_dir,
+)
+from qcardia.series import BaseSeries, CineSeries, LGESeries, PerfusionSeries
 
 from model.subject_labels import (
     SeriesLabel,
@@ -26,11 +31,14 @@ from model.subject_labels import (
     save_labels,
     update_primary,
 )
+from utils.hanging_protocols import PERF_REST_KEY, PERF_STRESS_KEY
 from utils.windowing import dicom_window, percentile_window, window_to_uint8
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
 CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
+PERFUSION_RUN_KEYS = {"stress": PERF_STRESS_KEY, "rest": PERF_REST_KEY}
+PERFUSION_CACHE_KEY = "PERF"
 
 
 @dataclass
@@ -98,6 +106,7 @@ class DICOMModel:
         self.use_segmentation_cache = True
         self.subject_folder: Path | None = None
         self._series_dirs: dict[str, Path] = {}
+        self._perfusion_dirs: dict[str, list[Path]] = {}
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -135,6 +144,10 @@ class DICOMModel:
         self.series[series_key] = CineSeries(Path(folder_path), batch_size=10)
         if series_key == "CINE_SAX":
             self.folder_path = Path(folder_path)
+        return self._process_temporal_volumes(series_key)
+
+    def load_perfusion_series(self, folders: list[Path], series_key: str):
+        self.series[series_key] = PerfusionSeries(folders)
         return self._process_temporal_volumes(series_key)
 
     def load_lge_series(self, folder_path, series_key: str):
@@ -454,19 +467,28 @@ class DICOMModel:
     def _group_and_resolve(
         self, descriptors: list[SequenceDescriptor], folder_path, ignore_cache: bool = False
     ) -> tuple[dict[str, Path], dict[str, dict]]:
-        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
-        for d in descriptors:
-            if d.key is not None:
-                dirs_by_key[d.key].append(d)
-
         use_cache = self.use_cardisort_cache and not ignore_cache
         cached = load_labels(folder_path) if use_cache else None
         primary_by_key = cached.primary_by_key if cached is not None else {}
 
         classified: dict[str, Path] = {}
         resolved: dict[str, dict] = {}
+        perfusion_entry = self._assign_perfusion_keys(descriptors, primary_by_key)
+        if perfusion_entry is not None:
+            resolved[PERFUSION_CACHE_KEY] = perfusion_entry
+
+        dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
+        for d in descriptors:
+            if d.key is not None:
+                dirs_by_key[d.key].append(d)
         for key, group in dirs_by_key.items():
             dirs = [d.path for d in group]
+            if key in self._perfusion_dirs:
+                # Siemens stores each slice of a run as its own series: all of them make up the run.
+                classified[key] = dirs[0]
+                for d in group:
+                    d.is_primary = True
+                continue
             primary, confident = self._resolve_primary_dir(key, dirs, primary_by_key)
             classified[key] = primary
             for d in group:
@@ -476,6 +498,27 @@ class DICOMModel:
                 resolved[key] = {"candidates": sorted(p.name for p in dirs), "primary": primary.name}
 
         return classified, resolved
+
+    def _assign_perfusion_keys(self, descriptors: list[SequenceDescriptor], primary_by_key: dict) -> dict | None:
+        """Gives the dirs of the stress and rest runs their keys; test runs and unmatched dirs get none.
+        The keys are cached with the series, so a cached grouping holds while its candidates match."""
+        perfusion = [d for d in descriptors if d.sequence_name in PERFUSION_SEQUENCE_NAMES]
+        entry = {"candidates": sorted(d.path.name for d in perfusion)} if perfusion else None
+        if entry is not None and primary_by_key.get(PERFUSION_CACHE_KEY) != entry:
+            try:
+                runs = select_perfusion_series([d.path for d in perfusion])
+            except Exception as e:
+                logging.warning(f"Could not group the perfusion series into stress and rest runs: {e}")
+                runs, entry = {}, None  # a failure must not be cached, or it can never be revisited
+            key_by_dir = {p: PERFUSION_RUN_KEYS[role] for role, dirs in runs.items() for p in dirs}
+            for d in perfusion:
+                d.key = key_by_dir.get(d.path)
+
+        self._perfusion_dirs = defaultdict(list)
+        for d in perfusion:
+            if d.key is not None:
+                self._perfusion_dirs[d.key].append(d.path)
+        return entry
 
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
         descriptors, _ = self._describe_patient_folder(folder_path)
@@ -541,6 +584,9 @@ class DICOMModel:
         if key.startswith("CINE_"):
             volume, num_frames = self.load_cine_series(seq_dir, key)
             info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
+        elif key.startswith("PERF_"):
+            volume, num_frames = self.load_perfusion_series(self._perfusion_dirs.get(key, [seq_dir]), key)
+            info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
         else:
             volume, _slice_positions = self.load_lge_series(seq_dir, key)
             info = {"volume": volume, "is_temporal": False, "num_frames": None}
@@ -571,8 +617,12 @@ class DICOMModel:
         descriptors, from_cache = self._describe_patient_folder(folder_path)
         classified, primary_by_key = self._group_and_resolve(descriptors, folder_path)
 
-        if not from_cache and self.use_cardisort_cache:
-            self._cache_labels(folder_path, descriptors, primary_by_key)
+        if self.use_cardisort_cache:
+            cached = load_labels(folder_path) if from_cache else None
+            if cached is None:
+                self._cache_labels(folder_path, descriptors, primary_by_key)
+            elif any(cached.primary_by_key.get(k) != v for k, v in primary_by_key.items()):
+                self._cache_labels(folder_path, descriptors, {**cached.primary_by_key, **primary_by_key})
 
         loaded: dict[str, dict] = {}
         for key, seq_dir in classified.items():

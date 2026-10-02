@@ -4,7 +4,7 @@ utils.hanging_protocols so the two can't drift apart.
 """
 from __future__ import annotations
 
-from utils.hanging_protocols import PERFUSION_TRIGGERS, PRESETS
+from utils.hanging_protocols import PRESETS
 
 _BASE_PROMPT = (
     "You are an assistant embedded in a cardiac MRI DICOM viewer. Your "
@@ -90,7 +90,7 @@ _BASE_PROMPT = (
 
 
 def _preset_rules() -> str:
-    """Generates the PRESET SHORTCUTS block from PRESETS/PERFUSION_TRIGGERS
+    """Generates the PRESET SHORTCUTS block from PRESETS
     (every trigger phrase, not a sample — a truncated list previously hid
     valid phrasings from the model), so the prompt can't drift out of sync
     with the actual preset definitions."""
@@ -98,9 +98,9 @@ def _preset_rules() -> str:
     for name, preset in PRESETS.items():
         if preset.triggers:
             trig = " / ".join(f'"{t}"' for t in preset.triggers)
-            lines.append(f'  {trig} -> apply_preset(preset="{name}") [{preset.grid[0]}x{preset.grid[1]} grid]')
-    trig = " / ".join(f'"{t}"' for t in PERFUSION_TRIGGERS)
-    lines.append(f'  {trig} -> apply_preset(preset="perfusion") [grid depends on available stress/rest data]')
+            grid = ("grid depends on available stress/rest data" if preset.drop_empty_rows
+                    else f"{preset.grid[0]}x{preset.grid[1]} grid")
+            lines.append(f'  {trig} -> apply_preset(preset="{name}") [{grid}]')
     lines.append(
         "  AVAILABILITY — the trigger phrases above say what a preset is FOR, not that it's "
         "available now. apply_preset's 'preset' parameter only lists the values it can "
