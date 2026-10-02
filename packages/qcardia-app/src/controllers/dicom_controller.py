@@ -205,9 +205,12 @@ class DICOMController:
             else:
                 thumbnail = read_disk_thumbnail(entry.path, is_lge_like)
 
-            if entry.key is not None:
+            if entry.key is not None and entry.is_primary:
                 group = entry.key.split("_", 1)[0]
-                label = entry.key if entry.is_primary else entry.path.name
+                label = entry.key
+            elif entry.key is not None:  # a candidate the disambiguation did not pick: never loaded
+                group = "Unclassified"
+                label = entry.path.name
             elif entry.sequence_name is not None:
                 group = entry.sequence_name
                 label = f"{entry.sequence_name}_{entry.plane_name}"
