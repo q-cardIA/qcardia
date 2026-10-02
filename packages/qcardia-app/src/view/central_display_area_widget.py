@@ -348,6 +348,15 @@ class CentralDisplayAreaWidget(QWidget):
         self._update_panel(panel_idx)
         self._show_cine_time_if_unseen()
 
+    def set_panel_waiting(self, panel_idx: int, series_key: str):
+        """Empty, with the series that it shows once that series has loaded."""
+        self.set_panel_empty(panel_idx)
+        if 0 <= panel_idx < self.n_panels:
+            self._panels[panel_idx].title_label.setText(f"{series_key} · loading…")
+
+    def is_panel_empty(self, panel_idx: int) -> bool:
+        return 0 <= panel_idx < self.n_panels and self._panel_series_key[panel_idx] is None
+
     def set_panel_empty(self, panel_idx: int):
         if panel_idx < 0 or panel_idx >= self.n_panels:
             return

@@ -184,7 +184,7 @@ class ToolContext:
     @classmethod
     def from_app(cls, model, view) -> "ToolContext":
         return cls(
-            series=model.series,
+            series=dict(model.series),
             cine_modalities=model.cine_modalities,
             n_panels=view.display_area_widget.n_panels,
             num_time_frames=model.num_time_frames,

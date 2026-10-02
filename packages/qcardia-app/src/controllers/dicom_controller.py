@@ -18,6 +18,10 @@ class DICOMController:
         self._last_result = None
         self._current_subject_folder = None
         self._load_worker = None
+        self._cine_frames = 0
+        self._loading_keys: set[str] = set()  # series of the patient that is loading, not loaded yet
+        # Panels that show their series once it has loaded: panel -> (assignment, its preset's slots).
+        self._waiting: dict[int, tuple[PanelAssignment, Counter]] = {}
         # Runs one at a time, first entry is running: several at once doubled peak memory (#11).
         self._seg_queue: list[str] = []
         self._seg_worker: CallableWorker | None = None
@@ -55,7 +59,8 @@ class DICOMController:
 
         self._current_subject_folder = Path(folder_path)
         self.view.show_loading(f"Loading {Path(folder_path).name}…")
-        self._load_worker = CallableWorker(self.model.load_patient, folder_path)
+        self._load_worker = CallableWorker(self.model.load_patient, folder_path, report=True)
+        self._load_worker.progress.connect(self._on_load_progress)
         span = study_log.Span("load_subject", subject=Path(folder_path).name)
         self._load_worker.finished_ok.connect(
             lambda result: self._on_patient_loaded(result, on_complete)
@@ -73,10 +78,53 @@ class DICOMController:
 
     def _on_patient_load_error(self, exc, on_complete=None):
         self.view.hide_loading()
+        self._loading_keys.clear()
+        self._fill_waiting_panels()
+        self.view.series_browser_widget.stop_loading()
         logging.error(f"Failed to load patient: {exc}")
         self.view.show_error("Load Error", f"Failed to load patient folder:\n{exc}")
         if on_complete:
             on_complete(False)
+
+    def _on_load_progress(self, event):
+        kind, *args = event
+        if kind == "classified":
+            self._show_patient_outline(*args)
+        elif kind == "series":
+            self._add_loaded_series(*args)
+        elif kind == "thumbnail":
+            self.view.series_browser_widget.update_card(*args)
+
+    def _show_patient_outline(self, result):
+        """The series are known: show their cards and hide the loading screen, while they load."""
+        if not result.entries:
+            return  # reported once the load has finished
+        self.view.hide_loading()
+        self._last_result = result
+        self._loading_keys = {e.key for e in result.entries if e.key is not None and e.is_primary}
+        # The layout stays: each panel shows its series again, of this patient, once that has loaded.
+        self._waiting = {a["idx"]: (PanelAssignment(a["idx"], a["series_key"], a["axis"]), Counter())
+                         for a in self._widget.panel_assignments() if a["series_key"]}
+        self._widget.clear_series()
+        for idx, (panel, _) in self._waiting.items():
+            self._widget.set_panel_waiting(idx, panel.key)
+        self.view.series_browser_widget.populate(self._build_browser_cards(result, loading=True))
+        self.view.sidebar.show_patient(self._current_subject_folder.name, 0)
+        self.current_time_index = self._cine_frames = 0
+        self.view.update_time_slider_range(0)
+
+    def _add_loaded_series(self, key: str, info: dict):
+        self._register(key, info)
+        self._last_result.loaded[key] = info
+        self._loading_keys.discard(key)
+        self._fill_waiting_panels()
+        path = next(e.path for e in self._last_result.entries if e.key == key and e.is_primary)
+        self.view.series_browser_widget.update_card(path, self._widget.get_thumbnail(key), key)
+        self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
+        cine_frames = self._widget.n_frames(CINE_TIME_AXIS)
+        if cine_frames != self._cine_frames:  # else a later cine would reset the frame shown
+            self._cine_frames = cine_frames
+            self.view.update_time_slider_range(cine_frames)
 
     def _on_patient_loaded(self, result, on_complete=None):
         self.view.hide_loading()
@@ -89,17 +137,9 @@ class DICOMController:
                 on_complete(False)
             return
 
-        self._widget.clear_series()
-        for key, info in result.loaded.items():
-            self._register(key, info)
-
-        self._widget.refresh_panels()
-        self._last_result = result
-        self.view.series_browser_widget.populate(self._build_browser_cards(result))
-        self.view.sidebar.show_patient(self._current_subject_folder.name, len(result.loaded))
-
-        self.current_time_index = 0
-        self.view.update_time_slider_range(self._widget.n_frames(CINE_TIME_AXIS))
+        self._loading_keys.clear()
+        self._fill_waiting_panels()
+        self.view.series_browser_widget.stop_loading()
 
         if not result.loaded:
             self.view.show_warning(
@@ -113,6 +153,9 @@ class DICOMController:
 
     def reassign_series(self, card_info: SeriesCardInfo, new_key: str):
         if self._last_result is None:
+            return
+        if self._load_worker is not None:  # the load thread still adds series to the model
+            self.view.show_info("Please wait", "Reassign a series once the patient has loaded.")
             return
         try:
             info = self.model.load_series_for_key(card_info.path, new_key)
@@ -148,17 +191,19 @@ class DICOMController:
         self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],
                                      window=info["window"], geometry=info["geometry"])
 
-    def _build_browser_cards(self, result) -> list[SeriesCardInfo]:
+    def _build_browser_cards(self, result, loading: bool = False) -> list[SeriesCardInfo]:
+        """With loading, the series still load: no thumbnails yet, they come with the series."""
         cards = []
         for entry in result.entries:
             is_lge_like = entry.sequence_name in {"DBLGE", "WBLGE"}
             loaded_here = entry.key is not None and entry.is_primary and entry.key in result.loaded
 
-            thumbnail = (
-                self._widget.get_thumbnail(entry.key)
-                if loaded_here
-                else read_disk_thumbnail(entry.path, is_lge_like)
-            )
+            if loading:
+                thumbnail = None
+            elif loaded_here:
+                thumbnail = self._widget.get_thumbnail(entry.key)
+            else:
+                thumbnail = read_disk_thumbnail(entry.path, is_lge_like)
 
             if entry.key is not None:
                 group = entry.key.split("_", 1)[0]
@@ -178,6 +223,7 @@ class DICOMController:
                     draggable=loaded_here,
                     path=entry.path,
                     series_key=entry.key if loaded_here else None,
+                    loading=loading and entry.key is not None and entry.is_primary,
                 )
             )
         return cards
@@ -235,12 +281,12 @@ class DICOMController:
         if preset is None:
             logging.warning(f"apply_preset: unknown preset {name!r}")
             return None
-        preset = preset.for_loaded(self._widget.is_series_registered)
+        preset = preset.for_loaded(lambda k: self._widget.is_series_registered(k) or k in self._loading_keys)
 
         total = len(preset.panels)
         slots = Counter(p.key for p in preset.panels if p.slice_slot is not None)
-        slices = [self._preset_slice(p, slots) for p in preset.panels]
-        filled = sum(z is not None for z in slices)
+        slices = [None if self._must_wait(p) else self._preset_slice(p, slots) for p in preset.panels]
+        filled = sum(z is not None or self._must_wait(p) for p, z in zip(preset.panels, slices))
         if filled == 0:
             # Leave the current grid/panels untouched — a total no-op should
             # actually be a no-op, not silently wipe what was displayed.
@@ -248,13 +294,34 @@ class DICOMController:
 
         rows, cols = preset.grid
         self._widget.set_grid_size(rows, cols)
+        self._waiting = {}
         for panel, z in zip(preset.panels, slices):
             if z is not None:
                 self._widget.set_panel_series(panel.idx, panel.key, axis=panel.axis, slice_idx=z)
+            elif self._must_wait(panel):
+                self._waiting[panel.idx] = (panel, slots)
+                self._widget.set_panel_waiting(panel.idx, panel.key)
             else:
                 self._widget.set_panel_empty(panel.idx)
         study_log.log("layout", preset=name, panels=self._widget.panel_assignments())
         return filled, total
+
+    def _must_wait(self, panel: PanelAssignment) -> bool:
+        """Its series, or the series its slice is matched to, is still loading."""
+        return panel.key in self._loading_keys or any(k in self._loading_keys for k in panel.match_keys)
+
+    def _fill_waiting_panels(self):
+        for idx, (panel, slots) in list(self._waiting.items()):
+            if self._must_wait(panel):
+                continue
+            del self._waiting[idx]
+            if not self._widget.is_panel_empty(idx):  # the user put something else there meanwhile
+                continue
+            z = self._preset_slice(panel, slots)
+            if z is None:
+                self._widget.set_panel_empty(idx)
+            else:
+                self._widget.set_panel_series(idx, panel.key, axis=panel.axis, slice_idx=z)
 
     def _preset_slice(self, panel, slots: Counter) -> int | None:
         """Slice to show in a preset panel, or None to leave it empty. Slots go from apex to base."""
