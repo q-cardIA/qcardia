@@ -606,6 +606,7 @@ class DICOMModel:
         """Forget the loaded patient, so a new session cannot save or show its series."""
         self.series = {}
         self._series_dirs = {}
+        self._perfusion_dirs = {}
         self.subject_folder = None
         self.folder_path = None
         self.num_time_frames = 0
