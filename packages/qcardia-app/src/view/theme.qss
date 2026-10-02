@@ -430,8 +430,8 @@ QGraphicsView[role="imageViewport"]:focus { border: 1px solid @accent; }
 
 QLabel[role="viewerTitle"] {
 	color: @text_muted;
-	font-size: @fs_small;
-	font-weight: bold;
+	font-size: @fs_body;
+	font-weight: 600;
 }
 QLabel[role="viewerMeta"] {
 	color: @text_faint;
@@ -546,7 +546,7 @@ QPushButton[role="toolCallHeader"]:hover { color: @text; }
 
 QLabel[role="toolCallDetail"] {
 	color: @text_faint;
-	font-family: "Cascadia Mono", Consolas, monospace;
+	font-family: "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
 	font-size: @fs_small;
 }
 QLabel[role="thinkingDetail"] {
@@ -575,12 +575,12 @@ QWidget#welcomeRoot {
 
 QLabel[role="welcomeAppName"] {
 	color: @text;
-	font-size: @fs_display;
-	font-weight: bold;
+	font-size: @fs_hero;
+	font-weight: 600;
 }
 QLabel[role="welcomeHeadline"] {
 	color: @text_muted;
-	font-size: @fs_body;
+	font-size: @fs_large;
 }
 QLabel[role="welcomeDescription"] {
 	color: @text_faint;
@@ -599,7 +599,7 @@ QLabel[role="welcomeSectionTitle"] {
 	font-weight: bold;
 }
 
-/* Main action + "···" options button, styled as one group.
+/* Main action + chevron options button, styled as one group.
    [panelOpen="true"] is set in Python (WelcomeWidget._on_chevron_toggled). */
 QPushButton[role="welcomeMainAction"] {
 	min-height: 44px;  /* here, not in code: the general button min-height would win over code */
@@ -625,9 +625,6 @@ QPushButton[role="welcomeChevron"] {
 	border-left: 1px solid @bg1;
 	border-top-left-radius: 0px;
 	border-bottom-left-radius: 0px;
-	color: @on_accent;
-	font-size: @fs_large;
-	font-weight: bold;
 	padding: 0px @sp3;
 }
 QPushButton[role="welcomeChevron"]:hover,

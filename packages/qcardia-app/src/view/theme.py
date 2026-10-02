@@ -61,7 +61,8 @@ ACCENTS = {
 }
 DEFAULT_ACCENT = "Blue"
 
-FONT_SIZES = {"Small": 9, "Default": 10, "Large": 11.5, "Extra large": 13}  # body size in pt
+# Body size in px: points map to 1 px on macOS and 1.33 px elsewhere, so pt made the Mac text small.
+FONT_SIZES = {"Small": 12, "Default": 13, "Large": 15, "Extra large": 17}
 DEFAULT_FONT_SIZE = "Default"
 
 SPACING = {"sp1": 4, "sp2": 8, "sp3": 12, "sp4": 16, "sp5": 24}  # px
@@ -138,10 +139,11 @@ def _build_tokens() -> dict[str, str]:
         "accent_hover": accent.lighter(112).name(),
         "accent_soft": f"rgba({accent.red()}, {accent.green()}, {accent.blue()}, {soft.alpha()})",
         "on_accent": _on_accent(accent),
-        "fs_small": f"{body * 0.9:.1f}pt",
-        "fs_body": f"{body:.1f}pt",
-        "fs_large": f"{body * 1.3:.1f}pt",
-        "fs_display": f"{body * 2:.1f}pt",
+        "fs_small": f"{round(body * 0.9)}px",
+        "fs_body": f"{body}px",
+        "fs_large": f"{round(body * 1.3)}px",
+        "fs_display": f"{round(body * 2)}px",
+        "fs_hero": f"{round(body * 2.75)}px",
         "radius": f"{RADIUS}px",
         "radius_panel": f"{PANEL_RADIUS}px",
         "scrim": "rgba(16, 16, 18, 210)",           # loading overlay over images
@@ -213,6 +215,10 @@ def _draw_chevron_down(painter: QPainter):
     painter.drawPolyline([QPointF(9, 12.5), QPointF(16, 19.5), QPointF(23, 12.5)])
 
 
+def _draw_chevron_up(painter: QPainter):
+    painter.drawPolyline([QPointF(9, 19.5), QPointF(16, 12.5), QPointF(23, 19.5)])
+
+
 def _draw_chevron_right(painter: QPainter):
     painter.drawPolyline([QPointF(12.5, 9), QPointF(19.5, 16), QPointF(12.5, 23)])
 
@@ -223,7 +229,7 @@ def _draw_close(painter: QPainter):
 
 
 _LINE_ICONS = {"mic": _draw_mic, "arrow_up": _draw_arrow_up, "close": _draw_close,
-               "chevron_down": _draw_chevron_down, "chevron_right": _draw_chevron_right}
+               "chevron_down": _draw_chevron_down, "chevron_up": _draw_chevron_up, "chevron_right": _draw_chevron_right}
 
 
 def line_icon(kind: str, token: str) -> QIcon:
@@ -275,9 +281,9 @@ def _build_palette() -> QPalette:
 
 def _font_family() -> str | None:
     family = None
-    for ttf in sorted(_FONTS_DIR.glob("Inter*.ttf")):
+    for ttf in sorted(_FONTS_DIR.glob("IBMPlexSans-*.ttf")):
         fid = QFontDatabase.addApplicationFont(str(ttf))
-        if fid != -1 and family is None:
+        if fid != -1 and ttf.stem.endswith("-Regular"):
             names = QFontDatabase.applicationFontFamilies(fid)
             family = names[0] if names else None
     return family
@@ -304,7 +310,7 @@ def _refresh(app: QApplication) -> None:
     _cache.clear()
     app.setPalette(_build_palette())
     font = QFont(app.property("themeFontFamily"))
-    font.setPointSizeF(FONT_SIZES[font_size_name()])
+    font.setPixelSize(FONT_SIZES[font_size_name()])
     app.setFont(font)
     app.setStyleSheet(stylesheet())
     notifier.changed.emit()
