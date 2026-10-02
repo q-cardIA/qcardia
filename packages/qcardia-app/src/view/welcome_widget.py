@@ -83,6 +83,11 @@ class WelcomeWidget(QWidget):
     def _retint_main_action(self):
         self.left_panel_single_patient_pushbutton.setIcon(
             theme.tinted_icon(self._asset("patient-icon.png"), "on_accent"))
+        self._show_chevron()
+
+    def _show_chevron(self):
+        kind = "chevron_up" if self._chevron_btn.isChecked() else "chevron_down"
+        self._chevron_btn.setIcon(theme.line_icon(kind, "on_accent"))
 
     def _toggle_switch(self, default: bool, enabled: bool = True) -> QPushButton:
         """An ON/OFF pill button standing in for a checkbox — used in the
@@ -138,11 +143,12 @@ class WelcomeWidget(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
 
         logo_label = QLabel()
+        logo_size = theme.scaled(88)
         pix = QPixmap(self._asset("q-cardIA.png")).scaled(
-            64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            logo_size, logo_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         logo_label.setPixmap(pix)
-        logo_label.setFixedSize(64, 64)
+        logo_label.setFixedSize(logo_size, logo_size)
 
         title_col = QVBoxLayout()
         title_col.setSpacing(4)
@@ -212,11 +218,13 @@ class WelcomeWidget(QWidget):
             "Single patient mode", "patient-icon.png", "welcomeMainAction", "on_accent"
         )
         theme.notifier.changed.connect(self._retint_main_action)
-        self._chevron_btn = QPushButton("···")
+        self._chevron_btn = QPushButton()
         self._chevron_btn.setCheckable(True)
         self._chevron_btn.setChecked(False)
         self._chevron_btn.setToolTip("Assistant and preprocessing options")
         self._chevron_btn.setProperty("role", "welcomeChevron")
+        self._chevron_btn.setIconSize(QSize(18, 18))
+        self._show_chevron()
 
         button_row_layout.addWidget(self.left_panel_single_patient_pushbutton, 1)
         button_row_layout.addWidget(self._chevron_btn)
@@ -458,6 +466,7 @@ class WelcomeWidget(QWidget):
         if checked:
             self._place_options()
         self._options_panel.setVisible(checked)
+        self._show_chevron()
         for widget in (self.left_panel_single_patient_pushbutton, self._chevron_btn):
             theme.set_style_property(widget, "panelOpen", checked)
 
