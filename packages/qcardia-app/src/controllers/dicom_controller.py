@@ -6,6 +6,7 @@ from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
 from utils import study_log
 from utils.hanging_protocols import PRESETS, PanelAssignment
+from view.central_display_area_widget import CINE_TIME_AXIS
 from view.series_browser_widget import SeriesCardInfo
 
 
@@ -78,20 +79,16 @@ class DICOMController:
                 on_complete(False)
             return
 
-        max_frames = 0
         self._widget.clear_series()
         for key, info in result.loaded.items():
             self._register(key, info)
-            if info["is_temporal"]:
-                max_frames = max(max_frames, info["num_frames"])
 
         self._widget.refresh_panels()
         self._last_result = result
         self.view.series_browser_widget.populate(self._build_browser_cards(result))
 
-        if max_frames:
-            self.current_time_index = 0
-            self.view.update_time_slider_range(max_frames)
+        self.current_time_index = 0
+        self.view.update_time_slider_range(self._widget.n_frames(CINE_TIME_AXIS))
 
         if not result.loaded:
             self.view.show_warning(
@@ -273,8 +270,8 @@ class DICOMController:
         return geom.apex_to_base()[i] if geom is not None else i
 
     def set_time_frame(self, time_index):
-        self.current_time_index = time_index
         self._widget.set_time_index(time_index)
+        self.current_time_index = self._widget.current_time_index
 
     def save_segmentation(self):
         try:

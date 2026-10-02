@@ -69,6 +69,7 @@ class CustomQGraphicsView(QGraphicsView):
     action_requested = Signal(str, int)  # ("slice"|"frame", step), or (first|last|play|reset|link|contours, 0)
     window_dragged = Signal(float, float)  # screen pixels moved (dx, dy)
     view_changed = Signal(float, float, float)
+    focused = Signal()
 
     def __init__(self, view_type="axial", size=QSize(150, 150), parent=None):
         super(CustomQGraphicsView, self).__init__()
@@ -272,6 +273,10 @@ class CustomQGraphicsView(QGraphicsView):
         self.__emit_view()
 
     # ── Input ─────────────────────────────────────────────────────────────
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self.focused.emit()
 
     def mousePressEvent(self, event):
         self._press_pos = event.position()
