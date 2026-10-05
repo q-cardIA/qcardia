@@ -6,6 +6,9 @@ from dataclasses import dataclass, field, replace
 PERF_STRESS_KEY = "PERF_STRESS_SAX"
 PERF_REST_KEY = "PERF_REST_SAX"
 PERF_KEY = "PERF_SAX"  # a perfusion run that is neither stress nor rest
+# A flow acquisition loads as its velocity (the key) and its magnitude (key + suffix).
+FLOW_KEYS = {"aorta": "PC_AORTA", "pulmonary": "PC_MPA"}
+FLOW_MAGNITUDE_SUFFIX = "_MAG"
 
 
 @dataclass
@@ -111,9 +114,44 @@ PRESETS: dict[str, Preset] = {
         ],
         drop_empty_rows=True,
     ),
+    # Velocity on the left, magnitude on the right: aortic flow on top, pulmonary below, or the
+    # one of the two that was acquired.
+    "flow": Preset(
+        label="Flow",
+        grid=(2, 2),
+        panels=[
+            PanelAssignment(row * 2 + col, FLOW_KEYS[vessel] + suffix)
+            for row, vessel in enumerate(("aorta", "pulmonary"))
+            for col, suffix in enumerate(("", FLOW_MAGNITUDE_SUFFIX))
+        ],
+        triggers=[
+            "flow", "phase contrast", "flow quantification", "flow assessment", "flow measurement",
+            "cardiac output", "regurgitant fraction", "regurgitation", "valve flow", "Qp:Qs",
+            "phase contrast imaging", "flow CMR",
+        ],
+        drop_empty_rows=True,
+    ),
+    "flow_aortic": Preset(
+        label="Aortic Flow",
+        grid=(1, 2),
+        panels=[
+            PanelAssignment(0, FLOW_KEYS["aorta"]),
+            PanelAssignment(1, FLOW_KEYS["aorta"] + FLOW_MAGNITUDE_SUFFIX),
+        ],
+        triggers=["aortic flow", "aortic stenosis", "aortic regurgitation"],
+    ),
+    "flow_pulmonary": Preset(
+        label="Pulmonary Flow",
+        grid=(1, 2),
+        panels=[
+            PanelAssignment(0, FLOW_KEYS["pulmonary"]),
+            PanelAssignment(1, FLOW_KEYS["pulmonary"] + FLOW_MAGNITUDE_SUFFIX),
+        ],
+        triggers=["pulmonary flow", "pulmonary artery flow", "pulmonary regurgitation", "pulmonary hypertension"],
+    ),
 }
 
-PRESET_BUTTON_ORDER = ["functional", "functional_complex", "viability", "perfusion"]
+PRESET_BUTTON_ORDER = ["functional", "functional_complex", "viability", "perfusion", "flow", "flow_aortic", "flow_pulmonary"]
 
 
 def preset_label(name: str) -> str:
@@ -136,5 +174,11 @@ def available_presets(loaded_series: set[str]) -> list[str]:
     # matching the tool's own stated precondition.
     if any(k in loaded_series for k in _PERFUSION_KEYS):
         names.append("perfusion")
+    if any(k in loaded_series for k in FLOW_KEYS.values()):
+        names.append("flow")
+    if FLOW_KEYS["aorta"] in loaded_series:
+        names.append("flow_aortic")
+    if FLOW_KEYS["pulmonary"] in loaded_series:
+        names.append("flow_pulmonary")
     return names
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -17,12 +17,14 @@ from qcardia.cardisort import (
     load_series_datasets,
 )
 from qcardia.disambiguate import (
+    FLOW_SEQUENCE_NAME,
     PERFUSION_SEQUENCE_NAMES,
     disambiguate_duplicates,
+    select_flow_series,
     select_perfusion_series,
     summarize_sequence_dir,
 )
-from qcardia.series import BaseSeries, CineSeries, LGESeries, PerfusionSeries
+from qcardia.series import BaseSeries, CineSeries, FlowSeries, LGESeries, PerfusionSeries
 
 from model.subject_labels import (
     SeriesLabel,
@@ -31,16 +33,17 @@ from model.subject_labels import (
     save_labels,
     update_primary,
 )
-from utils.hanging_protocols import PERF_REST_KEY, PERF_STRESS_KEY
+from utils.hanging_protocols import FLOW_KEYS, FLOW_MAGNITUDE_SUFFIX, PERF_REST_KEY, PERF_STRESS_KEY
 from utils.windowing import dicom_window, percentile_window, window_to_uint8
 from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
 CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
 # Series that are read first load first; the perfusion runs are the largest.
-_LOAD_ORDER = ("CINE_SAX", "CINE", "LGE_SAX", "LGE", "PERF_STRESS_SAX", "PERF")
+_LOAD_ORDER = ("CINE_SAX", "CINE", "LGE_SAX", "LGE", "PC", "PERF_STRESS_SAX", "PERF")
 PERFUSION_RUN_KEYS = {"stress": PERF_STRESS_KEY, "rest": PERF_REST_KEY}
 PERFUSION_CACHE_KEY = "PERF"
+FLOW_CACHE_KEY = "PC"
 
 
 @dataclass
@@ -114,6 +117,7 @@ class DICOMModel:
         self.subject_folder: Path | None = None
         self._series_dirs: dict[str, Path] = {}
         self._perfusion_dirs: dict[str, list[Path]] = {}
+        self._flow_dirs: dict[str, list[Path]] = {}
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -483,6 +487,9 @@ class DICOMModel:
         perfusion_entry = self._assign_perfusion_keys(descriptors, primary_by_key)
         if perfusion_entry is not None:
             resolved[PERFUSION_CACHE_KEY] = perfusion_entry
+        flow_entry = self._assign_flow_keys(descriptors, primary_by_key)
+        if flow_entry is not None:
+            resolved[FLOW_CACHE_KEY] = flow_entry
 
         dirs_by_key: dict[str, list[SequenceDescriptor]] = defaultdict(list)
         for d in descriptors:
@@ -495,6 +502,11 @@ class DICOMModel:
                 classified[key] = dirs[0]
                 for d in group:
                     d.is_primary = True
+                continue
+            if key in self._flow_dirs:  # the series of the acquisition load together, as one
+                classified[key] = dirs[0]
+                for d in group:
+                    d.is_primary = d.path == dirs[0]
                 continue
             primary, confident = self._resolve_primary_dir(key, dirs, primary_by_key)
             classified[key] = primary
@@ -525,6 +537,31 @@ class DICOMModel:
         for d in perfusion:
             if d.key is not None:
                 self._perfusion_dirs[d.key].append(d.path)
+        return entry
+
+    def _assign_flow_keys(self, descriptors: list[SequenceDescriptor], primary_by_key: dict) -> dict | None:
+        """Gives the series of each vessel's flow acquisition its key. As for perfusion, the keys
+        are cached with the series and hold while the subject's series are the same."""
+        has_flow = any(d.sequence_name == FLOW_SEQUENCE_NAME for d in descriptors)
+        entry = {"candidates": sorted(d.path.name for d in descriptors)} if has_flow else None
+        if primary_by_key.get(FLOW_CACHE_KEY) != entry:
+            for d in descriptors:
+                if d.key is not None and d.key.startswith("PC_"):
+                    d.key = None
+            try:
+                selected = select_flow_series({d.path: (d.sequence_name, d.plane_name) for d in descriptors})
+            except Exception as e:
+                logging.warning(f"Could not find the flow acquisitions: {e}")
+                selected, entry = {}, None  # a failure must not be cached, or it can never be revisited
+            key_by_dir = {p: FLOW_KEYS[vessel] for vessel, dirs in selected.items() for p in dirs}
+            for d in descriptors:
+                if d.path in key_by_dir:
+                    d.key = key_by_dir[d.path]
+
+        self._flow_dirs = defaultdict(list)
+        for d in descriptors:
+            if d.key is not None and d.key.startswith("PC_"):
+                self._flow_dirs[d.key].append(d.path)
         return entry
 
     def classify_patient_folder(self, folder_path) -> dict[str, Path]:
@@ -594,6 +631,14 @@ class DICOMModel:
         elif key.startswith("PERF_"):
             volume, num_frames = self.load_perfusion_series(self._perfusion_dirs.get(key, [seq_dir]), key)
             info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
+        elif key.startswith("PC_") and key.endswith(FLOW_MAGNITUDE_SUFFIX):  # loads after its velocity
+            self.series[key] = self.series[key.removesuffix(FLOW_MAGNITUDE_SUFFIX)]
+            volume, num_frames = self._process_temporal_volumes(key)
+            info = {"volume": volume, "is_temporal": True, "num_frames": num_frames}
+        elif key.startswith("PC_"):
+            flow = self.series[key] = FlowSeries(self._flow_dirs.get(key, [seq_dir]))
+            volume = flow.get_velocity_array()[:, np.newaxis]  # (T, 1, H, W), as a cine
+            info = {"volume": volume, "is_temporal": True, "num_frames": volume.shape[0]}
         else:
             volume, _slice_positions = self.load_lge_series(seq_dir, key)
             info = {"volume": volume, "is_temporal": False, "num_frames": None}
@@ -602,7 +647,10 @@ class DICOMModel:
         return info
 
     def _default_window(self, key: str, volume: np.ndarray) -> tuple[float, float]:
-        """(center, width): the DICOM window for CINE if valid, else the 1st-99th percentile range."""
+        """(center, width): the DICOM window for CINE if valid, -VENC..+VENC for a flow velocity,
+        else the 1st-99th percentile range."""
+        if key.startswith("PC_") and not key.endswith(FLOW_MAGNITUDE_SUFFIX):
+            return 0.0, 2 * self.series[key].venc
         window = None
         if key.startswith("CINE_"):
             window = dicom_window(self.series[key].slice_data["slice01"]["meta_data"][0])
@@ -614,6 +662,7 @@ class DICOMModel:
         self.series = {}
         self._series_dirs = {}
         self._perfusion_dirs = {}
+        self._flow_dirs = {}
         self.subject_folder = None
         self.folder_path = None
         self.num_time_frames = 0
@@ -634,6 +683,12 @@ class DICOMModel:
                 self._cache_labels(folder_path, descriptors, primary_by_key)
             elif any(cached.primary_by_key.get(k) != v for k, v in primary_by_key.items()):
                 self._cache_labels(folder_path, descriptors, {**cached.primary_by_key, **primary_by_key})
+
+        # A flow acquisition shows as two series: its velocity, and its magnitude.
+        magnitudes = [replace(d, key=d.key + FLOW_MAGNITUDE_SUFFIX) for d in descriptors
+                      if d.is_primary and d.key in self._flow_dirs]
+        classified.update({d.key: d.path for d in magnitudes})
+        descriptors = descriptors + magnitudes
 
         if report:
             report(("classified", PatientLoadResult(loaded={}, entries=descriptors)))

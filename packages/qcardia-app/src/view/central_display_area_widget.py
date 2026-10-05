@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from utils import study_log
+from utils.hanging_protocols import FLOW_MAGNITUDE_SUFFIX
 from utils.windowing import window_to_uint8
 from view.custom_graphics_view import CustomQGraphicsView
 from view.loading_overlay import LoadingOverlay
@@ -410,7 +411,9 @@ class CentralDisplayAreaWidget(QWidget):
 
     @staticmethod
     def time_axis(series_key: str) -> str:
-        return series_key if series_key.startswith("PERF_") else CINE_TIME_AXIS
+        if series_key.startswith(("PERF_", "PC_")):
+            return series_key.removesuffix(FLOW_MAGNITUDE_SUFFIX)
+        return CINE_TIME_AXIS
 
     def n_frames(self, time_axis: str) -> int:
         return max((vol.shape[0] for key, vol in self._volumes.items()
@@ -637,8 +640,11 @@ class CentralDisplayAreaWidget(QWidget):
             self._panels[i].viewer.set_crosshair_from_volume_indices(row, col)
 
     def _group(self, panel_idx: int) -> tuple[str, str] | None:
+        """Panels of one plane link zoom and pan, e.g. CINE_SAX with LGE_SAX, PC_AORTA with PC_AORTA_MAG."""
         key = self._panel_series_key[panel_idx]
-        return None if key is None else (key.rsplit("_", 1)[-1], self._panel_axis[panel_idx])
+        if key is None:
+            return None
+        return key.removesuffix(FLOW_MAGNITUDE_SUFFIX).rsplit("_", 1)[-1], self._panel_axis[panel_idx]
 
     def _linked_with(self, source: int) -> list[int]:
         group = self._group(source)

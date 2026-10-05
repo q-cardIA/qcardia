@@ -259,9 +259,10 @@ class SeriesBrowserWidget(QFrame):
         self._fit_cards()
 
     def update_card(self, path: Path, thumbnail: np.ndarray | None = None, series_key: str | None = None):
-        """Fill in a card while the patient loads: its thumbnail, and its series once loaded."""
+        """Fill in a card while the patient loads: its thumbnail, and its series once loaded.
+        With series_key, only that series' card: a flow velocity and magnitude share a folder."""
         for card in self._cards:
-            if card.info.path == path:
+            if card.info.path == path and series_key in (None, card.info.label):
                 if series_key is not None:
                     card.set_loaded(series_key)
                 card.set_thumbnail(thumbnail)
