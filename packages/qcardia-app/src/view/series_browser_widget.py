@@ -196,6 +196,8 @@ class SeriesBrowserWidget(QFrame):
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
 
+        self._load_bar = theme.thin_loading_bar()
+        outer.addWidget(self._load_bar)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -265,8 +267,16 @@ class SeriesBrowserWidget(QFrame):
                 card.set_thumbnail(thumbnail)
                 card.update()
 
+    def set_load_progress(self, loaded: int, total: int):
+        """The bar above the cards: how many of the patient's series have loaded."""
+        self._load_bar.setRange(0, total)
+        self._load_bar.setValue(loaded)
+        self._load_bar.setToolTip(f"{loaded} of {total} series loaded")
+        self._load_bar.setVisible(loaded < total)
+
     def stop_loading(self):
         """Cards whose series failed to load stop saying they load."""
+        self._load_bar.hide()
         for card in self._cards:
             if card.info.loading:
                 card.info.loading = False

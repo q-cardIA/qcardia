@@ -446,8 +446,8 @@ def set_style_property(widget, name: str, value) -> None:
 
 
 def thin_loading_bar() -> QProgressBar:
-    """Hairline activity strip for under a control. Indeterminate: Ollama reports no
-    load progress, so a percentage would be invented."""
+    """Hairline activity strip for under a control. Indeterminate until given a range:
+    Ollama reports no load progress, so a percentage would be invented."""
     bar = QProgressBar()
     bar.setProperty("role", "thinLoadingBar")
     bar.setRange(0, 0)

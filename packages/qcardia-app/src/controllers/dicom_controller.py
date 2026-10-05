@@ -20,6 +20,7 @@ class DICOMController:
         self._load_worker = None
         self._cine_frames = 0
         self._loading_keys: set[str] = set()  # series of the patient that is loading, not loaded yet
+        self._load_total = 0  # series the load started with, for its progress
         self._on_ready = None  # load_patient's callback, until it has been called
         # Panels that show their series once it has loaded: panel -> (assignment, its preset's slots).
         self._waiting: dict[int, tuple[PanelAssignment, Counter]] = {}
@@ -126,6 +127,7 @@ class DICOMController:
         self.view.hide_loading()
         self._last_result = result
         self._loading_keys = {e.key for e in result.entries if e.key is not None and e.is_primary}
+        self._load_total = len(self._loading_keys)
         # The layout stays: each panel shows its series again, of this patient, once that has loaded.
         self._waiting = {a["idx"]: (PanelAssignment(a["idx"], a["series_key"], a["axis"]), Counter())
                          for a in self._widget.panel_assignments() if a["series_key"]}
@@ -133,6 +135,7 @@ class DICOMController:
         for idx, (panel, _) in self._waiting.items():
             self._widget.set_panel_waiting(idx, panel.key)
         self.view.series_browser_widget.populate(self._build_browser_cards(result, loading=True))
+        self.view.series_browser_widget.set_load_progress(0, self._load_total)
         self.view.sidebar.show_patient(self._current_subject_folder.name, 0)
         self.current_time_index = self._cine_frames = 0
         self.view.update_time_slider_range(0)
@@ -146,6 +149,7 @@ class DICOMController:
         if key in self._seg_queue:
             self._widget.show_segmentation_loading(key, "Queued…")
         self._start_next_segmentation()
+        self.view.series_browser_widget.set_load_progress(self._load_total - len(self._loading_keys), self._load_total)
         path = next(e.path for e in self._last_result.entries if e.key == key and e.is_primary)
         self.view.series_browser_widget.update_card(path, self._widget.get_thumbnail(key), key)
         self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
