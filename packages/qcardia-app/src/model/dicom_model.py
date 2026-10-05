@@ -623,6 +623,7 @@ class DICOMModel:
         """report, if given, gets ("classified", result) once the series are known, then
         ("series", key, info) as each loads and ("thumbnail", path, image) for the series that do not."""
         folder_path = Path(folder_path)
+        self.clear_patient()  # else the last patient's series stay, e.g. in what the assistant is told is loaded
         self.subject_folder = folder_path
         descriptors, from_cache = self._describe_patient_folder(folder_path)
         classified, primary_by_key = self._group_and_resolve(descriptors, folder_path)
