@@ -93,6 +93,13 @@ class FakeDicomController:
     def apply_preset(self, name: str):
         return self._real.apply_preset(name)
 
+    @property
+    def loading_series(self) -> set[str]:
+        return self._real.loading_series
+
+    def panel_assignments(self) -> list[dict]:
+        return self._real.panel_assignments()
+
 
 def _build_real_dicom_controller(model: FakeModel, view: FakeView):
     from controllers.dicom_controller import DICOMController  # lazy: src/ isn't on sys.path yet at import time
@@ -100,4 +107,6 @@ def _build_real_dicom_controller(model: FakeModel, view: FakeView):
     dc = object.__new__(DICOMController)
     dc.model = model
     dc.view = view
+    dc._loading_keys = set()  # the patient has loaded
+    dc._waiting = {}
     return dc

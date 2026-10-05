@@ -131,12 +131,14 @@ class ChatController:
         time_frame = None
         if self.model.num_time_frames:
             time_frame = (self.dicom_controller.current_time_index, self.model.num_time_frames)
+        loading = self.dicom_controller.loading_series
         return build_state_block(
             subject=self.model.folder_path.name if self.model.folder_path else "none",
-            loaded_series=sorted(self.model.series),
+            loaded_series=sorted(set(self.model.series) - loading),
+            loading_series=sorted(loading),
             time_frame=time_frame,
             grid=widget.grid_size,
-            panels=widget.panel_assignments(),
+            panels=self.dicom_controller.panel_assignments(),
         )
 
     def _messages_for_request(self) -> list[dict]:
@@ -148,7 +150,7 @@ class ChatController:
         return build_messages(history)
 
     def _build_tools(self) -> list[dict]:
-        ctx = ToolContext.from_app(self.model, self.view)
+        ctx = ToolContext.from_app(self.model, self.view, self.dicom_controller.loading_series)
         return build_tools(ctx)
 
     def send_message(self, user_text: str):
@@ -205,7 +207,7 @@ class ChatController:
         self.view.chat_widget.set_enabled(True)
 
     def _on_tool_calls(self, calls: list):
-        # load_subject loads in the background; remaining calls wait for it.
+        # load_subject loads in the background; remaining calls wait until its series are known.
         self._warm_model_in_background()
         self._execute_tool_sequence(list(calls))
 
@@ -234,7 +236,7 @@ class ChatController:
         with study_log.acting("assistant"):
             if name == "load_subject":
                 self._execute_load_subject(arguments, remaining, bubble)
-                return  # continues once the background load actually finishes
+                return  # continues once the patient's series are known; they may still load
             result = self._execute_tool(name, arguments)
         bubble.set_result(result)
         self._append_tool_history(name, arguments, result)
@@ -257,7 +259,7 @@ class ChatController:
             return
         path = data_dir() / name
 
-        def _on_complete(success: bool):
+        def _on_ready(success: bool):
             result = (
                 f"Loaded subject {name} from {path}."
                 if success
@@ -265,7 +267,7 @@ class ChatController:
             )
             self._finish_load_subject(result, arguments, remaining, bubble)
 
-        self.dicom_controller.load_patient(str(path), on_complete=_on_complete)
+        self.dicom_controller.load_patient(str(path), on_ready=_on_ready)
 
     def _finish_load_subject(self, result: str, arguments: dict, remaining: list, bubble):
         bubble.set_result(result)
@@ -285,10 +287,13 @@ class ChatController:
                         f"Unknown modality '{modality}' — expected "
                         f"{', '.join(repr(m) for m in self.model.cine_modalities)} or 'LGE_SAX'."
                     )
-                if modality not in self.model.series:
+                loading = modality in self.dicom_controller.loading_series
+                if modality not in self.model.series and not loading:
                     return f"'{modality}' is not loaded for this subject."
                 if not self.dicom_controller.run_segmentation(modality):
                     return f"{modality} segmentation is already running or queued."
+                if loading:
+                    return f"Queued {modality} segmentation; it starts once {modality} has loaded."
                 return f"Requested {modality} segmentation (check the app for the result or any errors)."
 
             if name == "apply_preset":
@@ -313,6 +318,9 @@ class ChatController:
                 axis = str(arguments.get("axis", "transverse"))
                 if not (0 <= panel_idx < widget.n_panels):
                     return f"panel_idx out of range (grid has {widget.n_panels} panels)."
+                if series_key in self.dicom_controller.loading_series:
+                    self.dicom_controller.show_series_when_loaded(panel_idx, series_key, axis)
+                    return f"{series_key} is still loading; panel {panel_idx} shows it ({axis}) once loaded."
                 if not widget.is_series_registered(series_key):
                     return f"Series '{series_key}' is not loaded."
                 widget.set_panel_series(panel_idx, series_key, axis=axis)

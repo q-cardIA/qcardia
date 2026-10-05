@@ -20,6 +20,7 @@ class DICOMController:
         self._load_worker = None
         self._cine_frames = 0
         self._loading_keys: set[str] = set()  # series of the patient that is loading, not loaded yet
+        self._on_ready = None  # load_patient's callback, until it has been called
         # Panels that show their series once it has loaded: panel -> (assignment, its preset's slots).
         self._waiting: dict[int, tuple[PanelAssignment, Counter]] = {}
         # Runs one at a time, first entry is running: several at once doubled peak memory (#11).
@@ -38,6 +39,20 @@ class DICOMController:
     def is_busy(self) -> bool:
         return self._load_worker is not None or self._seg_worker is not None or bool(self._seg_queue)
 
+    @property
+    def loading_series(self) -> set[str]:
+        """Series of the current patient that are still loading."""
+        return set(self._loading_keys)
+
+    def panel_assignments(self) -> list[dict]:
+        """The widget's panels, where a panel that waits for its series has that series, with loading."""
+        panels = self._widget.panel_assignments()
+        for p in panels:
+            if p["series_key"] is None and p["idx"] in self._waiting:
+                panel = self._waiting[p["idx"]][0]
+                p.update(series_key=panel.key, axis=panel.axis, loading=True)
+        return panels
+
     def reset_session(self):
         """Back at the start screen: nothing of the last patient may reach the next session."""
         self._last_result = None
@@ -49,23 +64,23 @@ class DICOMController:
     def _widget(self):
         return self.view.display_area_widget
 
-    def load_patient(self, folder_path, on_complete=None):
-        """Classify + load a patient folder in the background. `on_complete(success)`
-        fires once loading has actually finished (or been rejected as busy)."""
+    def load_patient(self, folder_path, on_ready=None):
+        """Classify + load a patient folder in the background. `on_ready(success)` fires once
+        the patient can be used: its series are known, though they may still load. It also
+        fires when the load fails or is rejected as busy."""
         if self._load_worker is not None and self._load_worker.isRunning():
-            if on_complete:
-                on_complete(False)
+            if on_ready:
+                on_ready(False)
             return
 
         self._current_subject_folder = Path(folder_path)
+        self._on_ready = on_ready
         self.view.show_loading(f"Loading {Path(folder_path).name}…")
         self._load_worker = CallableWorker(self.model.load_patient, folder_path, report=True)
         self._load_worker.progress.connect(self._on_load_progress)
         span = study_log.Span("load_subject", subject=Path(folder_path).name)
-        self._load_worker.finished_ok.connect(
-            lambda result: self._on_patient_loaded(result, on_complete)
-        )
-        self._load_worker.error.connect(lambda exc: self._on_patient_load_error(exc, on_complete))
+        self._load_worker.finished_ok.connect(self._on_patient_loaded)
+        self._load_worker.error.connect(self._on_patient_load_error)
         self._load_worker.finished_ok.connect(lambda result: span.end(series=sorted(result.loaded)))
         self._load_worker.error.connect(lambda exc: span.end(error=str(exc)))
         # `finished`, not `finished_ok`/`error`: those fire before the thread
@@ -76,15 +91,24 @@ class DICOMController:
     def _clear_load_worker(self):
         self._load_worker = None
 
-    def _on_patient_load_error(self, exc, on_complete=None):
-        self.view.hide_loading()
+    def _ready(self, success: bool):
+        """Calls load_patient's on_ready, once."""
+        on_ready, self._on_ready = self._on_ready, None
+        if on_ready:
+            on_ready(success)
+
+    def _end_loading(self):
         self._loading_keys.clear()
         self._fill_waiting_panels()
+        self._start_next_segmentation()
         self.view.series_browser_widget.stop_loading()
+
+    def _on_patient_load_error(self, exc):
+        self.view.hide_loading()
+        self._end_loading()
         logging.error(f"Failed to load patient: {exc}")
         self.view.show_error("Load Error", f"Failed to load patient folder:\n{exc}")
-        if on_complete:
-            on_complete(False)
+        self._ready(False)
 
     def _on_load_progress(self, event):
         kind, *args = event
@@ -112,12 +136,16 @@ class DICOMController:
         self.view.sidebar.show_patient(self._current_subject_folder.name, 0)
         self.current_time_index = self._cine_frames = 0
         self.view.update_time_slider_range(0)
+        self._ready(True)
 
     def _add_loaded_series(self, key: str, info: dict):
         self._register(key, info)
         self._last_result.loaded[key] = info
         self._loading_keys.discard(key)
         self._fill_waiting_panels()
+        if key in self._seg_queue:
+            self._widget.show_segmentation_loading(key, "Queued…")
+        self._start_next_segmentation()
         path = next(e.path for e in self._last_result.entries if e.key == key and e.is_primary)
         self.view.series_browser_widget.update_card(path, self._widget.get_thumbnail(key), key)
         self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
@@ -126,20 +154,17 @@ class DICOMController:
             self._cine_frames = cine_frames
             self.view.update_time_slider_range(cine_frames)
 
-    def _on_patient_loaded(self, result, on_complete=None):
+    def _on_patient_loaded(self, result):
         self.view.hide_loading()
 
         if not result.entries:
             self.view.show_warning(
                 "No Series Found", "No sequence directories found in this folder."
             )
-            if on_complete:
-                on_complete(False)
+            self._ready(False)
             return
 
-        self._loading_keys.clear()
-        self._fill_waiting_panels()
-        self.view.series_browser_widget.stop_loading()
+        self._end_loading()
 
         if not result.loaded:
             self.view.show_warning(
@@ -147,9 +172,7 @@ class DICOMController:
                 "Cardisort did not recognize any loadable series in this folder; "
                 "showing all detected sequences in the browser.",
             )
-
-        if on_complete:
-            on_complete(True)
+        self._ready(True)
 
     def reassign_series(self, card_info: SeriesCardInfo, new_key: str):
         if self._last_result is None:
@@ -232,15 +255,19 @@ class DICOMController:
         return cards
 
     def run_segmentation(self, series_key: str = "CINE_SAX") -> bool:
-        """Queues segmentation for series_key. Returns False if it is already queued or running."""
+        """Queues segmentation for series_key; a series that is still loading is segmented
+        once it has loaded. Returns False if it is already queued or running."""
         if series_key in self._seg_queue:
             return False
         self._seg_queue.append(series_key)
         self._seg_spans[series_key] = study_log.Span("segmentation", series=series_key, ahead=len(self._seg_queue) - 1)
         self._widget.show_segmentation_loading(series_key, "Queued…")
-        if len(self._seg_queue) == 1:
-            self._start_segmentation()
+        self._start_next_segmentation()
         return True
+
+    def _start_next_segmentation(self):
+        if self._seg_worker is None and self._seg_queue and self._seg_queue[0] not in self._loading_keys:
+            self._start_segmentation()
 
     def _start_segmentation(self):
         key = self._seg_queue[0]
@@ -258,8 +285,7 @@ class DICOMController:
     def _on_segmentation_finished(self):
         self._seg_worker = None
         self._seg_queue.pop(0)
-        if self._seg_queue:
-            self._start_segmentation()
+        self._start_next_segmentation()
 
     def _on_segmentation_done(self, series_key: str, result):
         self._widget.hide_segmentation_loading(series_key)
@@ -308,6 +334,11 @@ class DICOMController:
                 self._widget.set_panel_empty(panel.idx)
         study_log.log("layout", preset=name, panels=self._widget.panel_assignments())
         return filled, total
+
+    def show_series_when_loaded(self, panel_idx: int, series_key: str, axis: str = "transverse"):
+        """For a series that is still loading: the panel shows it once it has loaded."""
+        self._waiting[panel_idx] = (PanelAssignment(panel_idx, series_key, axis), Counter())
+        self._widget.set_panel_waiting(panel_idx, series_key)
 
     def _must_wait(self, panel: PanelAssignment) -> bool:
         """Its series, or the series its slice is matched to, is still loading."""

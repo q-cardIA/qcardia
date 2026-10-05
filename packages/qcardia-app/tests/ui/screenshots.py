@@ -93,13 +93,16 @@ def main():
         window().welcome_widget.left_panel_single_patient_pushbutton.click()
 
     def load():
-        state["controller"].load_patient(data_dir() / args.subject, on_complete=on_loaded)
+        state["controller"].load_patient(data_dir() / args.subject, on_ready=on_loaded)
         return False
 
     def on_loaded(success: bool):
         if not success:
             print(f"could not load {args.subject}")
             finish()
+            return
+        if state["controller"].loading_series:  # the shots need all series
+            QTimer.singleShot(100, lambda: on_loaded(True))
             return
         next_step()
 

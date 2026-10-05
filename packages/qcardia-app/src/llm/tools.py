@@ -109,7 +109,7 @@ TOOL_SPECS = [
             "name": "display_series",
             "description": (
                 "Show one loaded series in one panel. series_key must appear "
-                "exactly in 'Loaded series' in the state block."
+                "exactly in 'Loaded series' or 'Still loading' in the state block."
             ),
             "parameters": {
                 "type": "object",
@@ -121,7 +121,7 @@ TOOL_SPECS = [
                     "series_key": {
                         "type": "string",
                         "description": (
-                            "Exact key from 'Loaded series', e.g. CINE_SAX or "
+                            "Exact key from 'Loaded series' or 'Still loading', e.g. CINE_SAX or "
                             "LGE_4CH. Must match a listed key character for "
                             "character — never invent one."
                         ),
@@ -180,41 +180,44 @@ class ToolContext:
     n_panels: int
     num_time_frames: int
     has_segmentation: bool
+    loading_series: frozenset[str] = frozenset()  # usable already: the tools wait for them
 
     @classmethod
-    def from_app(cls, model, view) -> "ToolContext":
+    def from_app(cls, model, view, loading_series=frozenset()) -> "ToolContext":
         return cls(
             series=dict(model.series),
             cine_modalities=model.cine_modalities,
             n_panels=view.display_area_widget.n_panels,
             num_time_frames=model.num_time_frames,
             has_segmentation=hasattr(model.series.get("CINE_SAX"), "_segmentation_prediction"),
+            loading_series=frozenset(loading_series),
         )
 
 
 def build_tools(ctx: ToolContext) -> list[dict]:
     tools = []
+    usable = [*ctx.series, *sorted(ctx.loading_series - set(ctx.series))]
     for spec in TOOL_SPECS:
         name = spec["function"]["name"]
 
         if name == "run_segmentation":
-            modalities = [k for k in (*ctx.cine_modalities, "LGE_SAX") if k in ctx.series]
+            modalities = [k for k in (*ctx.cine_modalities, "LGE_SAX") if k in usable]
             if not modalities:
                 continue
             tools.append(_narrowed(spec, "modality", modalities))
             continue
 
         if name == "apply_preset":
-            names = available_presets(set(ctx.series))
+            names = available_presets(set(usable))
             if not names:
                 continue
             tools.append(_narrowed(spec, "preset", names))
             continue
 
         if name == "display_series":
-            if not ctx.series:
+            if not usable:
                 continue
-            spec = _narrowed(spec, "series_key", list(ctx.series))
+            spec = _narrowed(spec, "series_key", usable)
             props = spec["function"]["parameters"]["properties"]
             props["panel_idx"]["minimum"] = 0
             props["panel_idx"]["maximum"] = ctx.n_panels - 1

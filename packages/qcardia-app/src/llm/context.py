@@ -10,6 +10,7 @@ def build_state_block(
     time_frame: tuple[int, int] | None,
     grid: tuple[int, int],
     panels: list[dict],
+    loading_series: list[str] = (),
 ) -> str:
     if time_frame:
         current, total = time_frame
@@ -24,12 +25,18 @@ def build_state_block(
             panel_lines.append(f"  {panel['idx']}: empty")
         else:
             seg_note = "  seg=True" if panel["has_segmentation"] else ""
-            panel_lines.append(f"  {panel['idx']}: {panel['series_key']} / {panel['axis']}{seg_note}")
+            loading_note = "  (loading)" if panel.get("loading") else ""
+            panel_lines.append(f"  {panel['idx']}: {panel['series_key']} / {panel['axis']}{seg_note}{loading_note}")
 
+    loading_line = ""
+    if loading_series:
+        loading_line = (f"Still loading: {', '.join(loading_series)} (use them like loaded series: "
+                        "panels and segmentation wait until they have loaded)\n")
     return (
         "STATE:\n"
         f"Subject: {subject}\n"
         f"Loaded series: {', '.join(loaded_series) if loaded_series else 'none'}\n"
+        f"{loading_line}"
         f"{time_line}\n"
         f"Grid: {rows}x{cols}\n"
         "Panels:\n" + ("\n".join(panel_lines) if panel_lines else "  none")
