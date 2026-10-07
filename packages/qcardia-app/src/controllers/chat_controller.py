@@ -458,7 +458,9 @@ class ChatController:
                     return f"panel_idx out of range (grid has {widget.n_panels} panels)."
                 if series_key in self.dicom_controller.loading_series:
                     self.dicom_controller.show_series_when_loaded(panel_idx, series_key, axis)
-                    return f"{series_key} is still loading; panel {panel_idx} shows it ({axis}) once loaded."
+                    note = (" at its middle slice. Not done: the slice asked for; set it once loaded"
+                            if arguments.get("slice") is not None or arguments.get("match_panel") is not None else "")
+                    return f"{series_key} is still loading; panel {panel_idx} shows it ({axis}) once loaded{note}."
                 if not widget.is_series_registered(series_key):
                     return f"Series '{series_key}' is not loaded."
                 n = widget.n_slices(series_key, axis)
@@ -468,8 +470,8 @@ class ChatController:
                     if not 0 <= other < widget.n_panels:
                         return f"match_panel out of range (grid has {widget.n_panels} panels)."
                     source = widget.panel_assignments()[other]
-                    if source["series_key"] is None or "slice" not in source:
-                        return f"Panel {other} shows no stack to match."
+                    if source["series_key"] is None or "slice" not in source or source["axis"] != "transverse":
+                        return f"Panel {other} shows no transverse stack to match."
                     z = widget.matching_slice(source["series_key"], source["slice"], series_key)
                     if z is None or axis != "transverse":
                         return f"{series_key} is not parallel to {source['series_key']}, so no slice matches."
@@ -562,12 +564,13 @@ class ChatController:
             if name == "zoom":
                 widget = self.view.display_area_widget
                 mode = str(arguments["mode"])
-                if mode == "percent" and arguments.get("percent") is None:
-                    return "mode 'percent' needs a percent value."
+                percent = float(arguments.get("percent") or 0) if mode == "percent" else 100.0
+                if not 50 <= percent <= 1000:  # the range of the mouse zoom
+                    return "mode 'percent' needs a percent from 50 to 1000."
                 panels = _panel_list(arguments, widget.n_panels)
                 if isinstance(panels, str):
                     return panels
-                done = widget.zoom_panels(panels, mode, float(arguments.get("percent") or 100), self.model.analysis)
+                done = widget.zoom_panels(panels, mode, percent, self.model.analysis)
                 assignments = widget.panel_assignments()
                 skipped = [i for i in panels if i not in done and assignments[i]["series_key"]]
                 result = f"Zoomed {_panels_text(done) if done else 'no panel'} ({mode})."
