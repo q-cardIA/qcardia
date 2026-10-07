@@ -455,6 +455,7 @@ class ChatWidget(QFrame):
         self._busy_before_switch = False
         self._mic_worker: MicrophoneWorker | None = None
         self._ptt_held = False
+        self._send_after_voice = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -757,6 +758,13 @@ class ChatWidget(QFrame):
     def _on_send_clicked(self):
         if self._busy:
             return  # keep typing while a request is in flight, just can't send yet
+        if self._mic_worker is not None:
+            # The worker still writes the whole transcript into the input, so sending now
+            # would leave it to reappear in front of the next message.
+            self._send_after_voice = True
+            self._ptt_held = False
+            self._on_mic_release()
+            return
         text = self._input.text().strip()
         if not text:
             return
@@ -861,9 +869,13 @@ class ChatWidget(QFrame):
         self._mic_worker = None
         self._input.end_preview(text)
         self._input.setFocus()
+        if self._send_after_voice:
+            self._send_after_voice = False
+            self._on_send_clicked()
 
     def _on_mic_error(self, message: str):
         self._voice_span.end(error=message)
+        self._send_after_voice = False
         self._mic_btn.setDown(False)
         self._mic_btn.stop_loading()
         self._mic_worker = None
