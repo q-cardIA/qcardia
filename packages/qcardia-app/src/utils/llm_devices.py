@@ -319,6 +319,9 @@ def apply(device: Device) -> None:
     global _current
     base = device.base_url
     # Only chat can follow a non-Ollama device; the rest is Ollama-shaped, so it stays local.
+    # Chat sends the state block: series names, slice numbers, and LV volumes and ED/ES frames from
+    # the segmentation. These are derived numbers with no DICOM headers or pixels, so any chat
+    # device may get them (decided 2026-10-06).
     ollama = base if device.protocol == "ollama" else _LOCAL_URL
 
     from model import ollama_client

@@ -14,6 +14,12 @@ from dataclasses import dataclass
 
 from utils.hanging_protocols import available_presets
 
+from utils.layouts import CINE_SPEEDS, MAX_GRID_COLS, MAX_GRID_ROWS, MAX_HALF
+from utils.windowing import WINDOW_STEPS
+
+_ALL_OR_SOME_PANELS = {"type": "array", "items": {"type": "integer"},
+                       "description": "Panel numbers; leave out for all panels."}
+
 TOOL_SPECS = [
     {
         "type": "function",
@@ -91,7 +97,7 @@ TOOL_SPECS = [
                             "functional: ventricular/LV/RV function, ejection "
                             "fraction, volumes, wall motion (CINE only). "
                             "functional_complex: extended functional, long-axis "
-                            "views plus SAX slices from base to apex; for "
+                            "views plus SAX slices from apex to base; for "
                             "per-slice or full SAX views. "
                             "viability: scar, late gadolinium enhancement, "
                             "infarct, fibrosis, transmurality (needs LGE). "
@@ -115,14 +121,19 @@ TOOL_SPECS = [
             "name": "display_series",
             "description": (
                 "Show one loaded series in one panel. series_key must appear "
-                "exactly in 'Loaded series' or 'Still loading' in the state block."
+                "exactly in 'Loaded series' or 'Still loading' in the state block. "
+                "Without slice or match_panel the panel keeps the position of the stack it replaces "
+                "if that stack has the same plane (e.g. CINE_SAX -> LGE_SAX), else the middle slice."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "panel_idx": {
                         "type": "integer",
-                        "description": "0-indexed panel in the current grid: row * cols + col.",
+                        "description": (
+                            "Panel number as listed under 'Panels' in the state block. After a "
+                            "set_grid call in the same reply, use the numbering of the new grid."
+                        ),
                     },
                     "series_key": {
                         "type": "string",
@@ -142,6 +153,18 @@ TOOL_SPECS = [
                             "explicitly asks to reslice."
                         ),
                     },
+                    "slice": {
+                        "type": "integer",
+                        "description": "Slice number to show, 1 to the slice count, as in 'slice 7/14' in the state block.",
+                    },
+                    "match_panel": {
+                        "type": "integer",
+                        "description": (
+                            "Show the slice nearest to the position of this panel's slice, e.g. LGE_SAX "
+                            "at the same depth as the CINE_SAX in panel 0 (slice numbers differ between "
+                            "stacks)."
+                        ),
+                    },
                 },
                 "required": ["panel_idx", "series_key"],
             },
@@ -155,16 +178,168 @@ TOOL_SPECS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "time_index": {
+                    "frame": {
                         "type": "integer",
                         "description": (
-                            "0-based frame index, range 0 to (total frames - 1). "
-                            "The state block shows 'Time frame: current / total' "
-                            "using 1-based numbering, so subtract 1."
+                            "Frame number, 1 to the frame count, as in 'Time frame: 9 / 30'; for ED or ES, "
+                            "the frame the state block gives under 'Segmentation'."
                         ),
-                    }
+                    },
                 },
-                "required": ["time_index"],
+                "required": ["frame"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_grid",
+            "description": (
+                "Change the panel layout to a rows x cols grid; panels are numbered 0, 1, 2 ... in "
+                "reading order (left to right, top to bottom). A panel keeps its series when its cell, "
+                "moved by shift_rows/shift_cols, is in the new grid; new panels are empty. Example: to "
+                "add a column on the left of a 2x3 layout, set_grid(rows=2, cols=4, shift_cols=1); then "
+                "panels 0 and 4 are the empty left column. For two halves with their own grids (e.g. one "
+                "large panel next to a 2x2), use set_split_grid."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rows": {"type": "integer", "minimum": 1, "maximum": MAX_GRID_ROWS},
+                    "cols": {"type": "integer", "minimum": 1, "maximum": MAX_GRID_COLS},
+                    "shift_rows": {
+                        "type": "integer",
+                        "description": "Move the current panels down by this many rows (default 0).",
+                    },
+                    "shift_cols": {
+                        "type": "integer",
+                        "description": "Move the current panels right by this many columns (default 0).",
+                    },
+                },
+                "required": ["rows", "cols"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_split_grid",
+            "description": (
+                "Split the window into two equal halves, each with its own grid; a 1x1 half is one large "
+                "panel. E.g. a large panel on the right with a 3x3 on the left = (3, 3, 1, 1); a large "
+                "panel on the left with a 2x2 on the right = (1, 1, 2, 2). Panels are numbered through "
+                "the left half first, then the right half, each in reading order; they keep their series "
+                "by number."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "left_rows": {"type": "integer", "minimum": 1, "maximum": MAX_HALF},
+                    "left_cols": {"type": "integer", "minimum": 1, "maximum": MAX_HALF},
+                    "right_rows": {"type": "integer", "minimum": 1, "maximum": MAX_HALF},
+                    "right_cols": {"type": "integer", "minimum": 1, "maximum": MAX_HALF},
+                },
+                "required": ["left_rows", "left_cols", "right_rows", "right_cols"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "zoom",
+            "description": (
+                "Zoom panels. mode 'roi': the heart, from a segmentation listed as available in the state "
+                "block, also when no contours are drawn (a series without its own uses one of the same plane); 'fill': the "
+                "image fills the panel, no empty bands at the sides; 'fit': the whole image; "
+                "'percent': percent of the fitted size (e.g. 150 to zoom in)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["roi", "fill", "fit", "percent"]},
+                    "percent": {"type": "number", "description": "Only for mode 'percent'."},
+                    "panels": _ALL_OR_SOME_PANELS,
+                },
+                "required": ["mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_window",
+            "description": (
+                "Set the window/level (brightness and contrast) of a series, in every panel that shows it. "
+                "null_myocardium (LGE_SAX only): healthy myocardium dark with its noise still visible, "
+                "scar and blood pool bright but not saturated, from the LGE segmentation. darker, "
+                "brighter, more_contrast, less_contrast: a step from the current window. reset: the "
+                "series' default window."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "series_key": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["null_myocardium", *WINDOW_STEPS, "reset"],
+                    },
+                    "steps": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "description": "For the relative modes: 1 = a bit (default), 3 = a lot.",
+                    },
+                    "panels": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": (
+                            "Only these panels (they must show series_key) get this window as their own. "
+                            "Leave out for the whole series: then its panels with an own window follow it again."
+                        ),
+                    },
+                },
+                "required": ["series_key", "mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_contours",
+            "description": (
+                "Show or hide the segmentation contours in panels, e.g. one panel with and one without. "
+                "Only a segmented series has contours (panel lines say 'seg shown' or 'seg hidden'); this "
+                "does not segment."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shown": {"type": "boolean"},
+                    "panels": _ALL_OR_SOME_PANELS,
+                },
+                "required": ["shown"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_playback",
+            "description": "Play the cines as a movie or stop them, optionally at another speed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "playing": {"type": "boolean", "description": "true = play, false = stop."},
+                    "speed": {
+                        "type": "number",
+                        "enum": list(CINE_SPEEDS),
+                        "description": (
+                            "Heartbeats per second: 1 = normal, 0.5 = half speed / slow motion, 2 = twice as "
+                            "fast. Leave out to keep the current speed (see 'cines playing at' in the state)."
+                        ),
+                    },
+                },
+                "required": ["playing"],
             },
         },
     },
@@ -224,14 +399,19 @@ def build_tools(ctx: ToolContext) -> list[dict]:
             if not usable:
                 continue
             spec = _narrowed(spec, "series_key", usable)
-            props = spec["function"]["parameters"]["properties"]
-            props["panel_idx"]["minimum"] = 0
-            props["panel_idx"]["maximum"] = ctx.n_panels - 1
+            spec["function"]["parameters"]["properties"]["panel_idx"]["minimum"] = 0
             tools.append(spec)
+            continue
+
+        if name == "set_window":
+            loaded = sorted(k for k in ctx.series if k not in ctx.loading_series)
+            if loaded:
+                tools.append(_narrowed(spec, "series_key", loaded))
             continue
 
         preconditions = {
             "set_time_frame": ctx.num_time_frames > 0,
+            "set_playback": ctx.num_time_frames > 0,
             "save_segmentation": ctx.has_segmentation,
         }
         if preconditions.get(name, True):

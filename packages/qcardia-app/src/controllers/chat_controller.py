@@ -7,19 +7,48 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from contextlib import suppress
 
-from PySide6.QtCore import Qt
+import numpy as np
+from PySide6.QtCore import Qt, QTimer
 
-from llm.context import build_state_block
+from llm.context import base_mid_apex, build_state_block, grid_text
 from llm.prompt import build_messages
 from llm.tools import ToolContext, build_tools
 from model.background_worker import CallableWorker
 from model.ollama_client import warm_model
 from utils import llm_devices, study_log
 from utils.app_config import data_dir, list_subjects
+from utils.windowing import WINDOW_STEPS, null_myocardium_window, step_window
+from utils.layouts import CINE_SPEEDS, MAX_GRID_COLS, MAX_GRID_ROWS, MAX_HALF
+from view.central_display_area_widget import CINE_TIME_AXIS
 
 _MAX_HISTORY_TURNS = 10
+
+
+def _drop_planned(remaining: list, after: str, keep: str | None = None) -> str:
+    """Drops the calls in remaining (except keep) that were planned before after happened; the text for
+    the tool result, so the model plans them again with the new state."""
+    dropped = [name for name, _ in remaining if name != keep]
+    remaining[:] = [call for call in remaining if call[0] == keep]
+    if not dropped:
+        return ""
+    return f" Not done (planned before {after}): {', '.join(dropped)}. Plan them again with the new state block."
+
+
+def _panel_list(arguments: dict, n_panels: int) -> list[int] | str:
+    """The 'panels' argument (all panels if left out), or an error text."""
+    panels = [int(i) for i in arguments.get("panels") or range(n_panels)]
+    if any(not 0 <= i < n_panels for i in panels):
+        return f"panel out of range (grid has {n_panels} panels)."
+    return panels
+
+
+def _panels_text(panels) -> str:
+    """'panel 1' or 'panels 0, 2'."""
+    panels = list(panels)
+    return f"panel{'s' if len(panels) > 1 else ''} {', '.join(map(str, panels))}"
 
 
 class ChatController:
@@ -130,16 +159,38 @@ class ChatController:
         widget = self.view.display_area_widget
         time_frame = None
         if self.model.num_time_frames:
-            time_frame = (self.dicom_controller.current_time_index, self.model.num_time_frames)
+            time_frame = (widget.current_time_index, self.model.num_time_frames)
         loading = self.dicom_controller.loading_series
         return build_state_block(
-            subject=self.model.folder_path.name if self.model.folder_path else "none",
+            subject=self.model.subject_folder.name if self.model.subject_folder else "none",
             loaded_series=sorted(set(self.model.series) - loading),
             loading_series=sorted(loading),
             time_frame=time_frame,
             grid=widget.grid_size,
             panels=self.dicom_controller.panel_assignments(),
+            analysis=self.model.analysis,
+            segmentable=self.model.segmentable,
+            level_matches=self._level_matches(),
+            playing=self.view.is_playing(),
+            split=widget.split,
+            speed=self.view.cine_speed,
         )
+
+    def _level_matches(self) -> dict[str, list[int]]:
+        """For each other loaded short-axis stack, its slices nearest the CINE_SAX base, mid and apex
+        slices at the current frame (0-based), so the model can show those levels in it too."""
+        sax = self.model.analysis.get("CINE_SAX", {})
+        widget = self.view.display_area_widget
+        levels = base_mid_apex(sax, widget.current_time_index) if "lv_slices" in sax else None
+        if levels is None:
+            return {}
+        matches = {}
+        for key in sorted(set(self.model.series) - self.dicom_controller.loading_series):
+            if key != "CINE_SAX" and key.endswith("_SAX") and widget.is_series_registered(key):
+                slices = [widget.matching_slice("CINE_SAX", z, key) for z in levels]
+                if None not in slices:
+                    matches[key] = slices
+        return matches
 
     def _messages_for_request(self) -> list[dict]:
         # Attached to the latest user turn, not the system prompt, so the
@@ -147,6 +198,9 @@ class ChatController:
         history = list(self._history)
         if history and history[-1]["role"] == "user":
             history[-1] = {**history[-1], "content": f"{self._context_snapshot()}\n\n{history[-1]['content']}"}
+        elif history and history[-1]["role"] == "tool":
+            # A follow-up after tool calls: the screen and the subject may have changed since the user turn.
+            history[-1] = {**history[-1], "content": f"{history[-1]['content']}\n\nNow:\n{self._context_snapshot()}"}
         return build_messages(history)
 
     def _build_tools(self) -> list[dict]:
@@ -238,6 +292,12 @@ class ChatController:
                 self._execute_load_subject(arguments, remaining, bubble)
                 return  # continues once the patient's series are known; they may still load
             result = self._execute_tool(name, arguments)
+            modality = str(arguments.get("modality", "")).upper()
+            if name == "run_segmentation" and self.dicom_controller.is_segmenting(modality):
+                bubble.set_result(result)
+                self._poll_until(lambda: not self.dicom_controller.is_segmenting(modality), 600,
+                                 lambda: self._finish_segmentation(modality, arguments, remaining, bubble))
+                return  # continues once the segmentation has finished
         bubble.set_result(result)
         self._append_tool_history(name, arguments, result)
         self._execute_tool_sequence(remaining)
@@ -271,8 +331,81 @@ class ChatController:
 
     def _finish_load_subject(self, result: str, arguments: dict, remaining: list, bubble):
         bubble.set_result(result)
+        loaded = result.startswith("Loaded")
+        if loaded:
+            result += _drop_planned(remaining, "this subject loaded")
         self._append_tool_history("load_subject", arguments, result)
+        # The cached segmentations (ED/ES, LV slices) are read as the CINE and LGE series load.
+        segmentable = set(self.model.segmentable)
+        self._poll_until(lambda: not (self.dicom_controller.loading_series & segmentable), 60,
+                         lambda: self._execute_tool_sequence(remaining))
+
+    def _poll_until(self, done, timeout_s: float, then, started: float | None = None):
+        """then(), once done() is true or after timeout_s seconds."""
+        started = time.monotonic() if started is None else started
+        if done() or time.monotonic() - started > timeout_s:
+            then()
+            return
+        QTimer.singleShot(200, lambda: self._poll_until(done, timeout_s, then, started))
+
+    def _finish_segmentation(self, modality: str, arguments: dict, remaining: list, bubble):
+        widget = self.view.display_area_widget
+        if widget.has_segmentation(modality):
+            panels = [p["idx"] for p in widget.panel_assignments() if p["series_key"] == modality]
+            result = f"{modality} segmented; its contours show in {_panels_text(panels) if panels else 'no panel yet'}."
+        else:
+            result = f"Not done: the {modality} segmentation failed or is still running (see the app)."
+        result += _drop_planned(remaining, "the segmentation finished", keep="run_segmentation")
+        bubble.set_result(result)
+        self._append_tool_history("run_segmentation", arguments, result)
         self._execute_tool_sequence(remaining)
+
+    def _layout_result(self, widget) -> str:
+        assignments = widget.panel_assignments()
+        study_log.log("layout", grid=list(widget.grid_size), split=widget.split, panels=assignments)
+        empty = [p["idx"] for p in assignments if p["series_key"] is None]
+        return (f"Layout now {grid_text(*widget.grid_size, widget.split)}; empty: "
+                f"{_panels_text(empty) if empty else 'none'}.")
+
+    def _set_window(self, series_key: str, mode: str, steps: int, panels: list[int] | None = None) -> str:
+        widget = self.view.display_area_widget
+        if not widget.is_series_registered(series_key):
+            return f"Series '{series_key}' is not loaded."
+        if panels is not None:
+            shown = widget.panel_assignments()
+            wrong = [i for i in panels if not 0 <= i < len(shown) or shown[i]["series_key"] != series_key]
+            if wrong:
+                return f"Not done: panels {', '.join(map(str, wrong))} do not show {series_key}."
+        if mode == "reset":
+            window = widget.window(series_key, default=True)
+        elif mode == "null_myocardium":
+            if series_key != "LGE_SAX":
+                return ("null_myocardium works on LGE_SAX only; for other series use darker, brighter, "
+                        "more_contrast or less_contrast.")
+            seg = self.dicom_controller.segmentation_for(series_key)
+            if seg is None:
+                return "Not done: null_myocardium needs an LGE_SAX segmentation. Ask the user whether to run it."
+            window = null_myocardium_window(widget.volume(series_key), seg)
+            if window is None:
+                return "The LGE_SAX segmentation has no healthy myocardium to set the window from."
+        elif mode in WINDOW_STEPS:
+            steps = max(1, min(5, steps))
+            if panels is not None:  # each panel steps from the window it shows now
+                for i in panels:
+                    widget.set_window(series_key, step_window(widget.window(series_key, panel=i), mode, steps), [i])
+                return f"{series_key} window ({mode}) set in {_panels_text(panels)} only, as their own window."
+            window = step_window(widget.window(series_key), mode, steps)
+        else:
+            return f"Unknown mode '{mode}'."
+        widget.set_window(series_key, window, panels)
+        center, width = widget.window(series_key, panel=panels[0] if panels else None)
+        where = f" in {_panels_text(panels)} only, as their own window" if panels else " in every panel of it"
+        result = f"{series_key} window set ({mode}){where}: level {center:.0f}, width {width:.0f}"
+        if mode == "null_myocardium":
+            healthy = widget.volume(series_key)[seg == 1]
+            grey = 100 * (float(np.median(healthy)) - (center - width / 2)) / width
+            result += f"; healthy myocardium at about {max(grey, 0):.0f}% grey, so dark with its noise visible"
+        return result + ". The user can fine-tune it with darker, brighter or more contrast."
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
         try:
@@ -282,7 +415,7 @@ class ChatController:
 
             if name == "run_segmentation":
                 modality = str(arguments.get("modality", "")).upper()
-                if modality not in (*self.model.cine_modalities, "LGE_SAX"):
+                if modality not in self.model.segmentable:
                     return (
                         f"Unknown modality '{modality}' — expected "
                         f"{', '.join(repr(m) for m in self.model.cine_modalities)} or 'LGE_SAX'."
@@ -290,11 +423,16 @@ class ChatController:
                 loading = modality in self.dicom_controller.loading_series
                 if modality not in self.model.series and not loading:
                     return f"'{modality}' is not loaded for this subject."
+                widget = self.view.display_area_widget
+                panels = widget.show_segmentation(modality)
+                where = _panels_text(panels) if panels else f"any panel that shows {modality}"
+                if widget.has_segmentation(modality):
+                    return f"{modality} was already segmented; its contours now show in {where}."
                 if not self.dicom_controller.run_segmentation(modality):
-                    return f"{modality} segmentation is already running or queued."
-                if loading:
-                    return f"Queued {modality} segmentation; it starts once {modality} has loaded."
-                return f"Requested {modality} segmentation (check the app for the result or any errors)."
+                    return f"Not done yet: {modality} segmentation is already running or queued."
+                if widget.has_segmentation(modality):
+                    return f"{modality} segmented (from the cache); its contours show in {where}."
+                return f"Segmenting {modality} now; the app waits until it has finished."
 
             if name == "apply_preset":
                 preset_name = str(arguments["preset"])
@@ -323,18 +461,119 @@ class ChatController:
                     return f"{series_key} is still loading; panel {panel_idx} shows it ({axis}) once loaded."
                 if not widget.is_series_registered(series_key):
                     return f"Series '{series_key}' is not loaded."
-                widget.set_panel_series(panel_idx, series_key, axis=axis)
-                return f"Displaying {series_key} ({axis}) in panel {panel_idx}."
+                n = widget.n_slices(series_key, axis)
+                z = None
+                if arguments.get("match_panel") is not None:
+                    other = int(arguments["match_panel"])
+                    if not 0 <= other < widget.n_panels:
+                        return f"match_panel out of range (grid has {widget.n_panels} panels)."
+                    source = widget.panel_assignments()[other]
+                    if source["series_key"] is None or "slice" not in source:
+                        return f"Panel {other} shows no stack to match."
+                    z = widget.matching_slice(source["series_key"], source["slice"], series_key)
+                    if z is None or axis != "transverse":
+                        return f"{series_key} is not parallel to {source['series_key']}, so no slice matches."
+                elif arguments.get("slice") is not None:
+                    if not 1 <= int(arguments["slice"]) <= n:
+                        return f"slice out of range (1-{n} for {series_key})."
+                    z = int(arguments["slice"]) - 1
+                widget.set_panel_series(panel_idx, series_key, axis=axis, slice_idx=z)
+                at = f" at slice {widget.panel_assignments()[panel_idx]['slice'] + 1}/{n}" if n > 1 else ""
+                return f"Displaying {series_key} ({axis}) in panel {panel_idx}{at}."
 
             if name == "set_time_frame":
-                time_index = int(arguments["time_index"])
-                max_val = self.view.time_slider.maximum()
-                if not (0 <= time_index <= max_val):
-                    return f"time_index out of range (0-{max_val})."
-                if self.view.time_slider.value() == time_index:
-                    return f"Already at time frame {time_index}."
-                self.view.time_slider.setValue(time_index)  # triggers the normal slider signal chain
-                return f"Jumped to time frame {time_index}."
+                widget = self.view.display_area_widget
+                total = widget.n_frames(CINE_TIME_AXIS)
+                frame = int(arguments["frame"])
+                if not (1 <= frame <= total):
+                    return f"frame out of range (1-{total})."
+                if widget.current_time_index == frame - 1:
+                    return f"Already at frame {frame}."
+                widget.set_time_index(frame - 1, CINE_TIME_AXIS)
+                return f"Showing cine frame {frame}/{total}."
+
+            if name == "set_window":
+                panels = _panel_list(arguments, self.view.display_area_widget.n_panels) if arguments.get("panels") else None
+                if isinstance(panels, str):
+                    return panels
+                return self._set_window(str(arguments.get("series_key", "")), str(arguments.get("mode", "")),
+                                        int(arguments.get("steps") or 1), panels)
+
+            if name == "set_contours":
+                widget = self.view.display_area_widget
+                shown = bool(arguments["shown"])
+                panels = _panel_list(arguments, widget.n_panels)
+                if isinstance(panels, str):
+                    return panels
+                assignments = widget.panel_assignments()
+                done, missing = [], []
+                for i in panels:
+                    key = assignments[i]["series_key"]
+                    if key is None:
+                        continue
+                    if shown and not widget.has_segmentation(key):
+                        missing.append(i)
+                        continue
+                    widget.set_panel_contours(i, shown)
+                    done.append(i)
+                result = (f"Contours {'shown' if shown else 'hidden'} in {_panels_text(done)}."
+                          if done else "No contours changed.")
+                if missing:
+                    result += (f" Not done for {_panels_text(missing)}: their series has no "
+                               "segmentation. Ask the user whether to run it.")
+                return result
+
+            if name == "set_playback":
+                widget = self.view.display_area_widget
+                if not widget.n_frames(CINE_TIME_AXIS):
+                    return "No cine is loaded to play."
+                playing = bool(arguments["playing"])
+                if arguments.get("speed") is not None:
+                    speed = float(arguments["speed"])
+                    if speed not in CINE_SPEEDS:
+                        return f"speed must be one of {', '.join(f'{s:g}' for s in CINE_SPEEDS)}."
+                    self.view.set_cine_speed(speed)
+                widget.drive_cine_time()
+                if self.view.is_playing() != playing:
+                    self.view.toggle_cine()
+                if playing and not self.view.is_playing():
+                    return "Not done: the cines have a single frame, so there is nothing to play."
+                if playing:
+                    return f"Playing the cines at {self.view.cine_speed:g}x (heartbeats per second)."
+                return f"Cines stopped at frame {widget.current_time_index + 1}."
+
+            if name == "set_grid":
+                widget = self.view.display_area_widget
+                rows, cols = int(arguments["rows"]), int(arguments["cols"])
+                if not (1 <= rows <= MAX_GRID_ROWS and 1 <= cols <= MAX_GRID_COLS):
+                    return f"Grid out of range: 1-{MAX_GRID_ROWS} rows and 1-{MAX_GRID_COLS} columns."
+                widget.set_grid_size(rows, cols, (int(arguments.get("shift_rows") or 0),
+                                                  int(arguments.get("shift_cols") or 0)))
+                return self._layout_result(widget)
+
+            if name == "set_split_grid":
+                widget = self.view.display_area_widget
+                split = tuple(int(arguments[k]) for k in ("left_rows", "left_cols", "right_rows", "right_cols"))
+                if not all(1 <= n <= MAX_HALF for n in split):
+                    return f"Each half has 1-{MAX_HALF} rows and 1-{MAX_HALF} columns."
+                widget.set_split_layout(split)
+                return self._layout_result(widget)
+
+            if name == "zoom":
+                widget = self.view.display_area_widget
+                mode = str(arguments["mode"])
+                if mode == "percent" and arguments.get("percent") is None:
+                    return "mode 'percent' needs a percent value."
+                panels = _panel_list(arguments, widget.n_panels)
+                if isinstance(panels, str):
+                    return panels
+                done = widget.zoom_panels(panels, mode, float(arguments.get("percent") or 100), self.model.analysis)
+                assignments = widget.panel_assignments()
+                skipped = [i for i in panels if i not in done and assignments[i]["series_key"]]
+                result = f"Zoomed {_panels_text(done) if done else 'no panel'} ({mode})."
+                if skipped:
+                    result += f" Not done for {_panels_text(skipped)}: no segmentation of their plane to zoom to."
+                return result
 
             if name == "save_segmentation":
                 self.dicom_controller.save_segmentation()
