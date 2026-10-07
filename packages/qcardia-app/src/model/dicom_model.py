@@ -37,6 +37,8 @@ from view.volume_geometry import VolumeGeometry
 
 CARDISORT_SEQUENCE_TO_PREFIX = {"CINE": "CINE", "DBLGE": "LGE", "WBLGE": "LGE"}
 CARDISORT_SUPPORTED_PLANES = {"SAX", "2CH", "3CH", "4CH"}
+# Series that are read first load first; the perfusion runs are the largest.
+_LOAD_ORDER = ("CINE_SAX", "CINE", "LGE_SAX", "LGE", "PERF_STRESS_SAX", "PERF")
 PERFUSION_RUN_KEYS = {"stress": PERF_STRESS_KEY, "rest": PERF_REST_KEY}
 PERFUSION_CACHE_KEY = "PERF"
 
@@ -54,6 +56,11 @@ class SequenceDescriptor:
 class PatientLoadResult:
     loaded: dict[str, dict]
     entries: list[SequenceDescriptor]
+
+
+def _load_rank(key: str) -> tuple:
+    rank = next((i for i, k in enumerate(_LOAD_ORDER) if key == k or key.startswith(k + "_")), len(_LOAD_ORDER))
+    return rank, key
 
 
 def read_disk_thumbnail(seq_dir: Path, prefer_first_file: bool) -> np.ndarray | None:
@@ -612,8 +619,11 @@ class DICOMModel:
         self.num_time_frames = 0
         self.slice_positions = []
 
-    def load_patient(self, folder_path) -> PatientLoadResult:
+    def load_patient(self, folder_path, report=None) -> PatientLoadResult:
+        """report, if given, gets ("classified", result) once the series are known, then
+        ("series", key, info) as each loads and ("thumbnail", path, image) for the series that do not."""
         folder_path = Path(folder_path)
+        self.clear_patient()  # else the last patient's series stay, e.g. in what the assistant is told is loaded
         self.subject_folder = folder_path
         descriptors, from_cache = self._describe_patient_folder(folder_path)
         classified, primary_by_key = self._group_and_resolve(descriptors, folder_path)
@@ -625,11 +635,21 @@ class DICOMModel:
             elif any(cached.primary_by_key.get(k) != v for k, v in primary_by_key.items()):
                 self._cache_labels(folder_path, descriptors, {**cached.primary_by_key, **primary_by_key})
 
+        if report:
+            report(("classified", PatientLoadResult(loaded={}, entries=descriptors)))
         loaded: dict[str, dict] = {}
-        for key, seq_dir in classified.items():
+        for key in sorted(classified, key=_load_rank):
             try:
-                loaded[key] = self.load_series_for_key(seq_dir, key)
+                loaded[key] = self.load_series_for_key(classified[key], key)
             except Exception as e:
-                logging.warning(f"Failed to load {key} from {seq_dir}: {e}")
+                logging.warning(f"Failed to load {key} from {classified[key]}: {e}")
+                continue
+            if report:
+                report(("series", key, loaded[key]))
+        if report:
+            for d in descriptors:
+                if not (d.is_primary and d.key in loaded):
+                    image = read_disk_thumbnail(d.path, d.sequence_name in {"DBLGE", "WBLGE"})
+                    report(("thumbnail", d.path, image))
 
         return PatientLoadResult(loaded=loaded, entries=descriptors)

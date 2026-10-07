@@ -44,6 +44,7 @@ class SeriesCardInfo:
     draggable: bool
     path: Path
     series_key: str | None = None
+    loading: bool = False  # its series is still being loaded
 
 
 def _to_pixmap(arr: np.ndarray) -> QPixmap:
@@ -101,6 +102,12 @@ class _ThumbnailCard(QWidget):
         self._pixmap = pix.copy((pix.width() - side) // 2, (pix.height() - side) // 2, side, side)
         self._scaled = None
 
+    def set_loaded(self, series_key: str):
+        self.info.loading, self.info.draggable = False, True
+        self.series_key = self.info.series_key = series_key
+        self._draggable = True
+        self.setCursor(Qt.OpenHandCursor)
+
     def set_side(self, side: int):
         if self.width() != side or self.height() != side:
             self.setFixedSize(side, side)
@@ -119,6 +126,9 @@ class _ThumbnailCard(QWidget):
             painter.fillRect(self.rect(), theme.color("bg2"))
         painter.setOpacity(1.0)
         metrics = self.fontMetrics()
+        if self.info.loading:
+            painter.setPen(theme.color("text_faint"))
+            painter.drawText(self.rect().adjusted(0, 0, 0, -metrics.height()), Qt.AlignCenter, "Loading…")
         banner = self.rect().adjusted(0, self.height() - metrics.height() - 4, 0, 0)
         painter.fillRect(banner, theme.color("banner"))
         painter.setPen(theme.color("text" if self._draggable else "text_muted"))
@@ -186,6 +196,8 @@ class SeriesBrowserWidget(QFrame):
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
 
+        self._load_bar = theme.thin_loading_bar()
+        outer.addWidget(self._load_bar)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -226,7 +238,7 @@ class SeriesBrowserWidget(QFrame):
             grid.setContentsMargins(0, 0, 0, 4)
             grid.setSpacing(_GAP)
             grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-            sorted_cards = sorted(groups[group], key=lambda c: (not c.draggable, c.label))
+            sorted_cards = sorted(groups[group], key=lambda c: (not (c.draggable or c.loading), c.label))
             for j, info in enumerate(sorted_cards):
                 card = _ThumbnailCard(info)
                 card.set_thumbnail(info.thumbnail)
@@ -245,6 +257,30 @@ class SeriesBrowserWidget(QFrame):
             self._content_layout.insertWidget(insert_pos + 1, container)
             insert_pos += 2
         self._fit_cards()
+
+    def update_card(self, path: Path, thumbnail: np.ndarray | None = None, series_key: str | None = None):
+        """Fill in a card while the patient loads: its thumbnail, and its series once loaded."""
+        for card in self._cards:
+            if card.info.path == path:
+                if series_key is not None:
+                    card.set_loaded(series_key)
+                card.set_thumbnail(thumbnail)
+                card.update()
+
+    def set_load_progress(self, loaded: int, total: int):
+        """The bar above the cards: how many of the patient's series have loaded."""
+        self._load_bar.setRange(0, total)
+        self._load_bar.setValue(loaded)
+        self._load_bar.setToolTip(f"{loaded} of {total} series loaded")
+        self._load_bar.setVisible(loaded < total)
+
+    def stop_loading(self):
+        """Cards whose series failed to load stop saying they load."""
+        self._load_bar.hide()
+        for card in self._cards:
+            if card.info.loading:
+                card.info.loading = False
+                card.update()
 
     def _fold(self, group: str, container: QWidget, header: QPushButton, shown: bool):
         container.setVisible(shown)

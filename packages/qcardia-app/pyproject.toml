@@ -16,8 +16,10 @@ dependencies = [
     "pyyaml>=6.0.1",
     "requests>=2.31.0",
     "qcardia",
-    "faster-whisper>=1.0.3",
+    "faster-whisper>=1.1",
     "sounddevice>=0.4.6",
+    "nvidia-cublas-cu12; sys_platform == 'win32'",
+    "nvidia-cudnn-cu12>=9,<10; sys_platform == 'win32'",
     "wandb>=0.30.0",
 ]
 
@@ -25,3 +27,6 @@ dependencies = [
 # transitively through qcardia's own dependency spec, so nothing to override.
 [tool.uv.sources]
 qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "add-perfusion" }
+
+[tool.uv]
+environments = ["sys_platform == 'win32'", "sys_platform != 'win32'"]
