@@ -109,6 +109,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.dragging_crosshair = None
         self._needs_fit = True
         self._fit_view = None
+        self._frame = None  # (box in scene coordinates, cover): kept filling the panel until a manual zoom or pan
         self.image_2d_h = 0
         self.image_2d_w = 0
 
@@ -217,6 +218,10 @@ class CustomQGraphicsView(QGraphicsView):
             return
         view = self.viewport()
         fit = min(view.width() / self.image_2d_w, view.height() / self.image_2d_h)
+        if self._frame is not None:
+            (x0, y0, x1, y1), cover = self._frame
+            scale = (max if cover else min)(view.width() / (x1 - x0), view.height() / (y1 - y0))
+            self._zoom, self._center = scale / max(fit, 1e-6), QPointF((x0 + x1) / 2, (y0 + y1) / 2)
         self._actual_scale = max(fit, 1e-6) * self._zoom
         self.setTransform(QTransform.fromScale(self._actual_scale, self._actual_scale))
         self.centerOn(self.__view_center())
@@ -231,6 +236,7 @@ class CustomQGraphicsView(QGraphicsView):
         new_zoom = max(0.5, min(10.0, self._zoom * factor))
         if not self.image_2d_w or new_zoom == self._zoom:
             return
+        self._frame = None
         center = self.__view_center()
         if view_pos is not None:
             anchor = self.mapToScene(view_pos.toPoint())
@@ -245,7 +251,7 @@ class CustomQGraphicsView(QGraphicsView):
             self.view_changed.emit(self._zoom, center.x() / self.image_2d_w - 0.5, center.y() / self.image_2d_h - 0.5)
 
     def set_view(self, view: tuple[float, float, float] | None):
-        self._fit_view = view
+        self._fit_view, self._frame = view, None
         if self.image_2d_w and not self._needs_fit:
             self.__show_fit_view()
 
@@ -264,14 +270,27 @@ class CustomQGraphicsView(QGraphicsView):
         self._zoom_by(0.8)
 
     def reset_view(self):
-        self._fit_view = None
+        self._fit_view = self._frame = None
         self.__show_fit_view()
         self.__emit_view()
 
+    def frame(self, box: tuple[float, float, float, float] | None, cover: bool = False):
+        """Keep box (row0, col0, row1, col1 in image pixels, inclusive; None = the whole image) inside
+        the panel, or with cover the panel filled by it, also after a resize, until a manual zoom or pan."""
+        r0, c0, r1, c1 = box if box is not None else (0, 0, self.image_2d_h - 1, self.image_2d_w - 1)
+        self._frame = (c0, r0, c1 + 1, r1 + 1), cover
+        self.__apply_view()
+
+    def set_zoom(self, zoom: float):
+        """Zoom relative to fit-to-panel, around the current centre."""
+        self._frame, self._zoom = None, zoom
+        self.__apply_view()
+
     def new_series(self, view: tuple[float, float, float] | None = None):
-        self._needs_fit, self._fit_view = True, view
+        self._needs_fit, self._fit_view, self._frame = True, view, None
 
     def __pan(self, delta):
+        self._frame = None
         self._center = self.__view_center() - QPointF(delta.x(), delta.y()) * self.__px()
         self.centerOn(self._center)
         self.__emit_view()
@@ -441,7 +460,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.image_2d_h = 0
         self.image_2d_w = 0
         self.crosshair_pos = None
-        self._zoom, self._center = 1.0, None
+        self._zoom, self._center, self._frame = 1.0, None, None
         self.image_item.setPixmap(QPixmap())
         self.vertical_line.setVisible(False)
         self.horizontal_line.setVisible(False)
