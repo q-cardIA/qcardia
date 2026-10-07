@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from driver import build_controller, render_dry_run, run_one  # noqa: E402
+from driver import build_controller, render_dry_run, run_one, screen_after  # noqa: E402
 from test_cases import TEST_CASES  # noqa: E402
 from validator import validate  # noqa: E402
 
@@ -81,7 +81,7 @@ def _run_live(cases, runs: int, think: bool | None):
         for run_idx in range(runs):
             cc = build_controller(tc)
             try:
-                run_result = run_one(cc, tc.prompt, think=think)
+                run_result = run_one(cc, tc.prompt, think=think, history=tc.history)
             except Exception as e:
                 print(f"  [ERROR] {tc.id} run {run_idx + 1}/{runs}: {type(e).__name__}: {e}")
                 by_category[tc.category]["fail"] += 1
@@ -96,7 +96,8 @@ def _run_live(cases, runs: int, think: bool | None):
                                  "error": run_result.error})
                 continue
 
-            vres = validate(tc, run_result.tool_calls)
+            screen = screen_after(cc, run_result.tool_calls) if tc.match_mode == "state" else None
+            vres = validate(tc, run_result.tool_calls, screen)
             passed, reason = vres.passed, vres.failure_summary
             if passed:
                 passed, reason = _check_result_text(tc, cc, run_result)

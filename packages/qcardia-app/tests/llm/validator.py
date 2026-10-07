@@ -60,8 +60,9 @@ def _find_and_remove(expected_call: dict, pool: list) -> tuple[bool, Optional[di
     return False, None, reason
 
 
-def validate(test_case: TestCase, actual_tool_calls: list) -> ValidationResult:
-    """actual_tool_calls: raw list of {"name": ..., "arguments": ...} dicts."""
+def validate(test_case: TestCase, actual_tool_calls: list, screen: dict | None = None) -> ValidationResult:
+    """actual_tool_calls: raw list of {"name": ..., "arguments": ...} dicts. screen: the viewer state
+    after those calls (driver.screen_after), needed by match_mode "state"."""
     expected = test_case.expected_tool_calls
     mode = test_case.match_mode
 
@@ -70,6 +71,9 @@ def validate(test_case: TestCase, actual_tool_calls: list) -> ValidationResult:
     if not any(e.get("name") == "list_subjects" for e in expected):
         actual = [c for c in actual if c.get("name") != "list_subjects"]
 
+    if mode == "state":
+        problem = test_case.expected_state(screen)
+        return ValidationResult(test_case.id, problem is None, mode, expected, actual, [], problem or "")
     if mode == "exact":
         return _validate_exact(test_case.id, mode, expected, actual)
     elif mode == "any_order":

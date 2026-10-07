@@ -3,6 +3,7 @@ touched) and runs one Ollama tool-calling turn synchronously via
 OllamaWorker.run() — real, unmodified prompt/tool-building code, no mock."""
 from __future__ import annotations
 
+import copy
 import sys
 import time
 from pathlib import Path
@@ -19,9 +20,9 @@ from test_cases import TestCase  # noqa: E402
 
 def build_controller(test_case: TestCase, llm_model: str = OLLAMA_MODEL) -> ChatController:
     cc = object.__new__(ChatController)  # skip __init__, no Qt widgets touched
-    cc.view = test_case.view
-    cc.dicom_controller = FakeDicomController(test_case.model, test_case.view)
-    cc.model = test_case.model
+    # Copies: running the calls changes the fakes, and each run must start from the case's state.
+    cc.view, cc.model = copy.deepcopy(test_case.view), copy.deepcopy(test_case.model)
+    cc.dicom_controller = FakeDicomController(cc.model, cc.view)
     cc._history = []
     cc._worker = None
     cc._llm_model = llm_model
@@ -38,10 +39,11 @@ class RunResult:
         self.error = error
 
 
-def run_one(cc: ChatController, user_text: str, think: bool | None = None, timeout: float = 120.0) -> RunResult:
+def run_one(cc: ChatController, user_text: str, think: bool | None = None, timeout: float = 120.0,
+            history: list[dict] = ()) -> RunResult:
     """Runs one user turn and captures the model's tool_calls. Ignores
     multi-step continuation, except past a list_subjects lookup."""
-    cc._history = [{"role": "user", "content": user_text}]
+    cc._history = [*history, {"role": "user", "content": user_text}]
     tools = cc._build_tools()
 
     # think=None means "use OllamaWorker's own default", not a literal False.
@@ -73,6 +75,16 @@ def run_one(cc: ChatController, user_text: str, think: bool | None = None, timeo
         elapsed_s=elapsed,
         error=errors[0] if errors else None,
     )
+
+
+def screen_after(cc: ChatController, calls: list[dict]) -> dict:
+    """Runs the reply's calls in order, as the app does, and returns the fake viewer's state.
+    list_subjects already ran in run_one, and load_subject is not part of these cases."""
+    for c in calls:
+        if c["name"] not in ("list_subjects", "load_subject"):
+            cc._execute_tool(c["name"], c["arguments"])
+    return {**cc.view.display_area_widget.state(), "segmentations": cc.dicom_controller.segmentations,
+            "playing": cc.view.playing, "speed": cc.view.cine_speed}
 
 
 def render_dry_run(test_case: TestCase) -> dict:
