@@ -85,7 +85,8 @@ TOOL_SPECS = [
                 "properties": {
                     "preset": {
                         "type": "string",
-                        "enum": ["functional", "functional_complex", "viability", "perfusion"],
+                        "enum": ["functional", "functional_complex", "viability", "perfusion",
+                                 "flow", "flow_aortic", "flow_pulmonary"],
                         "description": (
                             "functional: ventricular/LV/RV function, ejection "
                             "fraction, volumes, wall motion (CINE only). "
@@ -95,7 +96,12 @@ TOOL_SPECS = [
                             "viability: scar, late gadolinium enhancement, "
                             "infarct, fibrosis, transmurality (needs LGE). "
                             "perfusion: perfusion, ischaemia, CAD, stress testing "
-                            "(needs PERF_STRESS_SAX, PERF_REST_SAX, or PERF_SAX)."
+                            "(needs PERF_STRESS_SAX, PERF_REST_SAX, or PERF_SAX). "
+                            "flow: flow, phase contrast, cardiac output, regurgitation, "
+                            "Qp:Qs; aortic flow on top and pulmonary flow below, or "
+                            "whichever of the two was acquired (needs PC_AORTA or PC_MPA). "
+                            "flow_aortic / flow_pulmonary: only when the user names the "
+                            "vessel (aortic flow, aortic stenosis / pulmonary artery flow)."
                         ),
                     }
                 },

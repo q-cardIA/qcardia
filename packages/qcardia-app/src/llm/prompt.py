@@ -98,7 +98,7 @@ def _preset_rules() -> str:
     for name, preset in PRESETS.items():
         if preset.triggers:
             trig = " / ".join(f'"{t}"' for t in preset.triggers)
-            grid = ("grid depends on available stress/rest data" if preset.drop_empty_rows
+            grid = ("rows depend on which of its series are loaded" if preset.drop_empty_rows
                     else f"{preset.grid[0]}x{preset.grid[1]} grid")
             lines.append(f'  {trig} -> apply_preset(preset="{name}") [{grid}]')
     lines.append(

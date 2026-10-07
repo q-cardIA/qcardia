@@ -2402,7 +2402,7 @@ wheels = [
 [[package]]
 name = "qcardia"
 version = "0.0.1"
-source = { git = "https://github.com/q-cardIA/qcardia.git?branch=add-perfusion#96ca157b27c1bb0c9afc25278142cc31b2e7f1fc" }
+source = { git = "https://github.com/q-cardIA/qcardia.git?branch=add-flow#e47714b0487a098cac57843176cfa8cc2fb6d97a" }
 dependencies = [
     { name = "opencv-python" },
     { name = "qcardia-data" },
@@ -2442,7 +2442,7 @@ requires-dist = [
     { name = "pydicom", specifier = ">=2.4.4" },
     { name = "pyside6", specifier = ">=6.6.2" },
     { name = "pyyaml", specifier = ">=6.0.1" },
-    { name = "qcardia", git = "https://github.com/q-cardIA/qcardia.git?branch=add-perfusion" },
+    { name = "qcardia", git = "https://github.com/q-cardIA/qcardia.git?branch=add-flow" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "scipy", specifier = ">=1.11.4" },
     { name = "sounddevice", specifier = ">=0.4.6" },
