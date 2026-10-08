@@ -230,6 +230,8 @@ class ChatController:
             self._history = self._history[cutoff:]
 
     def _start_worker(self, messages: list[dict]):
+        if self._worker is not None:
+            self._hold(self._worker)  # tool calls can start the follow-up before this thread ends
         worker_cls = llm_devices.worker_class()
         self._worker = worker_cls(messages, tools=self._build_tools(), model=self._llm_model,
                                   think=self._think)
@@ -241,11 +243,12 @@ class ChatController:
         self._worker.error.connect(self._on_error)
         # `finished`, not `finished_ok`/`error`: those fire before the thread
         # actually stops, so clearing the reference there races teardown.
-        self._worker.finished.connect(self._clear_worker)
+        self._worker.finished.connect(lambda w=self._worker: self._clear_worker(w))
         self._worker.start()
 
-    def _clear_worker(self):
-        self._worker = None
+    def _clear_worker(self, worker):
+        if worker is self._worker:
+            self._worker = None
 
     def _on_finished(self):
         text = self.view.chat_widget.finalize_assistant_message()
@@ -275,6 +278,7 @@ class ChatController:
             return
         worker = CallableWorker(warm_model, self._llm_model)
         self._warmup_worker = worker
+        self._hold(worker)
         worker.finished.connect(lambda: setattr(self, "_warmup_worker", None))
         worker.start()
 
