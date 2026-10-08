@@ -78,8 +78,9 @@ def _run_one_model(model: str, cases: list, runs: int, run_dir: Path) -> list[di
                 cc = build_controller(tc, llm_model=model)
                 try:
                     result = run_one(cc, tc.prompt, history=tc.history)
-                    screen = screen_after(cc, result.tool_calls) if tc.match_mode == "state" else None
-                    passed = not result.error and validate(tc, result.tool_calls, screen).passed
+                    screen = screen_after(cc)
+                    before = screen_after(build_controller(tc, llm_model=model))
+                    passed = not result.error and validate(tc, result.tool_calls, screen, before).passed
                     elapsed = result.elapsed_s
                 except Exception as e:
                     passed, elapsed = False, None

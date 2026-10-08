@@ -549,10 +549,12 @@ _add(
 )
 _m, _v = _loaded(grid=(2, 4))
 _add(
-    id="display_multi_003", category="display_multi", description="'All LGE views' should reach for the preset",
+    id="display_multi_003", category="display_multi", description="All LGE views on screen",
     model=_m, view=_v, prompt="Show all LGE views",
-    expected_tool_calls=[preset("viability")], match_mode="subset",
-    notes="Four display_series calls would also fill the screen, but the preset is the intended route.",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=lambda s: None if {"LGE_SAX", "LGE_2CH", "LGE_3CH", "LGE_4CH"} <= {k for k, _, _ in s["panels"]}
+    else f"panels show {[k for k, _, _ in s['panels']]}",
+    notes="The viability preset or four display_series calls both do it.",
 )
 _m, _v = _loaded()
 _add(
@@ -1051,9 +1053,12 @@ def _twice(base_keys: list, rows: int, cols: int):
     segmented = {"CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH", "LGE_SAX"}
 
     def check(s):
+        at = {cell[:2]: i for i, cell in enumerate(s["cells"])}  # a plain or a split grid look the same
         for i, key in enumerate(base_keys):
             r, c = divmod(i, cols)
-            left, right = r * 2 * cols + c, r * 2 * cols + c + cols
+            left, right = at.get((r, c)), at.get((r, c + cols))
+            if left is None or right is None:
+                return f"cells {s['cells']}: no {rows}x{2 * cols} layout"
             if s["panels"][left][0] != key or s["panels"][right][0] != key:
                 return f"panels {left} and {right} show {s['panels'][left][0]}, {s['panels'][right][0]}, expected {key}"
             if key in segmented and (s["contours"][left] or not s["contours"][right]):

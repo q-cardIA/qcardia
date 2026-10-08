@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from controllers.chat_controller import ChatController  # noqa: E402
-from model.ollama_client import OllamaWorker  # noqa: E402
+from utils import llm_devices  # noqa: E402
 from utils.app_config import OLLAMA_MODEL  # noqa: E402
 
 from fakes import FakeDicomController  # noqa: E402
@@ -40,9 +40,10 @@ class RunResult:
 
 
 def run_one(cc: ChatController, user_text: str, think: bool | None = None, timeout: float = 120.0,
-            history: list[dict] = ()) -> RunResult:
-    """Runs one user turn and captures the model's tool_calls. Ignores
-    multi-step continuation, except past a list_subjects lookup."""
+            history: list[dict] = (), max_rounds: int = 6) -> RunResult:
+    """Runs one user turn as the app does: each reply's tool calls run on the fakes and their results
+    go back to the model, until it calls no tool (at most max_rounds replies). A load_subject is
+    answered without loading. Captures all tool calls; the fakes then show the screen they led to."""
     cc._history = [*history, {"role": "user", "content": user_text}]
     tools = cc._build_tools()
 
@@ -54,19 +55,22 @@ def run_one(cc: ChatController, user_text: str, think: bool | None = None, timeo
     errors: list[str] = []
 
     start = time.monotonic()
-    for _ in range(2):
-        worker = OllamaWorker(cc._messages_for_request(), tools=tools, model=cc._llm_model, **kwargs)
+    for _ in range(max_rounds):
+        worker = llm_devices.worker_class()(cc._messages_for_request(), tools=tools, model=cc._llm_model, **kwargs)
         new: list[dict] = []
         tokens.clear()
         worker.tool_calls_ready.connect(lambda c: new.extend({"name": n, "arguments": a} for n, a in c))
         worker.token_received.connect(tokens.append)
         worker.error.connect(errors.append)
         worker.run()  # synchronous — see module docstring
-        calls += new
-        if errors or not new or any(c["name"] != "list_subjects" for c in new):
+        if errors or not new:
+            calls += new
             break
-        for c in new:  # answer the lookup and ask again, as the app does
-            cc._append_tool_history(c["name"], c["arguments"], cc._execute_tool(c["name"], c["arguments"]))
+        done, loaded = run_calls(cc, new)
+        calls += done
+        if loaded:
+            break
+        tools = cc._build_tools()
     elapsed = time.monotonic() - start
 
     return RunResult(
@@ -77,14 +81,31 @@ def run_one(cc: ChatController, user_text: str, think: bool | None = None, timeo
     )
 
 
-def screen_after(cc: ChatController, calls: list[dict]) -> dict:
-    """Runs the reply's calls in order, as the app does, and returns the fake viewer's state.
-    list_subjects already ran in run_one, and load_subject is not part of these cases."""
-    for c in calls:
-        if c["name"] not in ("list_subjects", "load_subject"):
-            cc._execute_tool(c["name"], c["arguments"])
+def run_calls(cc: ChatController, calls: list[dict]) -> tuple[list[dict], bool]:
+    """Runs calls in order as the app does, into the history; returns the calls that ran and whether a
+    subject loaded. A load ends the reply there: the app plans the rest again with the new subject,
+    which the fakes cannot load."""
+    for i, c in enumerate(calls):
+        if c["name"] == "load_subject":
+            name = cc._resolve_subject(str(c["arguments"].get("subject_id", "")))
+            result = (f"Loaded subject {name}." if name else f"No single subject folder matches "
+                      f"'{c['arguments'].get('subject_id')}'. Call list_subjects for the exact names.")
+            cc._append_tool_history(c["name"], c["arguments"], result)
+            if name:
+                cc.loaded_subjects = [*getattr(cc, "loaded_subjects", []), name]
+                return calls[:i + 1], True
+            continue
+        cc._append_tool_history(c["name"], c["arguments"], cc._execute_tool(c["name"], c["arguments"]))
+    return list(calls), False
+
+
+def screen_after(cc: ChatController, calls: list[dict] = ()) -> dict:
+    """Runs calls (see run_calls) and returns the fake viewer's state. After run_one the calls have run
+    already: pass none."""
+    run_calls(cc, list(calls))
     return {**cc.view.display_area_widget.state(), "segmentations": cc.dicom_controller.segmentations,
-            "playing": cc.view.playing, "speed": cc.view.cine_speed}
+            "playing": cc.view.playing, "speed": cc.view.cine_speed,
+            "loaded": getattr(cc, "loaded_subjects", [])}
 
 
 def render_dry_run(test_case: TestCase) -> dict:

@@ -73,13 +73,14 @@ def _check_result_text(tc, cc, run_result) -> tuple[bool, str]:
     return True, ""
 
 
-def _run_live(cases, runs: int, think: bool | None):
+def _run_live(cases, runs: int, think: bool | None, model: str | None = None):
     results = []
     by_category = defaultdict(lambda: {"pass": 0, "fail": 0})
 
     for tc in cases:
         for run_idx in range(runs):
-            cc = build_controller(tc)
+            cc = build_controller(tc, **({"llm_model": model} if model else {}))
+            before = screen_after(build_controller(tc))
             try:
                 run_result = run_one(cc, tc.prompt, think=think, history=tc.history)
             except Exception as e:
@@ -96,8 +97,8 @@ def _run_live(cases, runs: int, think: bool | None):
                                  "error": run_result.error})
                 continue
 
-            screen = screen_after(cc, run_result.tool_calls) if tc.match_mode == "state" else None
-            vres = validate(tc, run_result.tool_calls, screen)
+            screen = screen_after(cc)
+            vres = validate(tc, run_result.tool_calls, screen, before)
             passed, reason = vres.passed, vres.failure_summary
             if passed:
                 passed, reason = _check_result_text(tc, cc, run_result)
@@ -139,6 +140,9 @@ def main():
     p.add_argument("--ids", help="Comma-separated test id filter")
     p.add_argument("--runs", type=int, default=1, help="Repeat each case N times (default 1)")
     p.add_argument("--dry-run", action="store_true", help="Render prompts/tools only, no Ollama call")
+    p.add_argument("--device", help="A device id from config/llm_devices.json, e.g. spike (default: this computer)")
+    p.add_argument("--model", help="The model on that device (default: the app's default)")
+    p.add_argument("--out", help="Results file name in results/ (default: a timestamp)")
     think_group = p.add_mutually_exclusive_group()
     think_group.add_argument("--think", action="store_true", dest="think", default=None)
     think_group.add_argument("--no-think", action="store_false", dest="think")
@@ -153,11 +157,18 @@ def main():
     if args.dry_run:
         return _dry_run(cases)
 
-    results, by_category = _run_live(cases, runs=args.runs, think=args.think)
+    if args.device:
+        from utils import llm_devices
+        device = next((d for d in llm_devices.load_devices() if d.id == args.device), None)
+        probe = llm_devices.activate(device, timeout=30) if device else None
+        if probe is None or not probe.ok:
+            print(f"Device {args.device!r} is not available: {getattr(probe, 'detail', 'unknown id')}")
+            return 1
+    results, by_category = _run_live(cases, runs=args.runs, think=args.think, model=args.model)
     _print_report(by_category)
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    out_path = RESULTS_DIR / f"results_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    out_path = RESULTS_DIR / (args.out or f"results_{time.strftime('%Y%m%d_%H%M%S')}.json")
     out_path.write_text(json.dumps({"version": 1, "results": results}, indent=2, default=str))
     print(f"\nWrote {out_path}")
     return 0
