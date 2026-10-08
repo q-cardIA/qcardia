@@ -72,6 +72,7 @@ class CentralDisplayAreaWidget(QWidget):
     play_toggle_requested = Signal()
     time_axis_changed = Signal(int, int)  # (frames, frame) of the time axis the time slider now drives
     segmentation_requested = Signal(str)  # the contour toggle of a panel whose series has no segmentation yet
+    panels_moved = Signal(object)  # after a layout change: old panel index -> new, for the panels that stay
 
     def __init__(self, parent=None):
         super().__init__()
@@ -181,9 +182,12 @@ class CentralDisplayAreaWidget(QWidget):
         old_state = list(zip(self._panel_series_key, self._panel_axis, self._panel_slice_idx, self._panel_depth,
                              self._panel_linked, self._panel_contours, self._panel_window))
         if by_number and not any(shift):
-            moved = {cell[:2]: state for cell, state in zip(cells, old_state)}
+            moves = {i: i for i in range(min(len(cells), len(old_state)))}  # old panel -> new panel
         else:
-            moved = {(r + shift[0], c + shift[1]): state for (r, c, _, _), state in zip(self._cells, old_state)}
+            at = {cell[:2]: i for i, cell in enumerate(cells)}
+            moves = {i: at[r + shift[0], c + shift[1]] for i, (r, c, _, _) in enumerate(self._cells)
+                     if (r + shift[0], c + shift[1]) in at}
+        moved = {new: old_state[old] for old, new in moves.items()}
         self._split = split
         old_rows, old_cols = self._grid_rows, self._grid_cols
 
@@ -200,7 +204,7 @@ class CentralDisplayAreaWidget(QWidget):
         empty = (None, "transverse", 0, 0, True, True, None)
         (self._panel_series_key, self._panel_axis, self._panel_slice_idx, self._panel_depth,
          self._panel_linked, self._panel_contours, self._panel_window) = map(
-            list, zip(*(moved.get(cell[:2], empty) for cell in cells)))
+            list, zip(*(moved.get(i, empty) for i in range(len(cells)))))
 
         # Build fresh panels
         for idx in range(len(cells)):
@@ -243,6 +247,7 @@ class CentralDisplayAreaWidget(QWidget):
                 self._panels[i].viewer.new_series(self._view_of(i))
                 self._update_panel(i)
         self._show_cine_time_if_unseen()
+        self.panels_moved.emit(moves)
 
     def _add_divider(self, horizontal: bool, row: int, col: int):
         div = _make_divider(horizontal)
@@ -318,6 +323,7 @@ class CentralDisplayAreaWidget(QWidget):
         """Register a loaded series volume, its default (center, width) window and optional DICOM geometry."""
         self._volumes[series_key] = volume
         self._windows[series_key] = self._default_windows[series_key] = window
+        self._segmentations.pop(series_key, None)  # made from the volume this one replaces
         self._forget_contours(series_key)
         self._is_temporal[series_key] = is_temporal
         if geometry is not None:
@@ -857,9 +863,12 @@ class CentralDisplayAreaWidget(QWidget):
         elif action in ("first", "last"):
             slider.setValue(0 if action == "first" else slider.maximum())
         elif action == "reset":
-            self._panel_window[panel_idx] = None
-            self._windows[key] = self._default_windows[key]
-            self._refresh_images(key)
+            if self._panel_window[panel_idx] is not None:  # its own window: back to the series' window
+                self._panel_window[panel_idx] = None
+                self._update_panel(panel_idx)
+            else:
+                self._windows[key] = self._default_windows[key]
+                self._refresh_images(key)
         elif action == "link":
             linked = self._panel_linked[panel_idx] = not self._panel_linked[panel_idx]
             self._sync_toggles(panel_idx)

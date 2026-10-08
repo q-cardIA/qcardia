@@ -334,10 +334,9 @@ class ChatController:
         self.dicom_controller.load_patient(str(path), on_ready=_on_ready)
 
     def _finish_load_subject(self, result: str, arguments: dict, remaining: list, bubble):
+        # Planned for a patient that is now loaded, or that did not load: plan again either way.
+        result += _drop_planned(remaining, "this subject loaded" if result.startswith("Loaded") else "the load failed")
         bubble.set_result(result)
-        loaded = result.startswith("Loaded")
-        if loaded:
-            result += _drop_planned(remaining, "this subject loaded")
         self._append_tool_history("load_subject", arguments, result)
         # The cached segmentations (ED/ES, LV slices) are read as the CINE and LGE series load.
         segmentable = set(self.model.segmentable)

@@ -134,6 +134,7 @@ class MainWindow(QMainWindow):
     contours_requested = Signal(bool)  # contours on or off in every panel
     window_requested = Signal(str)  # "null_myocardium" (LGE_SAX) or "reset" (every series)
     phase_requested = Signal(str)  # "ED" or "ES"
+    panels_moved = Signal(object)  # see CentralDisplayAreaWidget.panels_moved
 
     def __init__(self):
         super().__init__()
@@ -206,6 +207,7 @@ class MainWindow(QMainWindow):
         self.display_area_widget.play_toggle_requested.connect(self.toggle_cine)
         self.display_area_widget.segmentation_requested.connect(
             lambda key: key in self.segmentable_series and self.seg_button_signal.emit(key))
+        self.display_area_widget.panels_moved.connect(self.panels_moved.emit)
 
         self.top_bar = QWidget()
         self.top_bar.setProperty("role", "topBar")
