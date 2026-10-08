@@ -25,17 +25,18 @@ _session: dict = {}
 _actor: str | None = None
 _task = 0
 _in_task = False
+_screen: dict = {}  # the last state logged, see log_state
 
 
 def start_session(participant: str, condition: str = "", **fields) -> Path:
-    global _file, _t0, _session, _task, _in_task
+    global _file, _t0, _session, _task, _in_task, _screen
     _session = {"participant": participant.strip() or "anonymous", "condition": condition.strip()}
     stem = "_".join(re.sub(r"[^\w.-]+", "-", v) for v in _session.values() if v)
     folder = LOG_DIR / f"{datetime.now():%Y%m%d-%H%M%S}_{stem}"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{folder.name}.jsonl"
     _file = open(path, "a", encoding="utf-8", buffering=1)
-    _t0, _task, _in_task = time.monotonic(), 0, False
+    _t0, _task, _in_task, _screen = time.monotonic(), 0, False, {}
     log("session_start", **fields)
     return path
 
@@ -60,6 +61,28 @@ def log(event: str, **fields):
               **_session, "event": event, **({"by": _actor} if _actor else {}), **fields}
     with _lock:
         _file.write(json.dumps(record, default=str) + "\n")
+
+
+def log_state(state: dict):
+    """Logs the screen as "state": whole the first time, then only the fields that changed. Of a dict
+    field only its changed entries while none was removed, and of "panels" only the changed panels by
+    number while the layout keeps its panel count."""
+    global _screen
+    if _file is None:
+        return
+    changed = {}
+    for key, new in state.items():
+        old = _screen.get(key)
+        if new == old:
+            continue
+        if isinstance(new, dict) and isinstance(old, dict) and old.keys() <= new.keys():
+            new = {k: v for k, v in new.items() if old.get(k) != v}
+        elif key == "panels" and old is not None and len(new) == len(old):
+            new = {i: p for i, (p, q) in enumerate(zip(new, old)) if p != q}
+        changed[key] = new
+    _screen = state
+    if changed:
+        log("state", **changed)
 
 
 @contextmanager

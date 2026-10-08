@@ -154,6 +154,19 @@ class CentralDisplayAreaWidget(QWidget):
             panels.append(panel)
         return panels
 
+    def state(self) -> dict:
+        """The screen for the session log, 1-based as the user sees it."""
+        def panel(i):
+            view = self._panels[i].viewer.view()
+            return {"series": self._panel_series_key[i], "axis": self._panel_axis[i],
+                    "slice": self._panel_slice_idx[i] + 1, "zoom": [round(v, 3) for v in view] if view else None,
+                    "window": self._panel_window[i], "contours": self._shows_segmentation(i),
+                    "linked": self._panel_linked[i]} if self._panel_series_key[i] else None
+        return {"grid": [self._grid_rows, self._grid_cols], "split": self._split,
+                "frames": {axis: t + 1 for axis, t in self._time_index.items()},
+                "windows": {k: [round(v, 1) for v in w] for k, w in self._windows.items()},
+                "panels": [panel(i) for i in range(self.n_panels)]}
+
     def set_crosshair_shown(self, shown: bool):
         CustomQGraphicsView.crosshair_shown = shown
         for p in self._panels:

@@ -151,6 +151,7 @@ class DICOMController:
 
     def _add_loaded_series(self, key: str, info: dict):
         self._register(key, info)
+        self.view.schedule_screen_log()  # a waiting panel may show it now
         self._last_result.loaded[key] = info
         self._loading_keys.discard(key)
         self._fill_waiting_panels()
@@ -365,6 +366,7 @@ class DICOMController:
         self._widget.hide_segmentation_loading(series_key)
         self._widget.set_segmentation(series_key, result)
         self._show_results()
+        self.view.schedule_screen_log()
 
     def _show_results(self):
         self.view.results_widget.show_analysis(self.model.analysis)

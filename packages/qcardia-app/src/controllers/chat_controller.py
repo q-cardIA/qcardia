@@ -233,6 +233,9 @@ class ChatController:
         if self._worker is not None:
             self._hold(self._worker)  # tool calls can start the follow-up before this thread ends
         worker_cls = llm_devices.worker_class()
+        # The input is the user message in chat_start (or the tool results before it); the context is not logged.
+        self._llm_span = study_log.Span("llm", device=llm_devices.current().id, model=self._llm_model,
+                                        think=self._think)
         self._worker = worker_cls(messages, tools=self._build_tools(), model=self._llm_model,
                                   think=self._think)
         self._worker.token_received.connect(self.view.chat_widget.append_assistant_chunk)
@@ -250,7 +253,14 @@ class ChatController:
         if worker is self._worker:
             self._worker = None
 
+    def _log_reply(self, **outcome):
+        """The raw output of the request that just ended, with the token counts the server reports."""
+        w = self._worker
+        if w is not None:
+            self._llm_span.end(reply=w.reply, thinking=w.thinking, **w.usage, **outcome)
+
     def _on_finished(self):
+        self._log_reply()
         text = self.view.chat_widget.finalize_assistant_message()
         if text:
             self._history.append({"role": "assistant", "content": text})
@@ -258,12 +268,14 @@ class ChatController:
         self.view.chat_widget.set_enabled(True)
 
     def _on_error(self, message: str):
+        self._log_reply(error=message)
         self._chat_span.end(error=message)
         self.view.chat_widget.finalize_assistant_message()
         self.view.chat_widget.append_system_message(f"Error: {message}")
         self.view.chat_widget.set_enabled(True)
 
     def _on_tool_calls(self, calls: list):
+        self._log_reply(tool_calls=[{"name": n, "arguments": a} for n, a in calls])
         # load_subject loads in the background; remaining calls wait until its series are known.
         self._warm_model_in_background()
         self._execute_tool_sequence(list(calls))
@@ -308,6 +320,7 @@ class ChatController:
 
     def _append_tool_history(self, name: str, arguments: dict, result: str):
         study_log.log("tool_call", name=name, arguments=arguments, result=result)
+        self.view.log_screen()  # the screen after each step
         self._history.append({
             "role": "assistant", "content": "",
             "tool_calls": [{"function": {"name": name, "arguments": arguments}}],

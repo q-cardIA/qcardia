@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from utils import study_log
 from utils.app_config import ICON_PATH, ISSUES_URL, REPO_URL, SETTINGS, WIKI_URL
 from utils.hanging_protocols import PRESET_BUTTON_ORDER, preset_label
 from utils.layouts import CINE_SPEEDS, SPLIT_PRESETS
@@ -155,6 +156,8 @@ class MainWindow(QMainWindow):
         self._play_timer = QTimer(self)
         self._play_timer.timeout.connect(lambda: self.step_time_frame(self._play_step))
         self._cine_speed, self._play_step = 1.0, 1
+        # One state record per burst of user input.
+        self._screen_log_timer = QTimer(self, singleShot=True, interval=300, timeout=self.log_screen)
         self.full_screen_action = QAction("&Full Screen", self)
         self.full_screen_action.setCheckable(True)
         self.full_screen_action.setShortcut("F11")
@@ -591,6 +594,15 @@ class MainWindow(QMainWindow):
         n = self.time_slider.maximum() + 1
         if n > 1:
             self.time_slider.setValue((self.time_slider.value() + step) % n)
+
+    def log_screen(self):
+        """The screen to the session log, as far as it changed since the last time."""
+        if hasattr(self, "display_area_widget"):
+            study_log.log_state({**self.display_area_widget.state(), "playing": self.is_playing(),
+                                 "speed": self._cine_speed})
+
+    def schedule_screen_log(self):
+        self._screen_log_timer.start()
 
     def is_playing(self) -> bool:
         return self._play_timer.isActive()

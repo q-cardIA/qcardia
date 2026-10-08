@@ -251,6 +251,9 @@ class FakeView:
     def is_playing(self) -> bool:
         return self.playing
 
+    def log_screen(self):
+        pass
+
     def set_cine_speed(self, speed: float):
         self.cine_speed = speed
 

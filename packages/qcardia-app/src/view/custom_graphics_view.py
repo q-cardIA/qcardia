@@ -246,9 +246,15 @@ class CustomQGraphicsView(QGraphicsView):
         self.__emit_view()
 
     def __emit_view(self):
-        if self.image_2d_w and self.image_2d_h:
-            center = self.__view_center()
-            self.view_changed.emit(self._zoom, center.x() / self.image_2d_w - 0.5, center.y() / self.image_2d_h - 0.5)
+        if self.view() is not None:
+            self.view_changed.emit(*self.view())
+
+    def view(self) -> tuple[float, float, float] | None:
+        """(zoom relative to fit, centre x and y as offsets from the image centre in image widths), or None."""
+        if not (self.image_2d_w and self.image_2d_h):
+            return None
+        center = self.__view_center()
+        return self._zoom, center.x() / self.image_2d_w - 0.5, center.y() / self.image_2d_h - 0.5
 
     def set_view(self, view: tuple[float, float, float] | None):
         self._fit_view, self._frame = view, None
