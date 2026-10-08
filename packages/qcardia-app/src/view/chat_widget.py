@@ -65,8 +65,21 @@ _TOOL_SUMMARY_FORMATTERS = {
         f"Show {a.get('series_key')} in panel {a.get('panel_idx')}"
         # "transverse" is the default axis, not worth echoing back.
         + (f" ({a['axis']})" if a.get("axis") not in (None, "", "transverse") else "")
+        + (f", slice {a['slice']}" if a.get("slice") is not None else "")
+        + (f", as panel {a['match_panel']}" if a.get("match_panel") is not None else "")
     ),
-    "set_time_frame": lambda a: f"Jump to time frame {a.get('time_index')}",
+    "set_time_frame": lambda a: f"Jump to time frame {a.get('frame')}",
+    "set_grid": lambda a: f"Set a {a.get('rows')}x{a.get('cols')} grid",
+    "set_split_grid": lambda a: (f"Split: {a.get('left_rows')}x{a.get('left_cols')} left, "
+                                 f"{a.get('right_rows')}x{a.get('right_cols')} right"),
+    "zoom": lambda a: f"Zoom ({a.get('mode')})",
+    "set_window": lambda a: (f"Window {a.get('series_key')}: {str(a.get('mode', '')).replace('_', ' ')}"
+                             + (f" x{a['steps']}" if (a.get("steps") or 1) > 1 else "")
+                             + (f" (panels {', '.join(map(str, a['panels']))})" if a.get("panels") else "")),
+    "set_contours": lambda a: (f"{'Show' if a.get('shown') else 'Hide'} contours"
+                               + (f" in panels {', '.join(map(str, a['panels']))}" if a.get("panels") else "")),
+    "set_playback": lambda a: ("Play the cines" if a.get("playing") else "Stop the cines")
+                              + (f" at {a['speed']:g}x" if a.get("speed") is not None else ""),
     "save_segmentation": lambda a: "Save segmentation",
 }
 

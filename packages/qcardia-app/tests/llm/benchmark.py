@@ -34,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from driver import build_controller, run_one  # noqa: E402
+from driver import build_controller, run_one, screen_after  # noqa: E402
 from test_cases import TEST_CASES  # noqa: E402
 from utils.app_config import OLLAMA_MODEL, list_ollama_models  # noqa: E402
 from validator import validate  # noqa: E402
@@ -77,8 +77,10 @@ def _run_one_model(model: str, cases: list, runs: int, run_dir: Path) -> list[di
             for run_idx in range(runs):
                 cc = build_controller(tc, llm_model=model)
                 try:
-                    result = run_one(cc, tc.prompt)
-                    passed = not result.error and validate(tc, result.tool_calls).passed
+                    result = run_one(cc, tc.prompt, history=tc.history)
+                    screen = screen_after(cc)
+                    before = screen_after(build_controller(tc, llm_model=model))
+                    passed = not result.error and validate(tc, result.tool_calls, screen, before).passed
                     elapsed = result.elapsed_s
                 except Exception as e:
                     passed, elapsed = False, None

@@ -65,7 +65,15 @@ class Device:
         return self.mode == "local"
 
 
-LOCAL_DEVICE = Device(id="local", label="This computer", patient_data_ok=True)
+def _local_model() -> str:
+    """This computer's default chat model: the "model" of an entry with "mode": "local" in DEVICES_PATH."""
+    with suppress(OSError, ValueError, AttributeError):
+        devices = json.loads(DEVICES_PATH.read_text(encoding="utf-8")).get("devices", [])
+        return next((d.get("model", "") for d in devices if d.get("mode") == "local"), "")
+    return ""
+
+
+LOCAL_DEVICE = Device(id="local", label="This computer", patient_data_ok=True, model=_local_model())
 _LOCAL_URL = LOCAL_DEVICE.base_url  # what non-cleared paths stay pinned to
 
 
@@ -319,6 +327,9 @@ def apply(device: Device) -> None:
     global _current
     base = device.base_url
     # Only chat can follow a non-Ollama device; the rest is Ollama-shaped, so it stays local.
+    # Chat sends the state block: series names, slice numbers, and LV volumes and ED/ES frames from
+    # the segmentation. These are derived numbers with no DICOM headers or pixels, so any chat
+    # device may get them (decided 2026-10-06).
     ollama = base if device.protocol == "ollama" else _LOCAL_URL
 
     from model import ollama_client

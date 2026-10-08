@@ -10,6 +10,14 @@ from pathlib import Path
 import numpy as np
 import pydicom
 import yaml
+from qcardia.analysis import (
+    CINE_LABELS,
+    bounding_box,
+    ed_es,
+    myocardial_coverage,
+    segmented_slices,
+    volume_curve,
+)
 from qcardia.cardisort import (
     classify_sequence_dir,
     get_sequence_dirs,
@@ -118,6 +126,7 @@ class DICOMModel:
         self._series_dirs: dict[str, Path] = {}
         self._perfusion_dirs: dict[str, list[Path]] = {}
         self._flow_dirs: dict[str, list[Path]] = {}
+        self.analysis: dict[str, dict] = {}  # per segmented series, see _analyse
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -363,8 +372,14 @@ class DICOMModel:
 
         return results
 
-    def segment(self, series_key: str) -> np.ndarray:
-        """From the subject's .segmentation_cache if made from the same series and weights, else from the model."""
+    @property
+    def segmentable(self) -> tuple[str, ...]:
+        """The series a segmentation model exists for."""
+        return (*self.cine_modalities, "LGE_SAX")
+
+    def segment(self, series_key: str, cached_only: bool = False) -> np.ndarray | None:
+        """From the subject's .segmentation_cache if made from the same series and weights, else from the model
+        (with cached_only, None). Measured for the assistant (see _analyse) the first time."""
         run = self.lge_wandb_run_path if series_key == "LGE_SAX" else self._seg_wandb_paths[series_key]
         weights = run / "files" / "last_model.pt"
         source = {
@@ -377,7 +392,12 @@ class DICOMModel:
             info = json.loads((folder / "info.json").read_text())
             if all(info.get(k) == v for k, v in source.items()):
                 with np.load(folder / "segmentation.npz") as cached:
-                    return cached["seg"]
+                    seg = cached["seg"]
+                if series_key not in self.analysis:
+                    self.analysis[series_key] = self._analyse(series_key, seg)
+                return seg
+        if cached_only:
+            return None
 
         if series_key == "LGE_SAX":
             seg = self.predict_lge_segmentation()
@@ -395,7 +415,37 @@ class DICOMModel:
                 (folder / "info.json").write_text(json.dumps(info, indent=2))
             except OSError as e:
                 logging.warning(f"Could not cache the {series_key} segmentation: {e}")
+        self.analysis[series_key] = self._analyse(series_key, seg)
         return seg
+
+    def _analyse(self, series_key: str, seg: np.ndarray) -> dict:
+        """What the assistant navigates by: the region of interest and, for CINE_SAX, the LV volume per
+        frame, ED/ES and the LV slices per frame. Indices follow the display order."""
+        seg = seg if seg.ndim == 4 else seg[np.newaxis]
+        result = {"box": bounding_box(seg)}
+        geom = self.get_geometry(series_key)
+        if geom is None:
+            return result
+        positions = [geom.slice_position(i) for i in range(len(geom.ipp_list))]
+        spacing = float(np.median(np.abs(np.diff(positions)))) if len(positions) > 1 else 0.0
+        voxel_mm3 = geom.pixel_spacing[0] * geom.pixel_spacing[1] * spacing
+        if series_key == "CINE_SAX":
+            curve = volume_curve(seg, voxel_mm3)
+            ed, es = ed_es(curve)
+            rv = volume_curve(seg, voxel_mm3, CINE_LABELS["rv"])
+            result.update(volumes=curve.round(1).tolist(), ed=ed, es=es, apex_to_base=geom.apex_to_base(),
+                          rv_volumes=rv.round(1).tolist(),
+                          lv_slices=[segmented_slices(seg, t) for t in range(len(seg))],
+                          lv_myo_rv_slices=[sorted(set.intersection(*(set(segmented_slices(seg, t, label))
+                                                                      for label in CINE_LABELS.values())))
+                                            for t in range(len(seg))],
+                          lv_coverage=[[round(c, 2) for c in myocardial_coverage(seg, t)] for t in range(len(seg))])
+        elif series_key == "LGE_SAX":
+            # LGE class 1 = myocardium without scar, class 2 = scar, so the myocardium is both.
+            scar = float(volume_curve(seg, voxel_mm3, 2)[0])
+            myo = float(volume_curve(seg, voxel_mm3, 1)[0]) + scar
+            result.update(myo_ml=round(myo, 1), scar_ml=round(scar, 1), scar_slices=segmented_slices(seg, 0, 2))
+        return result
 
     def get_geometry(self, series_key: str) -> VolumeGeometry | None:
         series = self.series.get(series_key)
@@ -644,6 +694,11 @@ class DICOMModel:
             info = {"volume": volume, "is_temporal": False, "num_frames": None}
         info["geometry"] = self.get_geometry(key)
         info["window"] = self._default_window(key, info["volume"])
+        if key in self.segmentable:
+            try:  # in the viewer and measured at once; a damaged cache must not stop the series from loading
+                info["segmentation"] = self.segment(key, cached_only=True)
+            except Exception as e:
+                logging.warning(f"Could not read the cached {key} segmentation: {e}")
         return info
 
     def _default_window(self, key: str, volume: np.ndarray) -> tuple[float, float]:
@@ -663,6 +718,7 @@ class DICOMModel:
         self._series_dirs = {}
         self._perfusion_dirs = {}
         self._flow_dirs = {}
+        self.analysis = {}
         self.subject_folder = None
         self.folder_path = None
         self.num_time_frames = 0

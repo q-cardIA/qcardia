@@ -6,6 +6,7 @@ from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
 from utils import study_log
 from utils.hanging_protocols import PRESETS, PanelAssignment
+from utils.windowing import null_myocardium_window
 from view.central_display_area_widget import CINE_TIME_AXIS
 from view.series_browser_widget import SeriesCardInfo
 
@@ -31,11 +32,15 @@ class DICOMController:
 
         self.view.load_patient_button_signal.connect(self.load_patient)
         self.view.seg_button_signal.connect(self.run_segmentation)
-        self.view.segmentable_series = (*self.model.cine_modalities, "LGE_SAX")
+        self.view.segmentable_series = self.model.segmentable
         self.view.save_button_signal.connect(self.save_segmentation)
         self.view.time_frame_changed_signal.connect(self.set_time_frame)
         self.view.preset_requested_signal.connect(self.apply_preset)
         self.view.reclassify_requested_signal.connect(self.reassign_series)
+        self.view.zoom_requested.connect(self.zoom_all)
+        self.view.contours_requested.connect(self.show_contours_everywhere)
+        self.view.window_requested.connect(self.window_everywhere)
+        self.view.phase_requested.connect(self.go_to_phase)
 
     def is_busy(self) -> bool:
         return self._load_worker is not None or self._seg_worker is not None or bool(self._seg_queue)
@@ -132,6 +137,7 @@ class DICOMController:
         self._waiting = {a["idx"]: (PanelAssignment(a["idx"], a["series_key"], a["axis"]), Counter())
                          for a in self._widget.panel_assignments() if a["series_key"]}
         self._widget.clear_series()
+        self._show_results()
         for idx, (panel, _) in self._waiting.items():
             self._widget.set_panel_waiting(idx, panel.key)
         self.view.series_browser_widget.populate(self._build_browser_cards(result, loading=True))
@@ -217,6 +223,10 @@ class DICOMController:
     def _register(self, key: str, info: dict):
         self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],
                                      window=info["window"], geometry=info["geometry"])
+        if info.get("segmentation") is not None:  # cached: ready to show, its contours still off
+            self._widget.set_segmentation(key, info["segmentation"])
+        if key in ("CINE_SAX", "LGE_SAX"):  # a cached segmentation was analysed while it loaded
+            self._show_results()
 
     def _build_browser_cards(self, result, loading: bool = False) -> list[SeriesCardInfo]:
         """With loading, the series still load: no thumbnails yet, they come with the series."""
@@ -263,11 +273,69 @@ class DICOMController:
         once it has loaded. Returns False if it is already queued or running."""
         if series_key in self._seg_queue:
             return False
+        if series_key not in self._loading_keys:  # a valid cache shows at once, for a next step in the same request
+            try:
+                seg = self.model.segment(series_key, cached_only=True)
+            except Exception as e:
+                logging.warning(f"Could not read the cached {series_key} segmentation: {e}")
+                seg = None
+            if seg is not None:
+                self._on_segmentation_done(series_key, seg)
+                return True
         self._seg_queue.append(series_key)
         self._seg_spans[series_key] = study_log.Span("segmentation", series=series_key, ahead=len(self._seg_queue) - 1)
         self._widget.show_segmentation_loading(series_key, "Queued…")
         self._start_next_segmentation()
         return True
+
+    def segmentation_for(self, series_key: str):
+        """series_key's segmentation: the one shown, else a valid cache. None if there is none."""
+        seg = self._widget.segmentation(series_key)
+        if seg is None and series_key in self.model.analysis:
+            seg = self.model.segment(series_key, cached_only=True)
+        return seg
+
+    def zoom_all(self, mode: str):
+        done = self._widget.zoom_panels(list(range(self._widget.n_panels)), mode, 100.0, self.model.analysis)
+        if mode == "roi" and not done:
+            self.view.show_info("Zoom to Heart", "No panel shows a segmented series or one of its plane. "
+                                "Segment it first (Tools > Predict Labels).")
+
+    def show_contours_everywhere(self, shown: bool):
+        """With shown, series without a segmentation are segmented (or read from the cache) first."""
+        for panel in self._widget.panel_assignments():
+            key = panel["series_key"]
+            if key is None:
+                continue
+            self._widget.set_panel_contours(panel["idx"], shown)
+            if shown and not self._widget.has_segmentation(key) and key in self.model.segmentable:
+                self.run_segmentation(key)
+
+    def window_everywhere(self, mode: str):
+        if mode == "reset":
+            for key in self.model.series:
+                if self._widget.is_series_registered(key):
+                    self._widget.set_window(key, self._widget.window(key, default=True))
+            return
+        seg = self.segmentation_for("LGE_SAX") if self._widget.is_series_registered("LGE_SAX") else None
+        window = null_myocardium_window(self._widget.volume("LGE_SAX"), seg) if seg is not None else None
+        if window is None:
+            self.view.show_info("Null Myocardium", "This needs a loaded LGE SAX with its segmentation "
+                                "(Tools > Predict Labels).")
+            return
+        self._widget.set_window("LGE_SAX", window)
+
+    def go_to_phase(self, phase: str):
+        sax = self.model.analysis.get("CINE_SAX", {})
+        if phase.lower() not in sax:
+            self.view.show_info("Go to " + phase, "ED and ES come from the CINE SAX segmentation. "
+                                "Segment it first (Tools > Predict Labels).")
+            return
+        self._widget.set_time_index(sax[phase.lower()], CINE_TIME_AXIS)
+
+    def is_segmenting(self, series_key: str) -> bool:
+        """Queued or running in the background."""
+        return series_key in self._seg_queue
 
     def _start_next_segmentation(self):
         if self._seg_worker is None and self._seg_queue and self._seg_queue[0] not in self._loading_keys:
@@ -294,6 +362,10 @@ class DICOMController:
     def _on_segmentation_done(self, series_key: str, result):
         self._widget.hide_segmentation_loading(series_key)
         self._widget.set_segmentation(series_key, result)
+        self._show_results()
+
+    def _show_results(self):
+        self.view.results_widget.show_analysis(self.model.analysis)
 
     def _on_segmentation_error(self, series_key: str, exc):
         self._widget.hide_segmentation_loading(series_key)

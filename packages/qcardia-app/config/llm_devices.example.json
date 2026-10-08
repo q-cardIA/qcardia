@@ -1,5 +1,5 @@
 {
-  "//": "Copy this file to llm_devices.json in the same folder (it is gitignored). Only 'devices' is read; 'examples' is ignored, so a plain copy just gives you the local Ollama with nothing to misconfigure. To add a machine, move one entry from 'examples' into 'devices' and fill it in. 'This computer' is always offered and never needs an entry. See the README for what each field means.",
+  "//": "Copy this file to llm_devices.json in the same folder (it is gitignored). Only 'devices' is read; 'examples' is ignored, so a plain copy just gives you the local Ollama with nothing to misconfigure. To add a machine, move one entry from 'examples' into 'devices' and fill it in. 'This computer' is always offered and never needs an entry; an entry with \"mode\": \"local\" and a \"model\" sets its default chat model. See the README for what each field means.",
   "devices": [],
   "examples": [
     {

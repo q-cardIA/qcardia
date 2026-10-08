@@ -60,8 +60,11 @@ def _find_and_remove(expected_call: dict, pool: list) -> tuple[bool, Optional[di
     return False, None, reason
 
 
-def validate(test_case: TestCase, actual_tool_calls: list) -> ValidationResult:
-    """actual_tool_calls: raw list of {"name": ..., "arguments": ...} dicts."""
+def validate(test_case: TestCase, actual_tool_calls: list, screen: dict | None = None,
+             before: dict | None = None) -> ValidationResult:
+    """actual_tool_calls: raw list of {"name": ..., "arguments": ...} dicts. screen: the viewer state
+    after those calls (driver.screen_after), needed by match_mode "state". With before, the state at
+    the start, match_mode "none" passes when nothing changed: a tool that refused is no harm."""
     expected = test_case.expected_tool_calls
     mode = test_case.match_mode
 
@@ -70,6 +73,13 @@ def validate(test_case: TestCase, actual_tool_calls: list) -> ValidationResult:
     if not any(e.get("name") == "list_subjects" for e in expected):
         actual = [c for c in actual if c.get("name") != "list_subjects"]
 
+    if mode == "none" and before is not None and screen is not None:
+        changed = sorted(k for k in screen if screen[k] != before.get(k))
+        problem = f"changed: {', '.join(changed)}" if changed else ""
+        return ValidationResult(test_case.id, not changed, mode, expected, actual, [], problem)
+    if mode == "state":
+        problem = test_case.expected_state(screen)
+        return ValidationResult(test_case.id, problem is None, mode, expected, actual, [], problem or "")
     if mode == "exact":
         return _validate_exact(test_case.id, mode, expected, actual)
     elif mode == "any_order":

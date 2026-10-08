@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QGuiApplication, QIcon, QKeySequence
@@ -23,10 +25,12 @@ from PySide6.QtWidgets import (
 
 from utils.app_config import ICON_PATH, ISSUES_URL, REPO_URL, SETTINGS, WIKI_URL
 from utils.hanging_protocols import PRESET_BUTTON_ORDER, preset_label
+from utils.layouts import CINE_SPEEDS, SPLIT_PRESETS
 from view.central_display_area_widget import CentralDisplayAreaWidget
 from view.dialogs import pick_directory
 from view.chat_widget import ChatWidget
 from view.loading_overlay import LoadingOverlay
+from view.results_widget import ResultsWidget
 from view.series_browser_widget import SeriesBrowserWidget
 from view.sidebar_widget import SidebarWidget
 from view import theme
@@ -126,6 +130,10 @@ class MainWindow(QMainWindow):
     session_started = Signal()  # the analysis screen is built; the welcome screen's choices are still readable
     session_ended = Signal()
     reclassify_requested_signal = Signal(object, str)
+    zoom_requested = Signal(str)  # "roi", "fill" or "fit", in every panel
+    contours_requested = Signal(bool)  # contours on or off in every panel
+    window_requested = Signal(str)  # "null_myocardium" (LGE_SAX) or "reset" (every series)
+    phase_requested = Signal(str)  # "ED" or "ES"
 
     def __init__(self):
         super().__init__()
@@ -144,7 +152,8 @@ class MainWindow(QMainWindow):
         self._dock_titles_timer.timeout.connect(self._update_dock_titles)
         self.session_busy = lambda: None  # set by main: why the session cannot end yet, or None
         self._play_timer = QTimer(self)
-        self._play_timer.timeout.connect(lambda: self.step_time_frame(1))
+        self._play_timer.timeout.connect(lambda: self.step_time_frame(self._play_step))
+        self._cine_speed, self._play_step = 1.0, 1
         self.full_screen_action = QAction("&Full Screen", self)
         self.full_screen_action.setCheckable(True)
         self.full_screen_action.setShortcut("F11")
@@ -176,6 +185,7 @@ class MainWindow(QMainWindow):
         self.chat_widget = ChatWidget(self)
         screen_width = QGuiApplication.primaryScreen().availableGeometry().width()
         self.chat_widget.setMaximumWidth(int(screen_width * 0.75))
+        self.results_widget = ResultsWidget(self)
 
         time_controls_container = QWidget()
         time_layout = QHBoxLayout(time_controls_container)
@@ -194,6 +204,8 @@ class MainWindow(QMainWindow):
         self.display_area_widget.time_step_requested.connect(self.step_time_frame)
         self.display_area_widget.time_axis_changed.connect(self.show_time_axis)
         self.display_area_widget.play_toggle_requested.connect(self.toggle_cine)
+        self.display_area_widget.segmentation_requested.connect(
+            lambda key: key in self.segmentable_series and self.seg_button_signal.emit(key))
 
         self.top_bar = QWidget()
         self.top_bar.setProperty("role", "topBar")
@@ -251,7 +263,7 @@ class MainWindow(QMainWindow):
         self._default_dock_state = None
         self._dock_titles_timer.stop()
         self._dock_title_bars = {}
-        for dock in (self.sidebar_dock, self.series_dock, self.chat_dock):
+        for dock in (self.sidebar_dock, self.series_dock, self.chat_dock, self.results_dock):
             self.removeDockWidget(dock)
             dock.deleteLater()
         self.top_bar.deleteLater()
@@ -268,6 +280,12 @@ class MainWindow(QMainWindow):
         self.series_dock = self._dock(self.series_browser_widget, "Series", "seriesDock", Qt.RightDockWidgetArea)
         self.chat_dock = self._dock(self.chat_widget, "Assistant", "assistantDock", Qt.RightDockWidgetArea)
         self.splitDockWidget(self.series_dock, self.chat_dock, Qt.Horizontal)
+        self.results_dock = self._dock(self.results_widget, "Results", "resultsDock", Qt.RightDockWidgetArea)
+        self._tab_results_with_chat()
+
+    def _tab_results_with_chat(self):
+        self.tabifyDockWidget(self.chat_dock, self.results_dock)
+        self.chat_dock.raise_()
 
     def _settle_docks(self, screen_width: int):
         chat_width = min(int(screen_width * 0.15), self.chat_widget.maximumWidth())
@@ -278,6 +296,8 @@ class MainWindow(QMainWindow):
         saved = SETTINGS.value("window/dock_state")
         if saved is not None:
             self.restoreState(saved)
+            if "resultsDock".encode("utf-16-be") not in bytes(saved):  # saved before the Results panel
+                self._tab_results_with_chat()
             if self._assistant_disabled:
                 self.chat_dock.hide()
 
@@ -418,6 +438,7 @@ class MainWindow(QMainWindow):
         # Ctrl+A stays "select all" while typing: text fields take their standard keys first.
         self.toggle_series_browser_action = self._panel_action(view_menu, self.series_dock, "&Series", "Ctrl+Shift+Q")
         self.toggle_chat_action = self._panel_action(view_menu, self.chat_dock, "&Assistant", "Ctrl+A")
+        self._panel_action(view_menu, self.results_dock, "&Results")
         view_menu.addAction("&Reset Panel Layout", self.reset_panel_layout)
         view_menu.addSeparator()
         crosshair = view_menu.addAction("&Crosshair")
@@ -433,6 +454,19 @@ class MainWindow(QMainWindow):
         layouts = view_menu.addMenu("&Layout")
         for name in PRESET_BUTTON_ORDER:
             layouts.addAction(preset_label(name), lambda n=name: self.preset_requested_signal.emit(n))
+        self.zoom_menu = view_menu.addMenu("&Zoom")
+        for text, mode in (("Zoom to &Heart", "roi"), ("&Fill Panels", "fill"), ("Fit &Whole Image", "fit")):
+            self.zoom_menu.addAction(text, lambda m=mode: self.zoom_requested.emit(m))
+        view_menu.addSeparator()
+        self.contours_menu = view_menu.addMenu("&Contours")
+        self.contours_menu.addAction("&Show in All Panels", lambda: self.contours_requested.emit(True))
+        self.contours_menu.addAction("&Hide in All Panels", lambda: self.contours_requested.emit(False))
+        self.window_menu = view_menu.addMenu("&Window")
+        self.window_menu.addAction("&Null Myocardium (LGE)", lambda: self.window_requested.emit("null_myocardium"))
+        self.window_menu.addAction("&Reset All Windows", lambda: self.window_requested.emit("reset"))
+        self.playback_menu = StickyMenu("&Playback", view_menu)
+        self.playback_menu.aboutToShow.connect(self._rebuild_playback_menu)
+        view_menu.addMenu(self.playback_menu)
 
         tools_menu = StickyMenu("&Tools", bar)
         bar.addMenu(tools_menu)
@@ -459,21 +493,52 @@ class MainWindow(QMainWindow):
         self.grid_menu.clear()
         group = QActionGroup(self.grid_menu)
         current = self.display_area_widget.grid_size
+        split = self.display_area_widget.split
         for rows, cols in GRID_SIZES:
             action = self.grid_menu.addAction(f"{rows} \u00d7 {cols}")
             action.setCheckable(True)
-            action.setChecked((rows, cols) == current)
+            action.setChecked((rows, cols) == current and split is None)
             group.addAction(action)
             action.triggered.connect(lambda _=False, r=rows, c=cols: self.display_area_widget.set_grid_size(r, c))
+        self.grid_menu.addSeparator()
+        for preset in SPLIT_PRESETS:
+            left, right = (("Large" if r * c == 1 else f"{r} \u00d7 {c}") for r, c in (preset[:2], preset[2:]))
+            action = self.grid_menu.addAction(f"{left}  |  {right}")
+            action.setCheckable(True)
+            action.setChecked(split == preset)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, p=preset: self.display_area_widget.set_split_layout(p))
+
+    def _rebuild_playback_menu(self):
+        """Rebuilt on opening, so the play state and the speed are current."""
+        menu = self.playback_menu
+        menu.clear()
+        menu.addAction("&Pause" if self.is_playing() else "&Play", self.toggle_cine)
+        speeds = self.speed_menu = menu.addMenu("&Speed")  # kept: a submenu built here must outlive this call
+        group = QActionGroup(speeds)
+        for speed in CINE_SPEEDS:
+            action = speeds.addAction(f"{speed:g}\u00d7" + (" (one heartbeat per second)" if speed == 1 else ""))
+            action.setCheckable(True)
+            action.setChecked(speed == self._cine_speed)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, s=speed: self.set_cine_speed(s))
+        menu.addSeparator()
+        menu.addAction("Go to &End-Diastole", lambda: self.phase_requested.emit("ED"))
+        menu.addAction("Go to End-&Systole", lambda: self.phase_requested.emit("ES"))
+
+    def _predict(self, key: str):
+        """Segments key (a cached segmentation is there already) and draws its contours in its panels."""
+        self.display_area_widget.show_segmentation(key)
+        self.seg_button_signal.emit(key)
 
     def _rebuild_predict_menu(self):
         self.predict_menu.clear()
         loaded = [k for k in self.segmentable_series if self.display_area_widget.is_series_registered(k)]
         for key in self.segmentable_series:
-            action = self.predict_menu.addAction(key, lambda k=key: self.seg_button_signal.emit(k))
+            action = self.predict_menu.addAction(key, lambda k=key: self._predict(k))
             action.setEnabled(key in loaded)
         self.predict_menu.addSeparator()
-        every = self.predict_menu.addAction("All Loaded Views", lambda: [self.seg_button_signal.emit(k) for k in loaded])
+        every = self.predict_menu.addAction("All Loaded Views", lambda: [self._predict(k) for k in loaded])
         every.setEnabled(bool(loaded))
 
     def _panel_action(self, menu, dock: QDockWidget, text: str, shortcut: str | None = None) -> QAction:
@@ -525,12 +590,32 @@ class MainWindow(QMainWindow):
         if n > 1:
             self.time_slider.setValue((self.time_slider.value() + step) % n)
 
+    def is_playing(self) -> bool:
+        return self._play_timer.isActive()
+
+    @property
+    def cine_speed(self) -> float:
+        return self._cine_speed
+
+    def set_cine_speed(self, speed: float):
+        """Heartbeats per second; also while playing."""
+        self._cine_speed = speed
+        if self._play_timer.isActive():
+            self._play_timer.start(self._play_interval())
+
+    def _play_interval(self) -> int:
+        """ms per step: one heartbeat per second at speed 1. At most 50 steps per second, so faster
+        playback skips frames."""
+        fps = (self.time_slider.maximum() + 1) * self._cine_speed
+        self._play_step = max(1, math.ceil(fps / 50))
+        return max(20, round(1000 * self._play_step / fps))
+
     def toggle_cine(self):
-        """Play or pause the cine: one heartbeat per second, at most 50 frames per second."""
+        """Play or pause the cine at the chosen speed."""
         if self._play_timer.isActive():
             self._play_timer.stop()
         elif self.time_slider.maximum() > 0:
-            self._play_timer.start(max(20, 1000 // (self.time_slider.maximum() + 1)))
+            self._play_timer.start(self._play_interval())
 
     def on_time_slider_changed(self, value):
         max_val = self.time_slider.maximum()

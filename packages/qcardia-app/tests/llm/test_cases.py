@@ -6,26 +6,35 @@ tools and argument names — `list_subjects()`, `load_subject(subject_id=)`,
 `run_segmentation(modality=)`. See fakes.py for the fixture classes and
 src/llm/ for the real prompt/tool specs this harness exercises unmodified.
 
-Capabilities the app doesn't have yet — grid sizing, flow presets, per-panel
-slice state, analysis/zoom/playback tools, and the T1/EGE/anatomy series keys
-cardisort doesn't produce — have their cases written out but **commented
-out**, each under a header saying what has to land before they're
-uncommented. Nothing is skipped at runtime: if a case is
-in TEST_CASES it gets run and it counts towards the pass rate.
+Capabilities the app doesn't have yet — flow presets, analysis/playback
+tools, and the T1/EGE/anatomy series keys cardisort doesn't produce — have
+their cases written out but **commented out**, each under a header saying
+what has to land before they're uncommented. Nothing is skipped at runtime:
+if a case is in TEST_CASES it gets run and it counts towards the pass rate.
 
 match_mode:
     "exact"      — same calls in same order, no extras
     "any_order"  — same calls, any order, no extras
     "subset"     — every expected call appears somewhere in actual (extras OK)
     "none"       — actual tool_calls must be empty
+    "state"      — the calls are run on the fake viewer, and expected_state
+                   checks the screen they lead to, whatever route got there
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
-from fakes import DEFAULT_CINE_MODALITIES, FakeDisplayAreaWidget, FakeModel, FakeView
+from fakes import (
+    DEFAULT_CINE_MODALITIES,
+    FakeDicomController,
+    FakeDisplayAreaWidget,
+    FakeModel,
+    FakeView,
+    phantom_analysis,
+    phantom_depths,
+)
 
 
 @dataclass
@@ -40,10 +49,13 @@ class TestCase:
     match_mode: str = "exact"
     available_subjects: List[str] = field(default_factory=lambda: [f"QLGE{n:02d}_" for n in range(1, 22)])
     notes: str = ""
+    history: List[dict] = field(default_factory=list)  # earlier turns, before prompt
     # For one expected call (matched by name), assert _execute_tool()'s result
     # text contains this substring — for regression cases where the result
     # text itself is what's being checked (e.g. partial-fill reporting).
     result_contains: dict | None = None  # {"tool_name": str, "contains": str}
+    # match_mode "state": takes driver.screen_after()'s dict, returns why it is wrong, or None.
+    expected_state: Callable[[dict], str | None] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -64,16 +76,29 @@ FULL_STRESS = {**FULL, "PERF_STRESS_SAX": True}
 
 # --- Fixture helpers --------------------------------------------------------
 
-def _model(series: dict, subject: str | None = "QLGE01_") -> FakeModel:
+def _model(series: dict, subject: str | None = "QLGE01_", analysis: dict | None = None) -> FakeModel:
     return FakeModel(
         series=series,
         folder_path=Path(subject) if subject else None,
+        num_time_frames=30 if "CINE_SAX" in series else 0,
         cine_modalities=DEFAULT_CINE_MODALITIES,
+        analysis=analysis,
     )
 
 
 def _view(grid=(2, 2), panels=None, registered_series: set[str] | None = None) -> FakeView:
     return FakeView(FakeDisplayAreaWidget(grid_size=grid, panels=panels or [], registered_series=registered_series))
+
+
+def _segmented(panels: list[dict] = (), grid=(2, 2), catalog: dict = None, lge: bool = False) -> tuple[FakeModel, FakeView]:
+    """As _displaying, with the CINE_SAX and CINE_4CH segmentations measured (see fakes.phantom_analysis),
+    and with lge the LGE_SAX one too (fakes.phantom_lge)."""
+    catalog = catalog or FULL
+    analysis = phantom_analysis()
+    if lge:
+        analysis["LGE_SAX"] = {"box": (30, 30, 66, 66), "myo_ml": 110.0, "scar_ml": 6.0, "scar_slices": [4, 5, 6]}
+    return (_model(catalog, analysis=analysis),
+            _view(grid=grid, panels=list(panels), registered_series=set(catalog)))
 
 
 def _loaded(catalog: dict = FULL, grid=(2, 2)) -> tuple[FakeModel, FakeView]:
@@ -127,6 +152,70 @@ def display_any_panel(series_key: str, axis: str | None = None) -> dict:
 
 def segment(modality: str) -> dict:
     return {"name": "run_segmentation", "arguments": {"modality": modality}}
+
+
+# --- Screen checks for match_mode "state": each returns why the screen is wrong, or None ---------
+
+def screen(*checks: Callable[[dict], str | None]) -> Callable[[dict], str | None]:
+    def check_all(s: dict) -> str | None:
+        return next((p for p in (c(s) for c in checks) if p), None)
+    return check_all
+
+
+def grid_is(rows: int, cols: int):
+    return lambda s: None if s["grid"] == (rows, cols) else f"grid {s['grid']}, expected {(rows, cols)}"
+
+
+def cells_are(*cells: tuple[int, int, int, int]):
+    return lambda s: None if s["cells"] == sorted(cells) else f"cells {s['cells']}, expected {sorted(cells)}"
+
+
+def frame_is(frame: int):
+    return lambda s: None if s["frame"] == frame else f"frame {s['frame']}, expected {frame}"
+
+
+def panel_is(idx: int, key: str, slice_no: int | None = None):
+    def check(s):
+        if idx >= len(s["panels"]):
+            return f"no panel {idx}"
+        k, sl, _ = s["panels"][idx]
+        if k != key or (slice_no is not None and sl != slice_no):
+            return f"panel {idx} shows {k} slice {sl}, expected {key}" + (f" slice {slice_no}" if slice_no else "")
+    return check
+
+
+def slices_shown(key: str, slices: list[int]):
+    """These slices of key are on screen, one panel each, in any panel order."""
+    def check(s):
+        shown = sorted(sl for k, sl, _ in s["panels"] if k == key)
+        return None if shown == sorted(slices) else f"{key} slices shown {shown}, expected {sorted(slices)}"
+    return check
+
+
+def zoomed(zoom, panels: list[int] | None = None):
+    """The given panels (default: every panel with a series) have this zoom."""
+    def check(s):
+        idxs = panels if panels is not None else [i for i, (k, _, _) in enumerate(s["panels"]) if k]
+        wrong = {i: s["panels"][i][2] for i in idxs if s["panels"][i][2] != zoom}
+        return None if not wrong else f"zoom {wrong}, expected {zoom!r}"
+    return check
+
+
+def only_zoomed(panels: list[int]):
+    def check(s):
+        others = [i for i, (_, _, z) in enumerate(s["panels"]) if z is not None and i not in panels]
+        return None if not others else f"panels {others} zoomed too"
+    return check
+
+
+def nothing_segmented(s):
+    return f"ran run_segmentation({s['segmentations']}) without asking" if s["segmentations"] else None
+
+
+def nearest(series_key: str, depth: float) -> int:
+    """1-based slice of series_key nearest to depth in the phantom."""
+    depths = phantom_depths(series_key)
+    return min(range(len(depths)), key=lambda i: abs(depths[i] - depth)) + 1
 
 
 # ---------------------------------------------------------------------------
@@ -460,10 +549,12 @@ _add(
 )
 _m, _v = _loaded(grid=(2, 4))
 _add(
-    id="display_multi_003", category="display_multi", description="'All LGE views' should reach for the preset",
+    id="display_multi_003", category="display_multi", description="All LGE views on screen",
     model=_m, view=_v, prompt="Show all LGE views",
-    expected_tool_calls=[preset("viability")], match_mode="subset",
-    notes="Four display_series calls would also fill the screen, but the preset is the intended route.",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=lambda s: None if {"LGE_SAX", "LGE_2CH", "LGE_3CH", "LGE_4CH"} <= {k for k, _, _ in s["panels"]}
+    else f"panels show {[k for k, _, _ in s['panels']]}",
+    notes="The viability preset or four display_series calls both do it.",
 )
 _m, _v = _loaded()
 _add(
@@ -538,24 +629,112 @@ for i, (prompt, grid) in enumerate([
         expected_tool_calls=[], match_mode="none",
     )
 
-# --- Not implemented yet: grid sizing ---------------------------------------
-# There is no set_grid tool — grid size only changes as a side effect of
-# apply_preset. Uncomment when a grid tool lands in src/llm/tools.py.
-#
-# for i, (prompt, grid) in enumerate([
-#     ("Set a 2x3 grid", (2, 3)),
-#     ("Change the grid to 1 row and 3 columns", (1, 3)),
-#     ("I need a 1 by 4 grid", (1, 4)),
-#     ("Give me a 3-column single-row layout", (1, 3)),
-#     ("Resize to 2 rows and 4 columns", (2, 4)),
-# ], start=1):
-#     _m, _v = _loaded()
-#     _add(
-#         id=f"grid_{i:03d}", category="grid", description="Explicit grid resize",
-#         model=_m, view=_v, prompt=prompt,
-#         expected_tool_calls=[{"name": "set_grid", "arguments": {"rows": grid[0], "cols": grid[1]}}],
-#         match_mode="subset",
-#     )
+# === GRID — set_grid: sizes and shifting the panels; set_split_grid: two halves ==
+
+for i, (prompt, grid) in enumerate([
+    ("Set a 2x3 grid", (2, 3)),
+    ("Change the grid to 1 row and 3 columns", (1, 3)),
+    ("I need a 3 by 3 layout", (3, 3)),
+    ("Give me a 3-column single-row layout", (1, 3)),
+], start=1):
+    _m, _v = _loaded()
+    _add(
+        id=f"grid_{i:03d}", category="grid", description="Explicit grid size",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[], match_mode="state", expected_state=screen(grid_is(*grid)),
+    )
+_m, _v = _loaded()
+_add(
+    id="grid_005", category="grid", description="One large panel on the left, a 2x2 on the right",
+    model=_m, view=_v, prompt="Give me one large panel on the left and a 2x2 grid on the right",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(2, 4), cells_are((0, 0, 2, 2), (0, 2, 1, 1), (0, 3, 1, 1), (1, 2, 1, 1),
+                                                     (1, 3, 1, 1))),
+    notes="set_split_grid(1, 1, 2, 2): the large panel is as large as the 2x2 beside it.",
+)
+_m, _v = _loaded()
+_add(
+    id="grid_007", category="grid", description="One large panel with a 3x3 beside it",
+    model=_m, view=_v, prompt="One big panel on the left and a 3 by 3 grid next to it",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(3, 6), lambda s: None if s["cells"][0] == (0, 0, 3, 3) and len(s["cells"]) == 10
+                          else f"cells {s['cells']}"),
+)
+_m, _v = _segmented(lge=True)
+_add(
+    id="grid_008", category="grid", description="LGE large on the left, the four cines in a 2x2 beside it",
+    model=_m, view=_v,
+    prompt="Show the LGE SAX mid slice large on the left with the four cines in a 2x2 next to it",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(2, 4), panel_is(0, "LGE_SAX", 6),
+                          lambda s: None if {k for k, _, _ in s["panels"][1:5]} == {"CINE_SAX", "CINE_2CH", "CINE_3CH",
+                                                                                   "CINE_4CH"}
+                          else f"panels 1-4 show {[k for k, _, _ in s['panels'][1:5]]}"),
+)
+_m, _v = _displaying([{"idx": i, "series_key": k} for i, k in
+                      enumerate(["CINE_SAX", "LGE_SAX", "CINE_3CH", "LGE_4CH", "LGE_2CH", "LGE_3CH"])], grid=(2, 3))
+_add(
+    id="grid_006", category="grid", description="Make room on the left of the current view for two LAX cines",
+    model=_m, view=_v, prompt="Put the 2 chamber and 4 chamber cine on the left of the current view",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(
+        grid_is(2, 4), panel_is(1, "CINE_SAX"), panel_is(2, "LGE_SAX"), panel_is(3, "CINE_3CH"),
+        panel_is(5, "LGE_4CH"), panel_is(6, "LGE_2CH"), panel_is(7, "LGE_3CH"),
+        lambda s: None if {s["panels"][0][0], s["panels"][4][0]} == {"CINE_2CH", "CINE_4CH"}
+        else f"left column shows {s['panels'][0][0]}, {s['panels'][4][0]}",
+    ),
+    notes="The six panels keep their places relative to each other: set_grid(2, 4, shift_cols=1), then "
+          "display_series in panels 0 and 4.",
+)
+def _split_screen(panels: dict[int, str], split=(1, 1, 2, 2)):
+    """The phantom with the CINE and LGE segmentations measured, in a split layout showing panels."""
+    m, v = _segmented(lge=True)
+    w = v.display_area_widget
+    w.set_split_layout(split)
+    for idx, key in panels.items():
+        w.set_panel_series(idx, key)
+    return m, v
+
+
+def split_is(split):
+    return lambda s: None if s["split"] == tuple(split) else f"split {s['split']}, expected {tuple(split)}"
+
+
+_CINES = ["CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH"]
+_m, _v = _split_screen({0: "LGE_SAX", **{i + 1: k for i, k in enumerate(_CINES)}})
+_add(
+    id="split_001", category="grid", description="Large panel on the right, a 3x3 on the left",
+    model=_m, view=_v, prompt="Can you also make a large one on the right with a 3x3 on the left",
+    expected_tool_calls=[], match_mode="state", expected_state=split_is((3, 3, 1, 1)),
+    notes="set_split_grid(3, 3, 1, 1): panels 0-8 on the left, 9 the large one.",
+)
+_m, _v = _loaded()
+_add(
+    id="split_002", category="grid", description="Two 2x2 grids side by side",
+    model=_m, view=_v, prompt="Give me two 2x2 grids next to each other",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=lambda s: None if sorted(s["cells"]) == [(r, c, 1, 1) for r in range(2) for c in range(4)]
+    else f"cells {s['cells']}",
+    notes="set_split_grid(2, 2, 2, 2) or set_grid(2, 4) look the same.",
+)
+_m, _v = _split_screen({0: "LGE_SAX", **{i + 1: k for i, k in enumerate(_CINES)}})
+_add(
+    id="split_003", category="grid", description="Move the large LGE to the right, the cines in a 2x2 left",
+    model=_m, view=_v,
+    prompt="Put the LGE in a large panel on the right and the four cines in a 2x2 on the left",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(split_is((2, 2, 1, 1)), panel_is(4, "LGE_SAX"), lambda s: None if sorted(k for k, _, _ in s["panels"][:4]) == sorted(_CINES)
+                          else f"panels 0-3 show {[k for k, _, _ in s['panels'][:4]]}"),
+    notes="set_split_grid(2, 2, 1, 1) keeps panels by number, so the LGE (was 0) ends up small: show it in "
+          "panel 4 and the cines in 0-3.",
+)
+_m, _v = _loaded()
+_add(
+    id="grid_neg_001", category="grid", description="Grid larger than the viewer supports",
+    model=_m, view=_v, prompt="Set a 6x8 grid",
+    expected_tool_calls=[], match_mode="none",
+    notes="set_grid allows 1-4 rows and 1-8 columns.",
+)
 
 
 # === DISPLAY_STATE — decisions that depend on what's already on screen ========
@@ -584,29 +763,565 @@ _add(
     match_mode="any_order",
 )
 
-# --- Not implemented yet: per-panel slice state -----------------------------
-# display_series has no slice_position parameter and the app doesn't track a
-# per-panel slice index, so "same slice" / "same level" / "same depth as panel
-# N" can't be expressed as a tool call. Uncomment once display_series takes a
-# slice argument.
-#
-# for i, prompt in enumerate([
-#     "Show LGE_SAX in panel 0 at the same slice",
-#     "Replace the cine SAX in panel 2 with LGE SAX, keeping the same level",
-#     "Show CINE_SAX in panel 1 at the same depth as panel 0",
-#     "Display LGE_SAX in panel 3 at the same anatomical level as panel 0",
-#     "Replace every CINE panel with the LGE equivalent, same level where applicable",
-# ], start=1):
-#     _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 2, "series_key": "CINE_SAX"}])
-#     _add(
-#         id=f"display_state_slice_{i:03d}", category="display_state",
-#         description="Slice-preserving replace",
-#         model=_m, view=_v, prompt=prompt,
-#         expected_tool_calls=[], match_mode="subset",  # fill in once the argument exists
-#     )
+# === SLICE — slice numbers and positions (the phantom's LGE_SAX has 12 slices to CINE_SAX's 14) ===
+
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="slice_001", category="slice", description="A slice number",
+    model=_m, view=_v, prompt="Show slice 5 of the cine SAX in panel 1",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(1, "CINE_SAX", 5)),
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "slice": 8}])
+_add(
+    id="slice_002", category="slice", description="Another stack at the depth of a panel",
+    model=_m, view=_v, prompt="Show the LGE SAX in panel 1 at the same depth as panel 0",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(panel_is(0, "CINE_SAX", 9), panel_is(1, "LGE_SAX", nearest("LGE_SAX", -73.3))),
+    notes="display_series(1, LGE_SAX, match_panel=0).",
+)
+# Issue #34: the extended functional layout, then all cine swapped for LGE at the same depths.
+_lax = {0: "4CH", 6: "3CH", 12: "2CH"}
+_sax = [i for i in range(18) if i not in _lax][:14]
+_m, _v = _displaying([{"idx": i, "series_key": f"CINE_{p}"} for i, p in _lax.items()]
+                     + [{"idx": i, "series_key": "CINE_SAX", "slice": z} for z, i in enumerate(_sax)],
+                     grid=(3, 6))
+_add(
+    id="slice_003", category="slice", description="Swap every cine for LGE, SAX panels keep their depth (#34)",
+    model=_m, view=_v, prompt="Swap out all the cine images for LGE",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(*[panel_is(i, f"LGE_{p}") for i, p in _lax.items()],
+                          *[panel_is(i, "LGE_SAX", nearest("LGE_SAX", phantom_depths("CINE_SAX")[z]))
+                            for z, i in enumerate(_sax)]),
+    notes="One display_series per panel with no slice: each SAX panel keeps its position, as LGE slice "
+          "numbers differ from cine.",
+)
+
+
+def _spread_cine_sax(count: int):
+    def check(s):
+        shown = [sl for k, sl, _ in s["panels"] if k == "CINE_SAX"]
+        if len(shown) != count or len(set(shown)) != count:
+            return f"CINE_SAX slices shown {shown}, expected {count} different ones"
+        if shown not in (sorted(shown), sorted(shown, reverse=True)):
+            return f"CINE_SAX slices {shown} are not in order across the panels"
+    return check
+
+
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="slice_004", category="slice", description="Nine SAX slices spread over a 3x3",
+    model=_m, view=_v, prompt="Show 9 of the cine SAX slices in a 3x3",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(grid_is(3, 3), _spread_cine_sax(9)),
+)
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="slice_005", category="slice", description="The apex at the current frame",
+    model=_m, view=_v, prompt="Show the most apical cine SAX slice that still has LV, myocardium and RV in panel 0",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(0, "CINE_SAX", 3)),
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="slice_neg_001", category="slice", description="Slice beyond the stack",
+    model=_m, view=_v, prompt="Show slice 20 of the cine SAX in panel 0",
+    expected_tool_calls=[], match_mode="none", notes="CINE_SAX has 14 slices.",
+)
+
+
+# === FRAME — frame numbers and ED/ES from the segmentation (phantom: ED = 28, ES = 11) ===
+
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="frame_001", category="frame", description="A frame number",
+    model=_m, view=_v, prompt="Go to frame 10",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(frame_is(10)),
+)
+for i, (prompt, frame) in enumerate([("Show end-systole", 11), ("Go to the ED frame", 28)], start=2):
+    _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+    _add(
+        id=f"frame_{i:03d}", category="frame", description="ED/ES from the segmentation",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[], match_mode="state", expected_state=screen(frame_is(frame)),
+    )
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="frame_neg_001", category="frame", description="Frame beyond the cine",
+    model=_m, view=_v, prompt="Go to frame 45",
+    expected_tool_calls=[], match_mode="none", notes="The cines have 30 frames.",
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="frame_neg_002", category="frame", description="ES asked, nothing segmented",
+    model=_m, view=_v, prompt="Go to end systole",
+    expected_tool_calls=[], match_mode="none",
+    notes="Without a segmentation there is no ES frame: say so and ask whether to segment.",
+)
+
+
+# === NAVIGATION — layout, phase and slice levels in one request =================
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
+_add(
+    id="nav_001", category="navigation", description="ES basal slices in a 2x2",
+    model=_m, view=_v, prompt="Show the ES basal slices of the cine sax in a 2x2",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(2, 2), frame_is(11), slices_shown("CINE_SAX", [11, 10, 9, 8])),
+    notes="LV is in slices 3-11 at ES and slice 14 is basal, so the four basal LV slices are 11-8.",
+)
+
+
+def _base_mid_apex(s):
+    shown = [sl for k, sl, _ in s["panels"] if k == "CINE_SAX"]
+    if sorted(shown) != [3, 7, 11]:
+        return f"CINE_SAX slices shown {shown}, expected 3 (apex), 7 (mid) and 11 (base)"
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="nav_002", category="navigation", description="Base, mid and apex at ED in a row",
+    model=_m, view=_v, prompt="Show a basal, a mid and an apical cine SAX slice at end-diastole in a 1x3 layout",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(1, 3), frame_is(28), _base_mid_apex),
+    notes="LV is in slices 2-12 at ED, but slice 12 is a crescent (< 50% surrounded) and slice 2 has no RV: 11 to 3.",
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
+_add(
+    id="nav_neg_001", category="navigation", description="ES basal slices asked, nothing segmented",
+    model=_m, view=_v, prompt="Show the ES basal slices of the cine sax in a 2x2",
+    expected_tool_calls=[], match_mode="none",
+    notes="ES and the LV range come from the segmentation: ask whether to run it first.",
+)
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="nav_003", category="navigation", description="SAX at four depths, then ED",
+    model=_m, view=_v, prompt="Display the cine SAX at 4 depths and move to the ED frame",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(frame_is(28), _spread_cine_sax(4)),
+    notes="Four different slices in order over the 2x2; slice numbers, not depths in mm.",
+)
+for i, (prompt, slice_no) in enumerate([("Display the base slice", 11), ("Now show the apex slice", 3)], start=4):
+    _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
+    _add(
+        id=f"nav_{i:03d}", category="navigation", description="Base or apex by the state block's rule",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(0, "CINE_SAX", slice_no)),
+        notes="At frame 1 LV is in slices 2-12 of 14; slice 12 is a crescent and slice 2 has no RV: 11 to 3.",
+    )
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"}])
+_add(
+    id="nav_006", category="navigation", description="The basal slice of a stack with no LV range of its own",
+    model=_m, view=_v, prompt="Show the basal LGE SAX slice in panel 1",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(panel_is(1, "LGE_SAX", nearest("LGE_SAX", phantom_depths("CINE_SAX")[10]))),
+    notes="The CINE_SAX LV range, mapped to the nearest LGE_SAX slice.",
+)
+
+
+# === WINDOW — window/level (the phantom's default window is 300/600) ==========
+
+def window_set(key: str, mode: str):
+    return {"name": "set_window", "arguments": {"series_key": key, "mode": mode}}
+
+
+for i, prompt in enumerate(["Make the myocardium dark on the LGE",
+                            "Adjust the window/level on the LGE until the myocardium is dark"], start=1):
+    _m, _v = _segmented([{"idx": 0, "series_key": "LGE_SAX"}], lge=True)
+    _add(
+        id=f"window_{i:03d}", category="window", description="LGE window with the myocardium nulled",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[window_set("LGE_SAX", "null_myocardium")], match_mode="exact",
+    )
+for i, (prompt, key, mode) in enumerate([("Make the LGE a bit darker", "LGE_SAX", "darker"),
+                                         ("Much more contrast on the cine", "CINE_SAX", "more_contrast"),
+                                         ("Reset the window of the LGE", "LGE_SAX", "reset")], start=3):
+    _m, _v = _segmented([{"idx": 0, "series_key": "LGE_SAX"}, {"idx": 1, "series_key": "CINE_SAX"}], lge=True)
+    _add(
+        id=f"window_{i:03d}", category="window", description=f"Window step: {mode}",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[window_set(key, mode)], match_mode="exact",
+    )
+_m, _v = _segmented([{"idx": 0, "series_key": "LGE_SAX"}])
+_add(
+    id="window_neg_001", category="window", description="Nulled myocardium asked, LGE not segmented",
+    model=_m, view=_v, prompt="Make the myocardium dark on the LGE",
+    expected_tool_calls=[], match_mode="none",
+    notes="null_myocardium needs the LGE segmentation: say so and ask whether to run it.",
+)
+
+
+def _two_lge_mid(s):
+    """Two LGE_SAX panels at the mid slice (6 in the phantom): the left with contours and the series'
+    window, the right without contours and with the myocardium nulled in its own window."""
+    shown = [i for i, (k, sl, _) in enumerate(s["panels"]) if k == "LGE_SAX"]
+    if len(shown) != 2 or any(s["panels"][i][1] != 6 for i in shown):
+        return f"LGE_SAX panels {[s['panels'][i] for i in shown]}, expected two at slice 6"
+    left, right = shown
+    if not s["contours"][left] or s["contours"][right]:
+        return f"contours {s['contours']}: expected on in panel {left} and off in panel {right}"
+    if s["panel_windows"][left] is not None or s["panel_windows"][right] is None:
+        return f"own windows {s['panel_windows']}: expected only panel {right}"
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "LGE_SAX"}], grid=(1, 1), lge=True)
+_add(
+    id="window_006", category="window", description="One series twice: contours left, nulled window right",
+    model=_m, view=_v,
+    prompt="Show the LGE SAX mid slice twice side by side, the left one with segmentation and the right one "
+           "with the myocardium nulled",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(_two_lge_mid),
+    notes="run_segmentation shows the cached LGE contours in both; set_contours hides them on the right; "
+          "set_window with panels gives only the right panel its own window.",
+)
+
+
+def _own_window_only(panel: int):
+    def check(s):
+        own = [i for i, w in enumerate(s["panel_windows"]) if w is not None]
+        return None if own == [panel] and not s["windows"] else f"own windows in {own}, series windows {s['windows']}"
+    return check
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "LGE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"}], lge=True)
+_add(
+    id="window_007", category="window", description="A window step in one panel only",
+    model=_m, view=_v, prompt="Make only panel 1 a bit darker",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(_own_window_only(1)),
+)
+
+
+# === ADVANCED — layouts grown from a preset, split grids, contours per block ===
+
+def _after_preset(preset: str, catalog: dict = None):
+    """The screen right after a preset, on the phantom with every CINE and the LGE_SAX segmentation cached
+    (measured, contours drawn in no panel yet)."""
+    m, v = _segmented(catalog=catalog or FULL_STRESS, lge=True)
+    m.analysis.update({"CINE_2CH": {"box": (60, 50, 200, 190)}, "CINE_3CH": {"box": (60, 50, 200, 190)}})
+    FakeDicomController(m, v).apply_preset(preset)
+    return m, v
+
+
+def _keys(view) -> list:
+    return [p["series_key"] for p in view.display_area_widget._panels]
+
+
+def _slices(view) -> list:
+    return [p["slice"] + 1 if p["series_key"] else None for p in view.display_area_widget._panels]
+
+
+def _moved(before_keys: list, before_slices: list, old_cols: int, new_cols: int, shift_cols: int = 0):
+    """The panels of an old grid are in the new grid at the same row, shifted right by shift_cols."""
+    def check(s):
+        for i, (key, sl) in enumerate(zip(before_keys, before_slices)):
+            r, c = divmod(i, old_cols)
+            j = r * new_cols + c + shift_cols
+            if (s["panels"][j][0], s["panels"][j][1]) != (key, sl):
+                return f"panel {j} shows {s['panels'][j][:2]}, expected {key} slice {sl} (was panel {i})"
+    return check
+
+
+def _column(panels: list[int], keys: list[str], ordered: bool = True):
+    def check(s):
+        shown = [s["panels"][i][0] for i in panels]
+        ok = shown == keys if ordered else sorted(shown, key=str) == sorted(keys)
+        return None if ok else f"panels {panels} show {shown}, expected {keys}"
+    return check
+
+
+_LAX_CINES = ["CINE_2CH", "CINE_3CH", "CINE_4CH"]
+_m, _v = _after_preset("perfusion")
+_add(
+    id="adv_001", category="advanced", description="Perfusion 3x3, the three LAX cines in a new right column",
+    model=_m, view=_v, prompt="Display the three long-axis cines on the right",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(3, 4), _column([3, 7, 11], _LAX_CINES),
+                          _moved(_keys(_v), _slices(_v), 3, 4)),
+    notes="set_grid(3, 4) keeps the 3x3 on the left; the new column is panels 3, 7 and 11.",
+)
+_m, _v = _after_preset("perfusion")
+_add(
+    id="adv_002", category="advanced", description="Perfusion 3x3, the three LGE LAX views in a new left column",
+    model=_m, view=_v, prompt="Put the three long-axis LGE views in a column on the left",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(3, 4), _column([0, 4, 8], ["LGE_2CH", "LGE_3CH", "LGE_4CH"], ordered=False),
+                          _moved(_keys(_v), _slices(_v), 3, 4, shift_cols=1)),
+    notes="set_grid(3, 4, shift_cols=1): the 3x3 moves right, the new left column is panels 0, 4 and 8.",
+)
+
+
+def _twice(base_keys: list, rows: int, cols: int):
+    """The layout twice side by side in a rows x 2cols grid: the left copy without contours, the right copy
+    with contours wherever the series is segmented."""
+    segmented = {"CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH", "LGE_SAX"}
+
+    def check(s):
+        at = {cell[:2]: i for i, cell in enumerate(s["cells"])}  # a plain or a split grid look the same
+        for i, key in enumerate(base_keys):
+            r, c = divmod(i, cols)
+            left, right = at.get((r, c)), at.get((r, c + cols))
+            if left is None or right is None:
+                return f"cells {s['cells']}: no {rows}x{2 * cols} layout"
+            if s["panels"][left][0] != key or s["panels"][right][0] != key:
+                return f"panels {left} and {right} show {s['panels'][left][0]}, {s['panels'][right][0]}, expected {key}"
+            if key in segmented and (s["contours"][left] or not s["contours"][right]):
+                return f"{key}: contours {s['contours'][left]} left, {s['contours'][right]} right, expected off, on"
+    return check
+
+
+_m, _v = _after_preset("functional", CINE_ONLY)
+_add(
+    id="adv_003", category="advanced", description="Functional twice: left without, right with contours",
+    model=_m, view=_v,
+    prompt="Show this layout twice side by side, the left one without segmentation and the right one with",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(2, 4), _twice(_keys(_v), 2, 2)),
+)
+_m, _v = _after_preset("viability", CINE_LGE)
+_add(
+    id="adv_004", category="advanced", description="Viability in a 2x8: left 4 columns without, right 4 with",
+    model=_m, view=_v,
+    prompt="Make it a 2x8 with the same views on the right half, contours only on the right",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(2, 8), _twice(_keys(_v), 2, 4)),
+)
+
+
+def _base_to_apex(count: int, first: int, last: int, start: int = 0):
+    """count CINE_SAX panels from panel start on, in reading order from first (base) down to last (apex)."""
+    def check(s):
+        shown = [sl for k, sl, _ in s["panels"][start:start + count] if k == "CINE_SAX"]
+        if len(shown) != count or shown != sorted(set(shown), reverse=True) or shown[0] != first or shown[-1] != last:
+            return f"CINE_SAX slices {shown}, expected {count} from {first} (base) down to {last} (apex)"
+    return check
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
+_add(
+    id="adv_005", category="advanced", description="3x3 from base to apex at end-diastole",
+    model=_m, view=_v, prompt="Show the cine SAX from base to apex in a 3x3 and go to the ED frame",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(3, 3), frame_is(28), _base_to_apex(9, 11, 3)),
+    notes="At ED the slices from base to apex are exactly 11 to 3.",
+)
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
+_add(
+    id="adv_006", category="advanced", description="Large 4CH left, the nine ES SAX slices in a 3x3 beside it",
+    model=_m, view=_v,
+    prompt="Large cine 4 chamber on the left and next to it the nine SAX slices from base to apex at end-systole",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(3, 6), panel_is(0, "CINE_4CH"), frame_is(11), _base_to_apex(9, 11, 3, start=1)),
+    notes="set_split_grid(1, 1, 3, 3); at ES the LV slices are exactly 11 to 3.",
+)
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1), lge=True)
+_add(
+    id="adv_007", category="advanced", description="Large LGE base left, a 2x2 of cine levels and the 4CH",
+    model=_m, view=_v,
+    prompt="One big LGE SAX at the base on the left, and next to it a 2x2 with the cine SAX at base, mid and "
+           "apex and the cine 4 chamber",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(2, 4), panel_is(0, "LGE_SAX", 9),
+                          lambda s: None if sorted((k, sl) for k, sl, _ in s["panels"][1:5] if k == "CINE_SAX")
+                          == [("CINE_SAX", 3), ("CINE_SAX", 7), ("CINE_SAX", 11)]
+                          and "CINE_4CH" in [k for k, _, _ in s["panels"][1:5]]
+                          else f"panels 1-4 show {s['panels'][1:5]}"),
+)
+_m, _v = _after_preset("perfusion")
+_lge_row = [(i, sl) for i, (k, sl) in enumerate(zip(_keys(_v), _slices(_v))) if k == "LGE_SAX"]
+_add(
+    id="adv_008", category="advanced", description="Perfusion 3x3, the LGE row swapped for cine SAX in place",
+    model=_m, view=_v, prompt="Replace the LGE row with the cine short axis at the same positions",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(*[panel_is(i, "CINE_SAX", _v.display_area_widget.matching_slice("LGE_SAX", sl - 1,
+                                                                                          "CINE_SAX") + 1)
+                            for i, sl in _lge_row]),
+    notes="display_series per panel without slice: a same-plane swap keeps each panel's position.",
+)
+
+
+def _lge_over_cine(s):
+    if s["grid"] != (2, 3):
+        return f"grid {s['grid']}, expected (2, 3)"
+    top, bottom = s["panels"][:3], s["panels"][3:6]
+    if any(k != "LGE_SAX" for k, _, _ in top) or sorted(sl for _, sl, _ in top) != [3, 6, 9]:
+        return f"top row {top}, expected LGE_SAX at its base, mid and apex"
+    if [(k, sl) for k, sl, _ in bottom] not in ([("CINE_SAX", 11), ("CINE_SAX", 7), ("CINE_SAX", 3)],
+                                                [("CINE_SAX", 3), ("CINE_SAX", 7), ("CINE_SAX", 11)]):
+        return f"bottom row {bottom}, expected CINE_SAX at the ES base, mid and apex (11, 7, 3)"
+    if not all(s["contours"][3:6]):
+        return f"contours {s['contours'][3:6]} in the bottom row, expected on"
+    if "LGE_SAX" not in s["windows"] and not any(s["panel_windows"][:3]):
+        return "no nulled-myocardium window on the LGE"
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1), lge=True)
+_add(
+    id="adv_009", category="advanced", description="LGE levels with nulled myocardium over cine ES levels",
+    model=_m, view=_v,
+    prompt="Show the LGE SAX at base, mid and apex with the myocardium nulled, and below them the cine SAX at "
+           "base, mid and apex at end-systole with segmentation",
+    expected_tool_calls=[], match_mode="state", expected_state=_lge_over_cine,
+    notes="The LGE levels nearest the CINE_SAX base, mid and apex are 9, 6 and 3 at frame 1 and at ES.",
+)
+
+
+# === CONTOURS — showing and hiding a segmentation per panel ===================
+
+def _base_with_and_without(s):
+    shown = [i for i, (k, sl, _) in enumerate(s["panels"]) if k == "CINE_SAX"]
+    if len(shown) != 2 or any(s["panels"][i][1] != 11 for i in shown):
+        return f"CINE_SAX panels {[s['panels'][i] for i in shown]}, expected two at the base, slice 11"
+    if sorted(s["contours"][i] for i in shown) != [False, True]:
+        return f"contours {[s['contours'][i] for i in shown]}, expected one with and one without"
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
+_add(
+    id="contours_001", category="contours", description="The base twice, with and without segmentation",
+    model=_m, view=_v,
+    prompt="Show the cine SAX base slice twice, one with segmentation and one without",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(_base_with_and_without),
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "has_segmentation": True},
+                      {"idx": 1, "series_key": "CINE_SAX", "has_segmentation": True}])
+_add(
+    id="contours_002", category="contours", description="Hide the contours in one panel",
+    model=_m, view=_v, prompt="Hide the segmentation in panel 1",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=lambda s: None if s["contours"][:2] == [True, False] else f"contours {s['contours']}",
+)
+
+# Asking before segmenting: a repeated request is not a yes.
+_ASKED = [{"role": "user", "content": "Go to the ED frame"},
+          {"role": "assistant", "content": "ED comes from the CINE_SAX segmentation, which has not been run yet. "
+                                           "Shall I run it?"}]
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="consent_001", category="segmentation", description="The request repeated after the question",
+    model=_m, view=_v, prompt="go to ed frame", history=list(_ASKED),
+    expected_tool_calls=[], match_mode="none",
+    notes="Not a yes: ask again whether to segment.",
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="consent_002", category="segmentation", description="Yes to the question",
+    model=_m, view=_v, prompt="yes", history=list(_ASKED),
+    expected_tool_calls=[segment("CINE_SAX")], match_mode="subset",
+)
+_ASKED_ZOOM = [{"role": "user", "content": "Zoom into the ROI"},
+               {"role": "assistant", "content": "Zooming to the ROI needs a CINE_SAX segmentation, which has not "
+                                                "been run yet. Shall I run it?"}]
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="consent_003", category="segmentation", description="Yes to segmenting for a zoom",
+    model=_m, view=_v, prompt="yes", history=list(_ASKED_ZOOM),
+    expected_tool_calls=[segment("CINE_SAX")], match_mode="subset",
+    notes="The app waits for the segmentation and asks again with the new state, where the zoom follows.",
+)
+
+
+# === PLAYBACK ==================================================================
+
+def playing_is(playing: bool):
+    return lambda s: None if s["playing"] == playing else f"playing {s['playing']}, expected {playing}"
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="playback_001", category="playback", description="Play the cines",
+    model=_m, view=_v, prompt="Play the cines",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(playing_is(True)),
+)
+for i, (prompt, frame) in enumerate([("Stop the movie", None), ("Stop at end-systole", 11)], start=2):
+    _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+    _v.playing = True
+    _add(
+        id=f"playback_{i:03d}", category="playback", description="Stop the cines" + (", then ES" if frame else ""),
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[], match_mode="state",
+        expected_state=screen(playing_is(False), *([frame_is(frame)] if frame else [])),
+    )
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+_add(
+    id="playback_004", category="playback", description="Slow motion",
+    model=_m, view=_v, prompt="Play the cines in slow motion",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(playing_is(True), lambda s: None if s["speed"] == 0.5 else f"speed {s['speed']}"),
+)
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+_v.playing = True
+_add(
+    id="playback_005", category="playback", description="Faster while playing",
+    model=_m, view=_v, prompt="Faster",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(playing_is(True), lambda s: None if s["speed"] == 2 else f"speed {s['speed']}"),
+    notes="From 1x the next speed up is 2x.",
+)
+
+
+# === ZOOM ======================================================================
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"},
+                     {"idx": 2, "series_key": "CINE_4CH"}])
+_add(
+    id="zoom_001", category="zoom", description="Every panel to the ROI",
+    model=_m, view=_v, prompt="Zoom all panels to the ROI",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(zoomed("roi")),
+    notes="LGE_SAX has no segmentation of its own and uses the CINE_SAX one of the same plane.",
+)
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "CINE_4CH"}])
+_add(
+    id="zoom_002", category="zoom", description="The heart, in clinical words",
+    model=_m, view=_v, prompt="Zoom in on the heart",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(zoomed("roi")),
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "CINE_4CH"}])
+_add(
+    id="zoom_003", category="zoom", description="A percentage on every panel",
+    model=_m, view=_v, prompt="Zoom to 150%",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(zoomed(("percent", 150.0))),
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "CINE_4CH"},
+                      {"idx": 2, "series_key": "CINE_2CH"}])
+_add(
+    id="zoom_004", category="zoom", description="A percentage on one panel",
+    model=_m, view=_v, prompt="Zoom panel 1 to 50%",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(zoomed(("percent", 50.0), [1]), only_zoomed([1])),
+)
+_m, _v = _loaded(CINE_ONLY)
+_add(
+    id="zoom_005", category="zoom", description="Extended LV function, images filling their panels",
+    model=_m, view=_v,
+    prompt="Show the extended LV function and make all images fit nicely, without empty bands at the sides",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(grid_is(3, 6), zoomed("fill")),
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "CINE_4CH"}])
+_add(
+    id="zoom_006", category="zoom", description="Back to the whole image",
+    model=_m, view=_v, prompt="Reset the zoom so I see the whole images again",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(zoomed("fit")),
+)
+_m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"}])
+_add(
+    id="zoom_neg_001", category="zoom", description="ROI asked, nothing segmented",
+    model=_m, view=_v, prompt="Zoom to the heart in every panel",
+    expected_tool_calls=[], match_mode="none",
+    notes="No segmentation to frame: ask whether to run it.",
+)
 
 
 # === SEGMENTATION ============================================================
+
+# A loaded subject with a cached segmentation: measured (ED/ES, ROI) but not shown in any panel.
+for i, prompt in enumerate(["Segment the cine SAX", "Show the segmentation"], start=1):
+    _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
+    _add(
+        id=f"segmentation_cached_{i:03d}", category="segmentation",
+        description="A cached segmentation that no panel shows yet",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[], match_mode="state",
+        expected_state=lambda s: None if s["contours"][0] else "panel 0 shows no contours",
+        notes="Available is not shown: run_segmentation or set_contours shows the cached result at once.",
+    )
 
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
@@ -733,10 +1448,8 @@ _add(
 )
 
 
-# --- Not implemented yet: analysis / zoom / playback tools -------------------
-# No run_analysis, no zoom_to_roi, and no play/pause — set_time_frame jumps to
-# a specific frame, it doesn't start or stop a cine loop. Uncomment per tool as
-# each one is added to TOOL_SPECS.
+# --- Not implemented yet: run_analysis tool -----------------------------------
+# No run_analysis. Uncomment this case when it is added to TOOL_SPECS.
 #
 # _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "has_segmentation": True}])
 # _add(
@@ -744,16 +1457,3 @@ _add(
 #     model=_m, view=_v, prompt="Analyse panel 0",
 #     expected_tool_calls=[{"name": "run_analysis", "arguments": {"panel_idx": 0}}], match_mode="subset",
 # )
-# _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "has_segmentation": True}])
-# _add(
-#     id="zoom_001", category="zoom", description="Zoom into a segmented panel",
-#     model=_m, view=_v, prompt="Zoom into panel 0",
-#     expected_tool_calls=[{"name": "zoom_to_roi", "arguments": {"panel_idx": 0}}], match_mode="subset",
-# )
-# for i, (prompt, playing) in enumerate([("Start the cine playback", True), ("Pause the cines", False)], start=1):
-#     _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
-#     _add(
-#         id=f"playback_{i:03d}", category="playback", description="Start/stop cine playback",
-#         model=_m, view=_v, prompt=prompt,
-#         expected_tool_calls=[{"name": "set_playback", "arguments": {"playing": playing}}], match_mode="subset",
-#     )
