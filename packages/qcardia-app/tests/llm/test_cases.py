@@ -1443,10 +1443,8 @@ _add(
 )
 
 
-# --- Not implemented yet: analysis / playback tools ---------------------------
-# No run_analysis, and no play/pause — set_time_frame jumps to a specific
-# frame, it doesn't start or stop a cine loop. Uncomment per tool as each one
-# is added to TOOL_SPECS.
+# --- Not implemented yet: run_analysis tool -----------------------------------
+# No run_analysis. Uncomment this case when it is added to TOOL_SPECS.
 #
 # _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "has_segmentation": True}])
 # _add(
@@ -1454,10 +1452,3 @@ _add(
 #     model=_m, view=_v, prompt="Analyse panel 0",
 #     expected_tool_calls=[{"name": "run_analysis", "arguments": {"panel_idx": 0}}], match_mode="subset",
 # )
-# for i, (prompt, playing) in enumerate([("Start the cine playback", True), ("Pause the cines", False)], start=1):
-#     _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
-#     _add(
-#         id=f"playback_{i:03d}", category="playback", description="Start/stop cine playback",
-#         model=_m, view=_v, prompt=prompt,
-#         expected_tool_calls=[{"name": "set_playback", "arguments": {"playing": playing}}], match_mode="subset",
-#     )
