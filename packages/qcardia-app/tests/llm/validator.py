@@ -70,8 +70,8 @@ def validate(test_case: TestCase, actual_tool_calls: list, screen: dict | None =
 
     actual = [c for c in actual_tool_calls if isinstance(c, dict)]
     # A lookup is a free step toward the answer, scored only by a case that expects it.
-    if not any(e.get("name") == "list_subjects" for e in expected):
-        actual = [c for c in actual if c.get("name") != "list_subjects"]
+    if not any(e.get("name") == "search_patients" for e in expected):
+        actual = [c for c in actual if c.get("name") != "search_patients"]
 
     if mode == "none" and before is not None and screen is not None:
         changed = sorted(k for k in screen if screen[k] != before.get(k))

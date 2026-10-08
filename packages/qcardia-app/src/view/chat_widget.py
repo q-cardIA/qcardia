@@ -37,6 +37,7 @@ from utils.app_config import (
     discover_local_gguf_files,
     gguf_model_tag,
     import_gguf_model,
+    patient_name,
 )
 from view import theme
 from view.theme import thin_loading_bar
@@ -57,8 +58,8 @@ _FAILURE_MARKERS = ("failed", "not found", "not loaded", "out of range", "unknow
 # available on click, mirroring how agentic coding UIs collapse tool calls
 # to a summary line with an expandable detail underneath.
 _TOOL_SUMMARY_FORMATTERS = {
-    "list_subjects": lambda a: "List subjects",
-    "load_subject": lambda a: f"Load subject {a.get('subject_id')}",
+    "search_patients": lambda a: "Search patient database" + (f": {a['query']}" if a.get("query") else ""),
+    "load_subject": lambda a: f"Load {patient_name(a.get('subject_id'))}",
     "run_segmentation": lambda a: f"Run {a.get('modality')} segmentation",
     "apply_preset": lambda a: f"Apply {a.get('preset')} preset",
     "display_series": lambda a: (

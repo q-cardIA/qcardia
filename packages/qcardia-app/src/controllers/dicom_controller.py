@@ -143,7 +143,7 @@ class DICOMController:
         self._show_results()
         self.view.series_browser_widget.populate(self._build_browser_cards(result, loading=True))
         self.view.series_browser_widget.set_load_progress(0, self._load_total)
-        self.view.sidebar.show_patient(self._current_subject_folder.name, 0)
+        self.view.sidebar.show_patient(self._current_subject_folder, 0)
         self.current_time_index = self._cine_frames = 0
         self.view.update_time_slider_range(0)
         self._ready(True)
@@ -160,7 +160,7 @@ class DICOMController:
         self.view.series_browser_widget.set_load_progress(self._load_total - len(self._loading_keys), self._load_total)
         path = next(e.path for e in self._last_result.entries if e.key == key and e.is_primary)
         self.view.series_browser_widget.update_card(path, self._widget.get_thumbnail(key), key)
-        self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
+        self.view.sidebar.show_patient(self._current_subject_folder, len(self._last_result.loaded))
         cine_frames = self._widget.n_frames(CINE_TIME_AXIS)
         if cine_frames != self._cine_frames:  # else a later cine would reset the frame shown
             self._cine_frames = cine_frames
@@ -220,7 +220,7 @@ class DICOMController:
 
         self._last_result.loaded[new_key] = info
         self.view.series_browser_widget.populate(self._build_browser_cards(self._last_result))
-        self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
+        self.view.sidebar.show_patient(self._current_subject_folder, len(self._last_result.loaded))
 
     def _register(self, key: str, info: dict):
         self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],

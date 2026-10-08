@@ -3,10 +3,12 @@ import os
 from PySide6.QtCore import QPoint, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -15,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from model.background_worker import CallableWorker
 from utils import bindings, llm_devices
-from utils.app_config import COMMUNITY_URL, ISSUES_URL, REPO_URL, WIKI_URL, data_dir, set_data_dir
+from utils.app_config import COMMUNITY_URL, ISSUES_URL, REPO_URL, WIKI_URL, data_dir, patient_source, set_data_dir
 from view.controls_dialog import ControlsDialog
 from view.dialogs import pick_directory
 from view import theme
@@ -120,8 +122,10 @@ class WelcomeWidget(QWidget):
         return button, row.itemAt(1).widget()
 
     def _show_data_dir(self):
-        self._data_dir_label.setText(f"Data folder: {data_dir().name}")
-        self._data_dir_label.setToolTip(str(data_dir()))
+        source = patient_source()
+        csv = source.suffix.lower() == ".csv"
+        self._data_dir_label.setText(f"{'Patient list' if csv else 'Data folder'}: {source.name}")
+        self._data_dir_label.setToolTip(str(source))
 
     def _show_controls(self):
         self._controls_label.setText(f"Controls: {bindings.preset_name(bindings.current())}")
@@ -479,9 +483,19 @@ class WelcomeWidget(QWidget):
         self._appearance_label.setText(theme.appearance_summary())
 
     def _on_change_data_dir(self):
-        folder = pick_directory(self, "Select data folder")
-        if folder:
-            set_data_dir(folder)
+        """A patient list (.csv, its paths relative to it), or a folder with one subfolder per subject."""
+        menu = QMenu(self)
+        as_list = menu.addAction("Patient list (.csv)…")
+        menu.addAction("Data folder…")
+        chosen = menu.exec(self._change_data_dir_btn.mapToGlobal(self._change_data_dir_btn.rect().bottomLeft()))
+        if chosen is None:
+            return
+        if chosen is as_list:
+            path = QFileDialog.getOpenFileName(self, "Select patient list", str(data_dir()), "Patient lists (*.csv)")[0]
+        else:
+            path = pick_directory(self, "Select data folder")
+        if path:
+            set_data_dir(path)
             self._show_data_dir()
 
     def community_clicked(self):

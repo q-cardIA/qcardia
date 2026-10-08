@@ -1,7 +1,7 @@
 """Eval test cases for qcardia-app-dev's ChatController tool-calling.
 
 One suite, one vocabulary: every case is written against the app's real
-tools and argument names — `list_subjects()`, `load_subject(subject_id=)`,
+tools and argument names — `search_patients(query=)`, `load_subject(subject_id=)`,
 `display_series(panel_idx=, series_key=, axis=)`, `apply_preset(preset=)`,
 `run_segmentation(modality=)`. See fakes.py for the fixture classes and
 src/llm/ for the real prompt/tool specs this harness exercises unmodified.
@@ -120,12 +120,13 @@ def _no_subject(grid=(2, 2)) -> tuple[FakeModel, FakeView]:
 
 # --- Tool-call helpers — argument keys verified against src/llm/tools.py -----
 
-def load(subject_id: str) -> dict:
-    return {"name": "load_subject", "arguments": {"subject_id": subject_id}}
+def search_patients() -> dict:
+    return {"name": "search_patients", "arguments": {}}
 
 
-def list_subjects() -> dict:
-    return {"name": "list_subjects", "arguments": {}}
+def loaded(folder: str):
+    """The state check that exactly this patient's study was loaded, by whatever name, ID or number."""
+    return lambda s: None if s["loaded"] == [folder] else f"loaded {s['loaded'] or 'nothing'}, expected {folder}"
 
 
 def preset(name: str) -> dict:
@@ -235,19 +236,19 @@ _m, _v = _no_subject()
 _add(
     id="load_001", category="load", description="Load by number, no subject loaded",
     model=_m, view=_v, prompt="Load subject 3",
-    expected_tool_calls=[load("QLGE03_")], match_mode="exact",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("QLGE03_"),
 )
 _m, _v = _no_subject()
 _add(
     id="load_002", category="load", description="Load via 'open patient' synonym",
     model=_m, view=_v, prompt="Open patient 7",
-    expected_tool_calls=[load("QLGE07_")], match_mode="exact",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("QLGE07_"),
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_2CH"}])
 _add(
     id="load_003", category="load", description="Switch subject while one is already loaded",
     model=_m, view=_v, prompt="Switch to subject 5",
-    expected_tool_calls=[load("QLGE05_")], match_mode="exact",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("QLGE05_"),
 )
 _m, _v = _no_subject()
 _add(
@@ -266,14 +267,72 @@ _m, _v = _no_subject()
 _add(
     id="load_004", category="load", description="Other dataset naming: number to folder name",
     model=_m, view=_v, prompt="Open patient 12",
-    expected_tool_calls=[load("patient_012")], match_mode="exact",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("patient_012"),
     available_subjects=[f"patient_{n:03d}" for n in range(1, 41)],
 )
 _m, _v = _no_subject()
 _add(
-    id="load_list_001", category="load", description="Which subjects exist — a lookup, not a load",
-    model=_m, view=_v, prompt="Which subjects can I open?",
-    expected_tool_calls=[list_subjects()], match_mode="exact",
+    id="load_list_001", category="load", description="Which patients exist — a lookup, not a load",
+    model=_m, view=_v, prompt="Which patients can I open?",
+    expected_tool_calls=[search_patients()], match_mode="exact",
+)
+_m, _v = _no_subject()
+_add(
+    id="load_005", category="load", description="Load by name",
+    model=_m, view=_v, prompt="Load Adam James",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("QLGE08_"),
+    notes="search_patients finds one Adam James (ID 08HD8H7Y9K); load_subject with that ID.",
+)
+_m, _v = _no_subject()
+_add(
+    id="load_006", category="load", description="Load by hospital ID",
+    model=_m, view=_v, prompt="Open the scans of patient 13HD3H7Y9K",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("QLGE13_"),
+)
+_m, _v = _no_subject()
+_add(
+    id="load_007", category="load", description="A misheard name: ask, do not load",
+    model=_m, view=_v, prompt="Load Adam Jams",
+    expected_tool_calls=[], match_mode="none",
+    notes="No exact match; Adam James only sounds alike, so ask whether that is the patient.",
+)
+_m, _v = _no_subject()
+_add(
+    id="load_008", category="load", description="Two patients with that name: ask which",
+    model=_m, view=_v, prompt="Load Emily",
+    expected_tool_calls=[], match_mode="none",
+    notes="Emily Clarke and Emily Carter: ask which one.",
+)
+_m, _v = _no_subject()
+_add(
+    id="load_neg_003", category="load", description="A name the database does not have",
+    model=_m, view=_v, prompt="Load Margaret Thatcher",
+    expected_tool_calls=[], match_mode="none",
+)
+_LOADED_EMILY = [{"role": "user", "content": "load patient 11HD1H7Y9K"},
+                 {"role": "assistant", "content": "Loaded the imaging of Emily Clarke, ID 11HD1H7Y9K."}]
+_m, _v = _loaded()
+_add(
+    id="load_009", category="load", description="A question about other patients is a search",
+    model=_m, view=_v, prompt="Is there another Emily?", history=list(_LOADED_EMILY),
+    expected_tool_calls=[search_patients()], match_mode="exact",
+    notes="Emily Carter too: only a search knows. Answer, do not load.",
+)
+_m, _v = _loaded()
+_add(
+    id="load_010", category="load", description="Search again after an earlier wrong 'no such patient'",
+    model=_m, view=_v, prompt="Load Emely",
+    history=[*_LOADED_EMILY, {"role": "user", "content": "how about an emely"},
+             {"role": "assistant", "content": "No patient named Emely is in the database."}],
+    expected_tool_calls=[search_patients()], match_mode="exact",
+    notes="The earlier answer came without a search. Emely sounds like Emily Clarke and Emily Carter: ask which.",
+)
+_m, _v = _no_subject()
+_add(
+    id="load_011", category="load", description="One name that sounds alike: ask, do not load it",
+    model=_m, view=_v, prompt="Load Grace Walkr",
+    expected_tool_calls=[search_patients()], match_mode="exact",
+    notes="Ask 'Did you mean Grace Walker?'; searching that name and loading it is the model guessing.",
 )
 
 
@@ -1395,7 +1454,7 @@ _add(
 # The harness runs ONE turn (driver.run_one), so what a compound case can
 # fairly assert depends on where it starts:
 #
-#   From _no_subject(), build_tools() offers list_subjects/load_subject only —
+#   From _no_subject(), build_tools() offers search_patients/load_subject only —
 #   no series are loaded, so apply_preset/display_series/run_segmentation are
 #   all filtered out. The only correct output is the load call, which makes
 #   match_mode="exact" a real test: it catches a model inventing calls to
@@ -1413,7 +1472,7 @@ _m, _v = _no_subject()
 _add(
     id="compound_001", category="compound", description="Load + apply preset in one request",
     model=_m, view=_v, prompt="Load subject 3 and set up the functional view",
-    expected_tool_calls=[load("QLGE03_")], match_mode="subset",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("QLGE03_"),
     notes="Single-turn harness only sees the load call; apply_preset legitimately comes in a follow-up turn.",
 )
 _m, _v = _no_subject()
@@ -1421,9 +1480,9 @@ _add(
     id="compound_002", category="compound", description="Four-step request with nothing loaded yet",
     model=_m, view=_v,
     prompt="Load subject 1, display the viability preset, segment the cine 4ch, cine sax and lge sax",
-    expected_tool_calls=[load("QLGE01_")], match_mode="exact",
-    notes="exact, not subset: apply_preset/run_segmentation aren't offered at all here, so any "
-          "call to them is a hallucinated tool, not an eager-but-correct next step.",
+    expected_tool_calls=[], match_mode="state", expected_state=loaded("QLGE01_"),
+    notes="apply_preset/run_segmentation aren't offered here, so the load is the step; the app plans "
+          "the rest again once the patient has loaded.",
 )
 _m, _v = _loaded(FULL, grid=(2, 4))
 _add(

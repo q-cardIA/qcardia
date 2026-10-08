@@ -11,9 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from controllers.chat_controller import ChatController  # noqa: E402
-from utils import llm_devices  # noqa: E402
+from utils import app_config, llm_devices  # noqa: E402
 
-from fakes import FakeDicomController  # noqa: E402
+from fakes import TEST_PATIENTS, FakeDicomController  # noqa: E402
 from test_cases import TestCase  # noqa: E402
 
 
@@ -26,6 +26,7 @@ def build_controller(test_case: TestCase, llm_model: str | None = None) -> ChatC
     cc._worker = None
     cc._llm_model = llm_model or llm_devices.default_model()  # as the app's model picker starts
     cc._available_subjects_cache = list(test_case.available_subjects)
+    app_config._patient_db = lambda: TEST_PATIENTS  # the cases' patients, whatever this machine's data folder has
     cc._warmup_worker = None
     return cc
 
@@ -87,8 +88,9 @@ def run_calls(cc: ChatController, calls: list[dict]) -> tuple[list[dict], bool]:
     for i, c in enumerate(calls):
         if c["name"] == "load_subject":
             name = cc._resolve_subject(str(c["arguments"].get("subject_id", "")))
-            result = (f"Loaded subject {name}." if name else f"No single subject folder matches "
-                      f"'{c['arguments'].get('subject_id')}'. Call list_subjects for the exact names.")
+            result = (f"Loaded the imaging of {app_config.patient_label(name)}." if name else
+                      f"No single patient matches '{c['arguments'].get('subject_id')}'. Call search_patients "
+                      "for the hospital ID.")
             cc._append_tool_history(c["name"], c["arguments"], result)
             if name:
                 cc.loaded_subjects = [*getattr(cc, "loaded_subjects", []), name]

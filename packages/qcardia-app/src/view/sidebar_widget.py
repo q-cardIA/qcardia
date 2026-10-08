@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
+from utils.app_config import patient_label
 from utils.hanging_protocols import PRESET_BUTTON_ORDER, preset_label
 from view import theme
 
@@ -60,9 +63,10 @@ class SidebarWidget(QFrame):
         self.layout.addSpacing(10)
         self.layout.addWidget(label)
 
-    def show_patient(self, name: str, n_series: int):
+    def show_patient(self, folder: Path, n_series: int):
+        name = patient_label(folder)
         self._patient_label.setText(f"{name} · {n_series} series")
-        self._patient_label.setToolTip(name)
+        self._patient_label.setToolTip(f"{name}\nStudy folder {folder}")
 
     def _style(self):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)

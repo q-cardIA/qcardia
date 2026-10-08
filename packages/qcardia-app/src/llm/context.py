@@ -53,7 +53,7 @@ def build_state_block(
                         "panels and segmentation wait until they have loaded)\n")
     return (
         "STATE:\n"
-        f"Subject: {subject}\n"
+        f"Patient: {subject} (for any other patient, even one asked about before: this turn's search_patients)\n"
         f"Loaded series: {', '.join(loaded_series) if loaded_series else 'none'}\n"
         f"{loading_line}"
         f"{time_line}\n"

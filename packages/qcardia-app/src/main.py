@@ -17,7 +17,7 @@ from model.background_worker import CallableWorker
 from model.dicom_model import DICOMModel
 from model.voice_input import VOICE_AVAILABLE, preload_model
 from utils import llm_devices, study_log
-from utils.app_config import APP_DIR, data_dir
+from utils.app_config import APP_DIR, patient_source
 from view.theme import apply_theme
 from view.main_window import MainWindow, load_app_icon
 from view.ui_logger import install_ui_logger
@@ -80,7 +80,7 @@ def main():
             *((welcome.participant_id, welcome.condition) if welcome.study_logging else ("", "")),
             study=welcome.study_logging, assistant=not welcome.assistant_disabled,
             cardisort_cache=welcome.use_cardisort_cache,
-            segmentation_cache=welcome.use_segmentation_cache, data_folder=str(data_dir()),
+            segmentation_cache=welcome.use_segmentation_cache, patients=str(patient_source()),
         )
         install_ui_logger(main_window)
 

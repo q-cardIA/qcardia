@@ -24,9 +24,17 @@ TOOL_SPECS = [
     {
         "type": "function",
         "function": {
-            "name": "list_subjects",
-            "description": "List the subject folder names in the data folder.",
-            "parameters": {"type": "object", "properties": {}},
+            "name": "search_patients",
+            "description": (
+                "Search the patient database by name, hospital ID or study number; leave out query to "
+                "list every patient. Gives each match's name, hospital ID and study folder."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "A name, part of one, a hospital ID or a number."}
+                },
+            },
         },
     },
     {
@@ -34,15 +42,15 @@ TOOL_SPECS = [
         "function": {
             "name": "load_subject",
             "description": (
-                "Load a patient study by subject folder name. This replaces the "
-                "current patient and clears all panels. Use a name from list_subjects."
+                "Load a patient's imaging. This replaces the current patient and clears "
+                "all panels. Use the hospital ID that search_patients gave."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "subject_id": {
                         "type": "string",
-                        "description": "Exact subject folder name from list_subjects.",
+                        "description": "The patient's hospital ID from search_patients.",
                     }
                 },
                 "required": ["subject_id"],

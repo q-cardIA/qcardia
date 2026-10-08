@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
+from utils import app_config
 from utils.layouts import layout_cells, split_layout
 
 DEFAULT_CINE_MODALITIES = ("CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH")
@@ -64,6 +65,15 @@ def phantom_lge() -> tuple[np.ndarray, np.ndarray]:
 
 
 DEFAULT_WINDOW = (300.0, 600.0)
+
+# The patient database the cases see (the app reads patients.csv in the data folder): made-up names, two
+# Emilys for a request that must ask which one. The folders are the cases' default available_subjects.
+_NAMES = ["Lucy Hughes", "Isabel Hall", "Michael King", "Alice White", "William Wilson", "Florence Johnson",
+          "Alice Jackson", "Adam James", "George Bell", "Hannah Wright", "Emily Clarke", "Oscar Turner",
+          "Grace Walker", "Henry Moore", "Sophie Bennett", "Emily Carter", "Jack Morgan", "Laura Evans",
+          "Peter Collins", "Rachel Hughes", "Thomas Fisher"]
+TEST_PATIENTS = {f"QLGE{n:02d}_": app_config.Patient(f"QLGE{n:02d}_", name, f"{n:02d}HD{n % 10}H7Y9K")
+                 for n, name in enumerate(_NAMES, start=1)}
 
 
 class FakeDisplayAreaWidget:
