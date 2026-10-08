@@ -519,7 +519,7 @@ class ChatWidget(QFrame):
         self._send_btn.setProperty("role", "composerSend")
         self._send_btn.setToolTip("Send (Enter)")
         self._send_btn.clicked.connect(self._on_send_clicked)
-        self._send_btn.hide()
+        self._send_btn.setEnabled(False)  # always there, so the mic never moves under a held mouse
         self._apply_composer_icons()
         theme.notifier.changed.connect(self._apply_composer_icons)
 
@@ -679,7 +679,8 @@ class ChatWidget(QFrame):
                                    f", thinking {'on' if self.think_enabled() else 'off'}")
 
     def _update_send_button(self):
-        self._send_btn.setVisible(self._busy or bool(self._input.text().strip()))
+        """Accent only when there is text to send; muted while empty or while a request runs."""
+        self._send_btn.setEnabled(not self._busy and bool(self._input.text().strip()))
 
     def _apply_composer_icons(self):
         for button, kind, token in ((self._mic_btn, "mic", "text_muted"), (self._send_btn, "arrow_up", "on_accent")):
@@ -787,7 +788,6 @@ class ChatWidget(QFrame):
 
     def set_enabled(self, enabled: bool):
         self._busy = not enabled
-        self._send_btn.setEnabled(enabled)
         if enabled:
             self._send_btn.stop_loading()
         else:
