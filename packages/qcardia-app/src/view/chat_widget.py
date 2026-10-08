@@ -861,6 +861,7 @@ class ChatWidget(QFrame):
         self._mic_btn.setDown(True)
         self._voice_span = study_log.Span("voice")
         self._input.begin_preview()
+        self._input.setPlaceholderText("Listening…")  # without live text, nothing else shows it records
         self._mic_worker = MicrophoneWorker(self)
         self._mic_worker.partial.connect(self._input.show_preview)
         self._mic_worker.finished.connect(self._on_transcription_done)
@@ -880,6 +881,7 @@ class ChatWidget(QFrame):
         self._voice_span.end(text=text)
         self._mic_btn.stop_loading()
         self._mic_worker = None
+        self._input.setPlaceholderText("Ask something…")
         self._input.end_preview(text)
         self._input.setFocus()
         if self._send_after_voice:
@@ -892,6 +894,7 @@ class ChatWidget(QFrame):
         self._mic_btn.setDown(False)
         self._mic_btn.stop_loading()
         self._mic_worker = None
+        self._input.setPlaceholderText("Ask something…")
         self._input.end_preview(None)
         self.append_system_message(f"Voice error: {message}")
 

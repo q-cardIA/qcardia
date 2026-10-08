@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import threading
+import time
 
 import numpy as np
 from PySide6.QtCore import QThread, Signal
@@ -30,6 +31,10 @@ PARTIAL_STEP_S = 0.4
 MIN_PARTIAL_S = 0.6
 PAUSE_S = 1.0
 MAX_PART_S = 25.0
+# A live pass costs about the same for any length (Whisper pads to 30 s): one slower than this lets the
+# live text lag a second behind, so this hardware gets none and the recording is decoded once on release.
+LIVE_MAX_PASS_S = 1.0
+_live = True  # off on the CPU backend, or after a live pass was too slow
 
 logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 
@@ -91,7 +96,7 @@ def _add_cuda_libraries():
 
 
 def _load() -> "WhisperModel":
-    global _model
+    global _model, _live
     with _lock:
         if _model is None:
             import ctranslate2
@@ -108,8 +113,9 @@ def _load() -> "WhisperModel":
                 except Exception as exc:
                     errors.append(f"{device}: {exc}")
                     continue
-                _model = model
-                logging.info("Voice input ready — model: whisper-%s on %s", size, device)
+                _model, _live = model, device == "cuda"
+                logging.info("Voice input ready — model: whisper-%s on %s%s", size, device,
+                             "" if _live else ", no live text (decoded once on release)")
                 break
             else:
                 raise RuntimeError("No Whisper backend could be loaded: " + "; ".join(errors))
@@ -216,8 +222,11 @@ class MicrophoneWorker(QThread):
             self._fixed.append(text)
 
     def _live_text(self, chunks: list[np.ndarray]) -> int:
+        """Live text while recording, if this hardware keeps up; returns where the undecoded audio starts."""
+        global _live
+        _load()
         start, decoded, previous = 0, 0, []
-        while not self._stop_event.wait(0.05):
+        while _live and not self._stop_event.wait(0.05):
             pending = list(chunks)
             n = sum(len(c) for c in pending)
             if n - start < MIN_PARTIAL_S * SAMPLE_RATE or n - decoded < PARTIAL_STEP_S * SAMPLE_RATE:
@@ -239,9 +248,14 @@ class MicrophoneWorker(QThread):
                 words = []
             else:
                 limit = int(8 * (len(part) - begin) / SAMPLE_RATE) + 10
+                began = time.monotonic()
                 words = _transcribe(part[begin:], 1, " ".join(self._fixed), limit).split()
+                if time.monotonic() - began > LIVE_MAX_PASS_S:
+                    _live = False
+                    logging.info("Voice: a live pass was too slow; from now on decoded once on release")
             agreed = len(os.path.commonprefix([words, previous]))
             if not self._stop_event.is_set():
                 self.partial.emit(" ".join([*self._fixed, *words[:agreed]]), " ".join(words[agreed:]))
             previous = words
+        self._stop_event.wait()
         return start
