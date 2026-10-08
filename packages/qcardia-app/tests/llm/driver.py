@@ -12,20 +12,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from controllers.chat_controller import ChatController  # noqa: E402
 from utils import llm_devices  # noqa: E402
-from utils.app_config import OLLAMA_MODEL  # noqa: E402
 
 from fakes import FakeDicomController  # noqa: E402
 from test_cases import TestCase  # noqa: E402
 
 
-def build_controller(test_case: TestCase, llm_model: str = OLLAMA_MODEL) -> ChatController:
+def build_controller(test_case: TestCase, llm_model: str | None = None) -> ChatController:
     cc = object.__new__(ChatController)  # skip __init__, no Qt widgets touched
     # Copies: running the calls changes the fakes, and each run must start from the case's state.
     cc.view, cc.model = copy.deepcopy(test_case.view), copy.deepcopy(test_case.model)
     cc.dicom_controller = FakeDicomController(cc.model, cc.view)
     cc._history = []
     cc._worker = None
-    cc._llm_model = llm_model
+    cc._llm_model = llm_model or llm_devices.default_model()  # as the app's model picker starts
     cc._available_subjects_cache = list(test_case.available_subjects)
     cc._warmup_worker = None
     return cc
