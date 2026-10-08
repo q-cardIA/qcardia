@@ -38,8 +38,8 @@ def _drop_planned(remaining: list, after: str, keep: str | None = None) -> str:
 
 
 def _panel_list(arguments: dict, n_panels: int) -> list[int] | str:
-    """The 'panels' argument (all panels if left out), or an error text."""
-    panels = [int(i) for i in arguments.get("panels") or range(n_panels)]
+    """The 'panels' argument (all panels if left out; some models send it as text), or an error text."""
+    panels = [int(i) for i in re.findall(r"-?\d+", str(arguments.get("panels")))] or list(range(n_panels))
     if any(not 0 <= i < n_panels for i in panels):
         return f"panel out of range (grid has {n_panels} panels)."
     return panels
@@ -493,10 +493,11 @@ class ChatController:
                 frame = int(arguments["frame"])
                 if not (1 <= frame <= total):
                     return f"frame out of range (1-{total})."
-                if widget.current_time_index == frame - 1:
-                    return f"Already at frame {frame}."
+                stopped = self.view.is_playing()  # a frame asked for is a frame to look at
+                if stopped:
+                    self.view.toggle_cine()
                 widget.set_time_index(frame - 1, CINE_TIME_AXIS)
-                return f"Showing cine frame {frame}/{total}."
+                return f"{'Stopped the cines; showing' if stopped else 'Showing'} cine frame {frame}/{total}."
 
             if name == "set_window":
                 panels = _panel_list(arguments, self.view.display_area_widget.n_panels) if arguments.get("panels") else None
@@ -533,7 +534,7 @@ class ChatController:
                 widget = self.view.display_area_widget
                 if not widget.n_frames(CINE_TIME_AXIS):
                     return "No cine is loaded to play."
-                playing = bool(arguments["playing"])
+                playing = bool(arguments.get("playing", True))  # a speed alone means: play at it
                 if arguments.get("speed") is not None:
                     speed = float(arguments["speed"])
                     if speed not in CINE_SPEEDS:
