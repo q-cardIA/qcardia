@@ -526,14 +526,19 @@ class MainWindow(QMainWindow):
         menu.addAction("Go to &End-Diastole", lambda: self.phase_requested.emit("ED"))
         menu.addAction("Go to End-&Systole", lambda: self.phase_requested.emit("ES"))
 
+    def _predict(self, key: str):
+        """Segments key (a cached segmentation is there already) and draws its contours in its panels."""
+        self.display_area_widget.show_segmentation(key)
+        self.seg_button_signal.emit(key)
+
     def _rebuild_predict_menu(self):
         self.predict_menu.clear()
         loaded = [k for k in self.segmentable_series if self.display_area_widget.is_series_registered(k)]
         for key in self.segmentable_series:
-            action = self.predict_menu.addAction(key, lambda k=key: self.seg_button_signal.emit(k))
+            action = self.predict_menu.addAction(key, lambda k=key: self._predict(k))
             action.setEnabled(key in loaded)
         self.predict_menu.addSeparator()
-        every = self.predict_menu.addAction("All Loaded Views", lambda: [self.seg_button_signal.emit(k) for k in loaded])
+        every = self.predict_menu.addAction("All Loaded Views", lambda: [self._predict(k) for k in loaded])
         every.setEnabled(bool(loaded))
 
     def _panel_action(self, menu, dock: QDockWidget, text: str, shortcut: str | None = None) -> QAction:

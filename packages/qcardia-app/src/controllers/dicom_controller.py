@@ -223,6 +223,8 @@ class DICOMController:
     def _register(self, key: str, info: dict):
         self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],
                                      window=info["window"], geometry=info["geometry"])
+        if info.get("segmentation") is not None:  # cached: ready to show, its contours still off
+            self._widget.set_segmentation(key, info["segmentation"])
         if key in ("CINE_SAX", "LGE_SAX"):  # a cached segmentation was analysed while it loaded
             self._show_results()
 

@@ -1313,9 +1313,9 @@ for i, prompt in enumerate(["Segment the cine SAX", "Show the segmentation"], st
         id=f"segmentation_cached_{i:03d}", category="segmentation",
         description="A cached segmentation that no panel shows yet",
         model=_m, view=_v, prompt=prompt,
-        expected_tool_calls=[segment("CINE_SAX")], match_mode="exact",
-        notes="'Measured from a segmentation' is not 'shown': the panel lacks seg=True, so call "
-              "run_segmentation, which shows the cached result at once.",
+        expected_tool_calls=[], match_mode="state",
+        expected_state=lambda s: None if s["contours"][0] else "panel 0 shows no contours",
+        notes="Available is not shown: run_segmentation or set_contours shows the cached result at once.",
     )
 
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])

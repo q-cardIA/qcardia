@@ -83,6 +83,7 @@ class FakeDisplayAreaWidget:
             self._show(p["idx"], p["series_key"], p.get("axis", "transverse"), p.get("slice"))
             if p.get("has_segmentation"):
                 self.segmented.add(p["series_key"])
+                self._panels[p["idx"]]["contours"] = True
         # is_series_registered() is about LOADED series, independent of what's
         # shown in a panel — pass registered_series explicitly for apply_preset tests.
         self._known_series: set[str] = (
@@ -94,7 +95,7 @@ class FakeDisplayAreaWidget:
 
     @staticmethod
     def _empty() -> dict:
-        return {"series_key": None, "axis": "transverse", "slice": 0, "zoom": None, "contours": True, "window": None}
+        return {"series_key": None, "axis": "transverse", "slice": 0, "zoom": None, "contours": False, "window": None}
 
     def _show(self, idx: int, key: str, axis: str, slice_idx: int | None):
         n = self.n_slices(key, axis)
@@ -214,7 +215,8 @@ class FakeDisplayAreaWidget:
             slice_idx = (old["slice"] if old["series_key"] == series_key
                          else self.matching_slice(old["series_key"], old["slice"], series_key))
         self._show(panel_idx, series_key, axis, slice_idx)
-        self._panels[panel_idx].update(contours=True, window=None)
+        self._panels[panel_idx].update(window=None, contours=any(
+            self._shows_contours(p) for i, p in enumerate(self._panels) if i != panel_idx and p["series_key"] == series_key))
 
     def set_panel_empty(self, panel_idx: int):
         self._panels[panel_idx] = self._empty()
@@ -292,6 +294,7 @@ class FakeDicomController:
         self._real = _build_real_dicom_controller(model, view)
         self._model, self._view = model, view
         self.segmentations: list[str] = []
+        view.display_area_widget.segmented |= set(model.analysis)  # a cached segmentation loads with its series
 
     def apply_preset(self, name: str):
         return self._real.apply_preset(name)

@@ -365,7 +365,10 @@ class CentralDisplayAreaWidget(QWidget):
             slice_idx = old_z if old_key == series_key else self.matching_slice(old_key, old_z, series_key)
         self._panel_series_key[panel_idx] = series_key
         self._panel_axis[panel_idx] = axis.lower()
-        self._panel_linked[panel_idx], self._panel_contours[panel_idx] = True, True
+        self._panel_linked[panel_idx] = True
+        # Contours as the series' other panels show them: a cached segmentation is in the viewer from the start.
+        self._panel_contours[panel_idx] = any(self._shows_segmentation(i) for i in range(self.n_panels)
+                                              if i != panel_idx and self._panel_series_key[i] == series_key)
         self._panel_window[panel_idx] = None
         self._sync_toggles(panel_idx)
         self._panels[panel_idx].viewer.new_series(self._view_of(panel_idx))

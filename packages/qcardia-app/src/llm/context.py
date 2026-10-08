@@ -132,7 +132,7 @@ def _measurements(analysis: dict, segmentable: list[str], time_frame, level_matc
         hidden = [k for k in segmented if k not in shown]
         if hidden:
             lines.append(f"  Contours drawn in no panel: {', '.join(hidden)}. Draw them only when the user asks to "
-                         "segment or to show the segmentation: run_segmentation.")
+                         "segment or to show the segmentation: set_contours.")
     missing = [k for k in segmentable if k not in analysis]
     if missing:
         lines.append(f"  Not segmented: {', '.join(missing)}. ED/ES, the LV slices and zoom roi based "

@@ -692,8 +692,8 @@ class DICOMModel:
         info["geometry"] = self.get_geometry(key)
         info["window"] = self._default_window(key, info["volume"])
         if key in self.segmentable:
-            try:  # measured for the assistant; a damaged cache must not stop the series from loading
-                self.segment(key, cached_only=True)
+            try:  # in the viewer and measured at once; a damaged cache must not stop the series from loading
+                info["segmentation"] = self.segment(key, cached_only=True)
             except Exception as e:
                 logging.warning(f"Could not read the cached {key} segmentation: {e}")
         return info
