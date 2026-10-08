@@ -664,7 +664,7 @@ _add(
     model=_m, view=_v,
     prompt="Show the LGE SAX mid slice large on the left with the four cines in a 2x2 next to it",
     expected_tool_calls=[], match_mode="state",
-    expected_state=screen(grid_is(2, 4), panel_is(0, "LGE_SAX", 5),
+    expected_state=screen(grid_is(2, 4), panel_is(0, "LGE_SAX", 6),
                           lambda s: None if {k for k, _, _ in s["panels"][1:5]} == {"CINE_SAX", "CINE_2CH", "CINE_3CH",
                                                                                    "CINE_4CH"}
                           else f"panels 1-4 show {[k for k, _, _ in s['panels'][1:5]]}"),
@@ -813,9 +813,9 @@ _add(
 )
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
-    id="slice_005", category="slice", description="The apical LV slice at the current frame",
-    model=_m, view=_v, prompt="Show the most apical cine SAX slice that still has LV in panel 0",
-    expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(0, "CINE_SAX", 2)),
+    id="slice_005", category="slice", description="The apex at the current frame",
+    model=_m, view=_v, prompt="Show the most apical cine SAX slice that still has LV, myocardium and RV in panel 0",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(0, "CINE_SAX", 3)),
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
@@ -869,8 +869,8 @@ _add(
 
 def _base_mid_apex(s):
     shown = [sl for k, sl, _ in s["panels"] if k == "CINE_SAX"]
-    if len(shown) != 3 or sorted(shown)[0] != 2 or sorted(shown)[2] != 11 or not 6 <= sorted(shown)[1] <= 7:
-        return f"CINE_SAX slices shown {shown}, expected 2 (apex), 6-7 (mid) and 11 (base)"
+    if sorted(shown) != [3, 7, 11]:
+        return f"CINE_SAX slices shown {shown}, expected 3 (apex), 7 (mid) and 11 (base)"
 
 
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
@@ -879,7 +879,7 @@ _add(
     model=_m, view=_v, prompt="Show a basal, a mid and an apical cine SAX slice at end-diastole in a 1x3 layout",
     expected_tool_calls=[], match_mode="state",
     expected_state=screen(grid_is(1, 3), frame_is(28), _base_mid_apex),
-    notes="LV is in slices 2-12 at ED, but slice 12 is a crescent (< 50% surrounded): the base is 11.",
+    notes="LV is in slices 2-12 at ED, but slice 12 is a crescent (< 50% surrounded) and slice 2 has no RV: 11 to 3.",
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
 _add(
@@ -896,13 +896,13 @@ _add(
     expected_tool_calls=[], match_mode="state", expected_state=screen(frame_is(28), _spread_cine_sax(4)),
     notes="Four different slices in order over the 2x2; slice numbers, not depths in mm.",
 )
-for i, (prompt, slice_no) in enumerate([("Display the base slice", 11), ("Now show the apex slice", 2)], start=4):
+for i, (prompt, slice_no) in enumerate([("Display the base slice", 11), ("Now show the apex slice", 3)], start=4):
     _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
     _add(
-        id=f"nav_{i:03d}", category="navigation", description="Base or apex = the outermost slice with LV",
+        id=f"nav_{i:03d}", category="navigation", description="Base or apex by the state block's rule",
         model=_m, view=_v, prompt=prompt,
         expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(0, "CINE_SAX", slice_no)),
-        notes="At frame 1 LV is in slices 2-12 of 14; slice 12 is a crescent, so the base is 11.",
+        notes="At frame 1 LV is in slices 2-12 of 14; slice 12 is a crescent and slice 2 has no RV: 11 to 3.",
     )
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"}])
 _add(
@@ -947,11 +947,11 @@ _add(
 
 
 def _two_lge_mid(s):
-    """Two LGE_SAX panels at the mid slice (5 in the phantom): the left with contours and the series'
+    """Two LGE_SAX panels at the mid slice (6 in the phantom): the left with contours and the series'
     window, the right without contours and with the myocardium nulled in its own window."""
     shown = [i for i, (k, sl, _) in enumerate(s["panels"]) if k == "LGE_SAX"]
-    if len(shown) != 2 or any(s["panels"][i][1] != 5 for i in shown):
-        return f"LGE_SAX panels {[s['panels'][i] for i in shown]}, expected two at slice 5"
+    if len(shown) != 2 or any(s["panels"][i][1] != 6 for i in shown):
+        return f"LGE_SAX panels {[s['panels'][i] for i in shown]}, expected two at slice 6"
     left, right = shown
     if not s["contours"][left] or s["contours"][right]:
         return f"contours {s['contours']}: expected on in panel {left} and off in panel {right}"
@@ -1093,8 +1093,8 @@ _add(
     id="adv_005", category="advanced", description="3x3 from base to apex at end-diastole",
     model=_m, view=_v, prompt="Show the cine SAX from base to apex in a 3x3 and go to the ED frame",
     expected_tool_calls=[], match_mode="state",
-    expected_state=screen(grid_is(3, 3), frame_is(28), _base_to_apex(9, 11, 2)),
-    notes="At ED the LV slices from base to apex are 11 to 2 (ten): nine of them, base first, apex last.",
+    expected_state=screen(grid_is(3, 3), frame_is(28), _base_to_apex(9, 11, 3)),
+    notes="At ED the slices from base to apex are exactly 11 to 3.",
 )
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
 _add(
@@ -1114,7 +1114,7 @@ _add(
     expected_tool_calls=[], match_mode="state",
     expected_state=screen(grid_is(2, 4), panel_is(0, "LGE_SAX", 9),
                           lambda s: None if sorted((k, sl) for k, sl, _ in s["panels"][1:5] if k == "CINE_SAX")
-                          == [("CINE_SAX", 2), ("CINE_SAX", 6), ("CINE_SAX", 11)]
+                          == [("CINE_SAX", 3), ("CINE_SAX", 7), ("CINE_SAX", 11)]
                           and "CINE_4CH" in [k for k, _, _ in s["panels"][1:5]]
                           else f"panels 1-4 show {s['panels'][1:5]}"),
 )
@@ -1135,7 +1135,7 @@ def _lge_over_cine(s):
     if s["grid"] != (2, 3):
         return f"grid {s['grid']}, expected (2, 3)"
     top, bottom = s["panels"][:3], s["panels"][3:6]
-    if any(k != "LGE_SAX" for k, _, _ in top) or sorted(sl for _, sl, _ in top) not in ([2, 5, 9], [3, 6, 9]):
+    if any(k != "LGE_SAX" for k, _, _ in top) or sorted(sl for _, sl, _ in top) != [3, 6, 9]:
         return f"top row {top}, expected LGE_SAX at its base, mid and apex"
     if [(k, sl) for k, sl, _ in bottom] not in ([("CINE_SAX", 11), ("CINE_SAX", 7), ("CINE_SAX", 3)],
                                                 [("CINE_SAX", 3), ("CINE_SAX", 7), ("CINE_SAX", 11)]):
@@ -1153,7 +1153,7 @@ _add(
     prompt="Show the LGE SAX at base, mid and apex with the myocardium nulled, and below them the cine SAX at "
            "base, mid and apex at end-systole with segmentation",
     expected_tool_calls=[], match_mode="state", expected_state=_lge_over_cine,
-    notes="The LGE levels may come from frame 1 (2, 5, 9) or from ES (3, 6, 9): either follows the state block.",
+    notes="The LGE levels nearest the CINE_SAX base, mid and apex are 9, 6 and 3 at frame 1 and at ES.",
 )
 
 

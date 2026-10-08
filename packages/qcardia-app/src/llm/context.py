@@ -70,7 +70,8 @@ BASAL_COVERAGE = 0.5  # Schulz-Menger et al. 2020: the basal slice has >= 50% of
 def base_to_apex(sax: dict, frame: int) -> list[int]:
     """The CINE_SAX slices with LV in frame, from the basal slice to the apex. The basal slice is the most
     basal one whose blood pool myocardium surrounds for at least BASAL_COVERAGE (see
-    qcardia.analysis.myocardial_coverage); without coverage, the most basal slice with LV. Empty for a
+    qcardia.analysis.myocardial_coverage); without coverage, the most basal slice with LV. The apex is the
+    most apical slice with LV, myocardium and RV; without one, the most apical slice with LV. Empty for a
     frame CINE_SAX does not have (the cine frame can come from a longer long-axis cine)."""
     if not 0 <= frame < len(sax["lv_slices"]):
         return []
@@ -80,6 +81,9 @@ def base_to_apex(sax: dict, frame: int) -> list[int]:
     if coverage:
         start = next((i for i, z in enumerate(order) if coverage[frame][z] >= BASAL_COVERAGE), 0)
         order = order[start:]
+    whole = sax.get("lv_myo_rv_slices")
+    if whole and set(whole[frame]) & set(order):
+        order = order[:max(i for i, z in enumerate(order) if z in whole[frame]) + 1]
     return order
 
 
@@ -115,7 +119,8 @@ def _measurements(analysis: dict, segmentable: list[str], time_frame, level_matc
         if current not in (ed, es):
             at.append((f"the current frame {current + 1}", current))
         lines.append("  CINE_SAX slices with LV from base to apex (the base is the most basal slice with at least "
-                     "half of the blood pool surrounded by myocardium): " + "; ".join(
+                     "half of the blood pool surrounded by myocardium, the apex the most apical slice with LV, "
+                     "myocardium and RV): " + "; ".join(
                          f"at {name}: {', '.join(str(z + 1) for z in base_to_apex(sax, t)) or 'none'}"
                          for name, t in at) + ".")
         levels = base_mid_apex(sax, current)

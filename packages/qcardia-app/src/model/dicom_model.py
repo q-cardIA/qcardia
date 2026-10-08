@@ -436,6 +436,9 @@ class DICOMModel:
             result.update(volumes=curve.round(1).tolist(), ed=ed, es=es, apex_to_base=geom.apex_to_base(),
                           rv_volumes=rv.round(1).tolist(),
                           lv_slices=[segmented_slices(seg, t) for t in range(len(seg))],
+                          lv_myo_rv_slices=[sorted(set.intersection(*(set(segmented_slices(seg, t, label))
+                                                                      for label in CINE_LABELS.values())))
+                                            for t in range(len(seg))],
                           lv_coverage=[[round(c, 2) for c in myocardial_coverage(seg, t)] for t in range(len(seg))])
         elif series_key == "LGE_SAX":
             # LGE class 1 = myocardium without scar, class 2 = scar, so the myocardium is both.

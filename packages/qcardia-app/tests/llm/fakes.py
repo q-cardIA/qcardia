@@ -32,7 +32,7 @@ def phantom_depths(series_key: str) -> list[float]:
 
 def phantom_analysis() -> dict:
     """CINE_SAX measurements as the app derives them from a segmentation (0-based indices):
-    ED = frame 28, ES = frame 11; LV in slices 2-12 at ED and 3-11 at ES; slice 1 apical."""
+    ED = frame 28, ES = frame 11; LV in slices 2-12 at ED and 3-11 at ES, RV too except in slice 2; slice 1 apical."""
     volumes = [round(70 + 50 * abs(t - 10) / 17, 1) if t <= 27 else round(118 - 2 * (t - 27), 1)
                for t in range(CINE_FRAMES)]
     lv = [list(range(1, 12)) if abs(t - 10) > 5 else list(range(2, 11)) for t in range(CINE_FRAMES)]
@@ -43,7 +43,7 @@ def phantom_analysis() -> dict:
     return {
         "CINE_SAX": {"box": box, "volumes": volumes, "ed": 27, "es": 10,
                      "apex_to_base": list(range(PHANTOM_STACKS["CINE_SAX"][0])), "lv_slices": lv,
-                     "lv_coverage": coverage},
+                     "lv_myo_rv_slices": [s[1:] if s[0] == 1 else s for s in lv], "lv_coverage": coverage},
         "CINE_4CH": {"box": (60, 50, 200, 190)},
     }
 
