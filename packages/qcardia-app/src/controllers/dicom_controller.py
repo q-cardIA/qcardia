@@ -135,13 +135,12 @@ class DICOMController:
         self._last_result = result
         self._loading_keys = {e.key for e in result.entries if e.key is not None and e.is_primary}
         self._load_total = len(self._loading_keys)
-        # The layout stays: each panel shows its series again, of this patient, once that has loaded.
-        self._waiting = {a["idx"]: (PanelAssignment(a["idx"], a["series_key"], a["axis"]), Counter())
-                         for a in self._widget.panel_assignments() if a["series_key"]}
+        # A new patient starts on an empty 2x2.
+        self._waiting = {}
         self._widget.clear_series()
+        self._widget.refresh_panels()  # every panel's series is gone: all empty
+        self._widget.set_grid_size(2, 2)
         self._show_results()
-        for idx, (panel, _) in self._waiting.items():
-            self._widget.set_panel_waiting(idx, panel.key)
         self.view.series_browser_widget.populate(self._build_browser_cards(result, loading=True))
         self.view.series_browser_widget.set_load_progress(0, self._load_total)
         self.view.sidebar.show_patient(self._current_subject_folder.name, 0)
