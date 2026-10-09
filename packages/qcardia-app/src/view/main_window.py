@@ -293,7 +293,7 @@ class MainWindow(QMainWindow):
     def _settle_docks(self, screen_width: int):
         chat_width = min(int(screen_width * 0.15), self.chat_widget.maximumWidth())
         self.resizeDocks([self.sidebar_dock, self.series_dock, self.chat_dock],
-                         [self.sidebar.minimumWidth(), theme.scaled(200), chat_width],
+                         [self.sidebar.minimumSizeHint().width(), theme.scaled(200), chat_width],
                          Qt.Horizontal)
         self._default_dock_state = self.saveState()
         saved = SETTINGS.value("window/dock_state")
@@ -322,6 +322,7 @@ class MainWindow(QMainWindow):
         for bar in self.findChildren(QTabBar, options=Qt.FindDirectChildrenOnly):
             if not bar.property("watched"):
                 bar.setProperty("watched", True)
+                bar.setElideMode(Qt.ElideNone)  # a tab as wide as its title; too many tabs scroll instead
                 bar.currentChanged.connect(lambda _: self._dock_titles_timer.start())
                 bar.installEventFilter(self)
             if bar.isVisible() and bar.currentIndex() == 0:

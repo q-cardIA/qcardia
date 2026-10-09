@@ -29,6 +29,7 @@ class SidebarWidget(QFrame):
         self.btn_patient = QPushButton("Patient Data")
         self.btn_patient.setProperty("role", "sidebarButton")
         self.btn_patient.setCheckable(True)
+        self.btn_patient.setObjectName("patientDataButton")  # open: grey, not the accent (theme.qss)
         self.layout.addWidget(self.btn_patient)
         patient_box = QFrame()
         box_layout = QVBoxLayout(patient_box)
@@ -45,7 +46,6 @@ class SidebarWidget(QFrame):
         self.btn_patient.toggled.connect(patient_box.setVisible)
         self.layout.addWidget(patient_box)
 
-        self.layout.addSpacing(10)
         # The presets a user picks directly; greyed out until a patient has their series (set_available).
         self._preset_buttons = {}
         for text, preset_name in SIDEBAR_PRESETS.items():
@@ -78,4 +78,3 @@ class SidebarWidget(QFrame):
 
     def _style(self):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        self.setMinimumWidth(theme.scaled(210))

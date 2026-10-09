@@ -380,6 +380,10 @@ QPushButton[role="sidebarButton"]:checked {
 	background-color: @accent_soft;
 	color: @accent;
 }
+QPushButton#patientDataButton:checked {
+	background-color: @bg2;
+	color: @text;
+}
 
 
 /* ---- Series browser ----------------------------------------- */
