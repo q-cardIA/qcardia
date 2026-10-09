@@ -266,6 +266,13 @@ class CentralDisplayAreaWidget(QWidget):
         self._selected = moves.get(self._selected)
         self._show_selected()
         self.panels_moved.emit(moves)
+        QTimer.singleShot(0, self, self._relink_views)  # the new panels have their sizes after a layout pass
+
+    def _relink_views(self):
+        """The linked view in each linked panel, converted for the size its panel now has."""
+        for i in range(self.n_panels):
+            if (view := self._view_of(i)) is not None:
+                self._panels[i].viewer.set_view(view)
 
     def _add_divider(self, horizontal: bool, row: int, col: int):
         div = _make_divider(horizontal)
@@ -451,8 +458,9 @@ class CentralDisplayAreaWidget(QWidget):
             for group in {self._group(i) for i in done if self._panel_linked[i]}:
                 first, *rest = [i for i in done if self._panel_linked[i] and self._group(i) == group]
                 physical = self._physical(first, self._panels[first].viewer.view())
-                for i in rest:
-                    self._panels[i].viewer.set_view(self._relative(i, physical, None))
+                for i in rest:  # a panel without geometry keeps its own framing
+                    if (view := self._relative(i, physical, None)) is not None:
+                        self._panels[i].viewer.set_view(view)
         return done
 
     def _roi_in_panel(self, panel_idx: int, boxes: dict) -> tuple[float, float, float, float] | None:
@@ -885,9 +893,9 @@ class CentralDisplayAreaWidget(QWidget):
 
     def _transverse_geometry(self, panel_idx: int):
         """The geometry of a panel's series in its acquired plane; None without one or in a reformat."""
-        if self._panel_axis[panel_idx] == "transverse":
-            return self._geometries.get(self._panel_series_key[panel_idx])
-        return None
+        key = self._panel_series_key[panel_idx]
+        geom = self._geometries.get(key) if self._panel_axis[panel_idx] == "transverse" else None
+        return geom if geom is not None and len(geom.ipp_list) == self._n_slices(key, "transverse") else None
 
     def _fit_scale(self, panel_idx: int, geom) -> float:
         """Screen pixels per image pixel with the whole image in the panel (as CustomQGraphicsView fits it)."""

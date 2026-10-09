@@ -600,6 +600,8 @@ class ChatController:
                 axis = axes[0]  # the time slider plays one series: of several perfusion runs, the first
                 perfusion = axis != CINE_TIME_AXIS
                 what = axis if perfusion else "the cines"
+                if perfusion and not any(p["series_key"] == axis for p in widget.panel_assignments()):
+                    return f"Not done: no panel shows {axis}; display it first."
                 if not widget.n_frames(axis):
                     return "No cine is loaded to play."
                 playing = bool(arguments.get("playing", True))  # a speed alone means: play at it

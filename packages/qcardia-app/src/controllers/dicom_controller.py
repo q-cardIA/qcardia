@@ -205,6 +205,7 @@ class DICOMController:
 
         study_log.log("reassign_series", series_folder=card_info.path.name, key=new_key)
         self._register(new_key, info)
+        self.view.sidebar.set_available(available_presets(set(self.model.series) | self._loading_keys))
         self._widget.refresh_panels(new_key)
 
         for entry in self._last_result.entries:
