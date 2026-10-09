@@ -1,0 +1,17 @@
+dataset:
+  split_file: default-cine-test-split.yaml
+  subsets:
+  - mm1       # possible keys: sa_cine/sa_cine_gt
+  - mm2       # possible keys: sa_cine/sa_cine_gt
+  key_pairs:
+  - [sa_cine, sa_cine_gt]
+  # key pairs indicate file names and output dict keys, applied to all used datasets:
+  # - [sa_cine, sa_cine_gt]         # images and labels
+  # - [sa_cine, none]               # only images
+  # - [none, sa_cine_gt]            # only labels  
+  valid_partition: 0.2
+  valid_split_seed: 0
+
+
+paths:
+  data: "/home/bme001/shared/qcardia/data"
