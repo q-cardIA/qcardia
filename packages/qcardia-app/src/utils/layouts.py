@@ -6,7 +6,6 @@ from math import lcm
 MAX_GRID_ROWS, MAX_GRID_COLS = 4, 8  # what the assistant may ask for
 MAX_HALF = 4  # rows and columns of each half of a split layout
 CINE_SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)  # playback speeds, heartbeats per second
-SPLIT_PRESETS = ((1, 1, 2, 2), (2, 2, 1, 1), (1, 1, 3, 3), (3, 3, 1, 1), (2, 2, 2, 2))  # in the Grid menu
 
 
 def layout_cells(rows: int, cols: int) -> list[tuple[int, int, int, int]]:

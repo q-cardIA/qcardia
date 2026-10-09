@@ -321,6 +321,20 @@ QWidget[role="topBar"] {
 	background-color: transparent;
 }
 
+/* The CVI-style quick controls next to the menus: the grid diagrams and the label tools. */
+QToolButton[role="topBarButton"], QPushButton[role="topBarButton"] {
+	background-color: transparent;
+	border: none;
+	border-radius: @radius;
+	padding: 2px @sp2;
+	min-height: 24px;
+}
+QToolButton[role="topBarButton"]:hover, QPushButton[role="topBarButton"]:hover { background-color: @bg3; }
+QToolButton[role="topBarButton"]:checked, QPushButton[role="topBarButton"]:checked {
+	background-color: @accent_soft;
+	color: @accent;
+}
+
 QLabel[role="appTitle"] {
 	color: @text_faint;
 	font-size: @fs_small;

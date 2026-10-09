@@ -19,14 +19,14 @@ from PySide6.QtWidgets import (
     QStyle,
     QTabBar,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from utils import study_log
 from utils.app_config import ICON_PATH, ISSUES_URL, REPO_URL, SETTINGS, WIKI_URL
-from utils.hanging_protocols import PRESET_BUTTON_ORDER, preset_label
-from utils.layouts import CINE_SPEEDS, SPLIT_PRESETS
+from utils.layouts import CINE_SPEEDS
 from view.central_display_area_widget import CentralDisplayAreaWidget
 from view.dialogs import pick_directory
 from view.chat_widget import ChatWidget
@@ -44,7 +44,7 @@ def load_app_icon() -> QIcon | None:
 
 
 _TAB_DRAG_OUT_PX = 24  # how far past its tab bar a tab must be dragged to unstack its panel
-GRID_SIZES = ((1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (2, 4), (3, 3), (3, 4), (3, 6))  # rows x columns
+GRID_SIZES = ((1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (2, 4), (3, 3), (3, 4))  # rows x columns, as diagrams
 
 
 class _ContourIsland(QFrame):
@@ -177,7 +177,6 @@ class MainWindow(QMainWindow):
     def build_analysis_interface(self):
         self.sidebar = SidebarWidget(self)
         self.sidebar.load_patient_requested.connect(self.on_load_patient_clicked)
-        self.sidebar.save_requested.connect(self.emit_save_signal)
         self.sidebar.preset_requested.connect(self.preset_requested_signal.emit)
 
         self.display_area_widget = CentralDisplayAreaWidget(self)
@@ -222,6 +221,7 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self.menu_bar = self._build_menu_bar()
         top_layout.addWidget(self.menu_bar, 0, Qt.AlignVCenter)
+        top_layout.addWidget(self._build_top_buttons(), 0, Qt.AlignVCenter)
         top_layout.addStretch(1)
         top_layout.addWidget(self.app_title)
 
@@ -454,11 +454,8 @@ class MainWindow(QMainWindow):
         self.display_area_widget.set_crosshair_shown(crosshair.isChecked())
         view_menu.addSeparator()
         self.grid_menu = StickyMenu("&Grid", view_menu)
-        self.grid_menu.aboutToShow.connect(self._rebuild_grid_menu)
+        self.grid_menu.aboutToShow.connect(lambda: self._rebuild_grid_menu(self.grid_menu))
         view_menu.addMenu(self.grid_menu)
-        layouts = view_menu.addMenu("&Layout")
-        for name in PRESET_BUTTON_ORDER:
-            layouts.addAction(preset_label(name), lambda n=name: self.preset_requested_signal.emit(n))
         self.zoom_menu = view_menu.addMenu("&Zoom")
         for text, mode in (("Zoom to &Heart", "roi"), ("&Fill Panels", "fill"), ("Fit &Whole Image", "fit")):
             self.zoom_menu.addAction(text, lambda m=mode: self.zoom_requested.emit(m))
@@ -478,14 +475,11 @@ class MainWindow(QMainWindow):
         self.predict_menu = QMenu("Predict &Labels", self)
         self.predict_menu.aboutToShow.connect(self._rebuild_predict_menu)
         tools_menu.addMenu(self.predict_menu)
-        self.sidebar.btn_predict.setMenu(self.predict_menu)
         tools_menu.addSeparator()
         self.contour_edit_action = tools_menu.addAction("&Edit Contours")
         self.contour_edit_action.setCheckable(True)
         self.contour_edit_action.setShortcut("Ctrl+E")
         self.contour_edit_action.toggled.connect(self._on_contour_edit_toggled)
-        self.contour_edit_action.toggled.connect(self.sidebar.btn_edit_contours.setChecked)
-        self.sidebar.btn_edit_contours.toggled.connect(self.contour_edit_action.setChecked)
 
         help_menu = bar.addMenu("&Help")
         for label, url in (("&Tutorials and Wiki", WIKI_URL), ("&Report an Issue", ISSUES_URL),
@@ -493,26 +487,54 @@ class MainWindow(QMainWindow):
             help_menu.addAction(label, lambda u=url: QDesktopServices.openUrl(QUrl(u)))
         return bar
 
-    def _rebuild_grid_menu(self):
-        """Rebuilt on opening: a layout preset may have changed the grid since."""
-        self.grid_menu.clear()
-        group = QActionGroup(self.grid_menu)
+    def _build_top_buttons(self) -> QWidget:
+        """CVI-style quick controls next to the menus: the grid as diagrams, and the label tools."""
+        box = QWidget()
+        layout = QHBoxLayout(box)
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(4)
+        self.grid_button = QToolButton()
+        self.grid_button.setPopupMode(QToolButton.InstantPopup)
+        self.grid_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.grid_button.setText("Grid")
+        grid_menu = QMenu(self.grid_button)
+        grid_menu.aboutToShow.connect(lambda: self._rebuild_grid_menu(grid_menu))
+        self.grid_button.setMenu(grid_menu)
+        self.display_area_widget.panels_moved.connect(lambda _: self._show_grid())
+        theme.notifier.changed.connect(self._show_grid)
+        self._show_grid()
+        predict = QPushButton("Predict Labels")
+        predict.setMenu(self.predict_menu)
+        edit = QPushButton("Edit Contours")
+        edit.setCheckable(True)  # in step with Tools > Edit Contours
+        edit.toggled.connect(self.contour_edit_action.setChecked)
+        self.contour_edit_action.toggled.connect(edit.setChecked)
+        save = QPushButton("Save Labels")
+        save.clicked.connect(self.emit_save_signal)
+        for button in (self.grid_button, predict, edit, save):
+            button.setProperty("role", "topBarButton")
+            layout.addWidget(button)
+        return box
+
+    def _show_grid(self):
+        """The Grid button shows the current grid as its diagram."""
+        rows, cols = self.display_area_widget.grid_size
+        self.grid_button.setIcon(theme.line_icon(f"grid:{rows}x{cols}", "text_muted"))
+        self.grid_button.setToolTip(f"Grid: {rows} \u00d7 {cols}")
+
+    def _rebuild_grid_menu(self, menu: QMenu):
+        """Rebuilt on opening: a preset or the assistant may have changed the grid since. Only the simple grids:
+        the split layouts are the assistant's."""
+        menu.clear()
+        group = QActionGroup(menu)
         current = self.display_area_widget.grid_size
         split = self.display_area_widget.split
         for rows, cols in GRID_SIZES:
-            action = self.grid_menu.addAction(f"{rows} \u00d7 {cols}")
+            action = menu.addAction(theme.line_icon(f"grid:{rows}x{cols}", "text_muted"), f"{rows} \u00d7 {cols}")
             action.setCheckable(True)
             action.setChecked((rows, cols) == current and split is None)
             group.addAction(action)
             action.triggered.connect(lambda _=False, r=rows, c=cols: self.display_area_widget.set_grid_size(r, c))
-        self.grid_menu.addSeparator()
-        for preset in SPLIT_PRESETS:
-            left, right = (("Large" if r * c == 1 else f"{r} \u00d7 {c}") for r, c in (preset[:2], preset[2:]))
-            action = self.grid_menu.addAction(f"{left}  |  {right}")
-            action.setCheckable(True)
-            action.setChecked(split == preset)
-            group.addAction(action)
-            action.triggered.connect(lambda _=False, p=preset: self.display_area_widget.set_split_layout(p))
 
     def _rebuild_playback_menu(self):
         """Rebuilt on opening, so the play state and the speed are current."""

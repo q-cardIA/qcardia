@@ -5,7 +5,7 @@ from pathlib import Path
 from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
 from utils import study_log
-from utils.hanging_protocols import PRESETS, PanelAssignment
+from utils.hanging_protocols import PRESETS, PanelAssignment, available_presets
 from utils.windowing import null_myocardium_window
 from view.central_display_area_widget import CINE_TIME_AXIS
 from view.series_browser_widget import SeriesCardInfo
@@ -135,6 +135,7 @@ class DICOMController:
         self._last_result = result
         self._loading_keys = {e.key for e in result.entries if e.key is not None and e.is_primary}
         self._load_total = len(self._loading_keys)
+        self.view.sidebar.set_available(available_presets(self._loading_keys))  # a preset's panels wait for its series
         # A new patient starts on an empty 2x2.
         self._waiting = {}
         self._widget.clear_series()
