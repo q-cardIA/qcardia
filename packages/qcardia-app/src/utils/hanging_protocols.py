@@ -178,7 +178,7 @@ PRESETS: dict[str, Preset] = {
 }
 
 # The patient sidebar's buttons: the presets a user picks directly. The others are the assistant's.
-SIDEBAR_PRESETS = {"Functional": "functional", "LGE": "lge", "Perfusion": "perfusion", "Flow": "flow"}
+SIDEBAR_PRESETS = {"Function": "functional", "LGE": "lge", "Perfusion": "perfusion", "Flow": "flow"}
 
 
 def preset_label(name: str) -> str:

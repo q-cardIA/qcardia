@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QStyle,
     QTabBar,
     QTabWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -221,7 +220,6 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self.menu_bar = self._build_menu_bar()
         top_layout.addWidget(self.menu_bar, 0, Qt.AlignVCenter)
-        top_layout.addWidget(self._build_top_buttons(), 0, Qt.AlignVCenter)
         top_layout.addStretch(1)
         top_layout.addWidget(self.app_title)
 
@@ -281,7 +279,7 @@ class MainWindow(QMainWindow):
     def _build_docks(self):
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
         self.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
-        self.sidebar_dock = self._dock(self.sidebar, "Patient", "patientDock", Qt.LeftDockWidgetArea)
+        self.sidebar_dock = self._dock(self.sidebar, "Protocols", "patientDock", Qt.LeftDockWidgetArea)
         self.series_dock = self._dock(self.series_browser_widget, "Series", "seriesDock", Qt.RightDockWidgetArea)
         self.chat_dock = self._dock(self.chat_widget, "Assistant", "assistantDock", Qt.RightDockWidgetArea)
         self.splitDockWidget(self.series_dock, self.chat_dock, Qt.Horizontal)
@@ -428,7 +426,7 @@ class MainWindow(QMainWindow):
         bar.setObjectName("appMenu")
 
         file_menu = bar.addMenu("&File")
-        file_menu.addAction("&Load Patient...", QKeySequence.Open, self.on_load_patient_clicked)
+        file_menu.addAction("&Load Files...", QKeySequence.Open, self.on_load_patient_clicked)
         file_menu.addAction("&Save New Labels", QKeySequence.Save, self.emit_save_signal)
         file_menu.addSeparator()
         file_menu.addAction("&Return to Start Screen", self.return_to_start)
@@ -439,7 +437,7 @@ class MainWindow(QMainWindow):
         bar.addMenu(view_menu)
         view_menu.addAction(self.full_screen_action)
         view_menu.addSeparator()
-        self.toggle_sidebar_action = self._panel_action(view_menu, self.sidebar_dock, "&Patient", "Ctrl+B")
+        self.toggle_sidebar_action = self._panel_action(view_menu, self.sidebar_dock, "&Protocols", "Ctrl+B")
         # Ctrl+A stays "select all" while typing: text fields take their standard keys first.
         self.toggle_series_browser_action = self._panel_action(view_menu, self.series_dock, "&Series", "Ctrl+Shift+Q")
         self.toggle_chat_action = self._panel_action(view_menu, self.chat_dock, "&Assistant", "Ctrl+A")
@@ -453,9 +451,6 @@ class MainWindow(QMainWindow):
         crosshair.setChecked(SETTINGS.value("view/crosshair", True, type=bool))
         self.display_area_widget.set_crosshair_shown(crosshair.isChecked())
         view_menu.addSeparator()
-        self.grid_menu = StickyMenu("&Grid", view_menu)
-        self.grid_menu.aboutToShow.connect(lambda: self._rebuild_grid_menu(self.grid_menu))
-        view_menu.addMenu(self.grid_menu)
         self.zoom_menu = view_menu.addMenu("&Zoom")
         for text, mode in (("Zoom to &Heart", "roi"), ("&Fill Panels", "fill"), ("Fit &Whole Image", "fit")):
             self.zoom_menu.addAction(text, lambda m=mode: self.zoom_requested.emit(m))
@@ -469,6 +464,11 @@ class MainWindow(QMainWindow):
         self.playback_menu = StickyMenu("&Playback", view_menu)
         self.playback_menu.aboutToShow.connect(self._rebuild_playback_menu)
         view_menu.addMenu(self.playback_menu)
+
+        # The simple grids as diagrams, beside View as in CVI42; the split layouts are the assistant's.
+        self.grid_menu = StickyMenu("&Grid", bar)
+        self.grid_menu.aboutToShow.connect(lambda: self._rebuild_grid_menu(self.grid_menu))
+        bar.addMenu(self.grid_menu)
 
         tools_menu = StickyMenu("&Tools", bar)
         bar.addMenu(tools_menu)
@@ -486,41 +486,6 @@ class MainWindow(QMainWindow):
                            ("&About q-cardIA", REPO_URL)):
             help_menu.addAction(label, lambda u=url: QDesktopServices.openUrl(QUrl(u)))
         return bar
-
-    def _build_top_buttons(self) -> QWidget:
-        """CVI-style quick controls next to the menus: the grid as diagrams, and the label tools."""
-        box = QWidget()
-        layout = QHBoxLayout(box)
-        layout.setContentsMargins(8, 0, 0, 0)
-        layout.setSpacing(4)
-        self.grid_button = QToolButton()
-        self.grid_button.setPopupMode(QToolButton.InstantPopup)
-        self.grid_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.grid_button.setText("Grid")
-        grid_menu = QMenu(self.grid_button)
-        grid_menu.aboutToShow.connect(lambda: self._rebuild_grid_menu(grid_menu))
-        self.grid_button.setMenu(grid_menu)
-        self.display_area_widget.panels_moved.connect(lambda _: self._show_grid())
-        theme.notifier.changed.connect(self._show_grid)
-        self._show_grid()
-        predict = QPushButton("Predict Labels")
-        predict.setMenu(self.predict_menu)
-        edit = QPushButton("Edit Contours")
-        edit.setCheckable(True)  # in step with Tools > Edit Contours
-        edit.toggled.connect(self.contour_edit_action.setChecked)
-        self.contour_edit_action.toggled.connect(edit.setChecked)
-        save = QPushButton("Save Labels")
-        save.clicked.connect(self.emit_save_signal)
-        for button in (self.grid_button, predict, edit, save):
-            button.setProperty("role", "topBarButton")
-            layout.addWidget(button)
-        return box
-
-    def _show_grid(self):
-        """The Grid button shows the current grid as its diagram."""
-        rows, cols = self.display_area_widget.grid_size
-        self.grid_button.setIcon(theme.line_icon(f"grid:{rows}x{cols}", "text_muted"))
-        self.grid_button.setToolTip(f"Grid: {rows} \u00d7 {cols}")
 
     def _rebuild_grid_menu(self, menu: QMenu):
         """Rebuilt on opening: a preset or the assistant may have changed the grid since. Only the simple grids:
