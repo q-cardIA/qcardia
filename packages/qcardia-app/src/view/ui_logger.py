@@ -68,8 +68,9 @@ def _watch(widget):
 
 
 class _UiLogger(QObject):
-    def __init__(self, parent):
+    def __init__(self, parent, window):
         super().__init__(parent)
+        self._window = window
         self._press = None
         self._away = None
 
@@ -82,6 +83,8 @@ class _UiLogger(QObject):
 
     def eventFilter(self, obj, event):
         kind = event.type()
+        if kind in (QEvent.MouseButtonRelease, QEvent.KeyRelease, QEvent.Wheel):
+            self._window.schedule_screen_log()  # what the input changed on screen
         if kind not in _WANTED or not isinstance(obj, QWidget):
             return False
         # A mouse, wheel or key event that a widget ignores goes on to its parent: log it at the first widget only.
@@ -121,7 +124,7 @@ def install_ui_logger(window):
     if app.property("ui_logger_installed"):
         return  # a second session after Return to Start Screen; one logger is enough
     app.setProperty("ui_logger_installed", True)
-    logger = _UiLogger(app)
+    logger = _UiLogger(app, window)
     for widget in app.allWidgets():
         _watch(widget)
     app.installEventFilter(logger)

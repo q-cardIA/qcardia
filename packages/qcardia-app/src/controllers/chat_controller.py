@@ -5,6 +5,7 @@ format changes nothing here.
 """
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 import time
@@ -19,7 +20,7 @@ from llm.tools import ToolContext, build_tools
 from model.background_worker import CallableWorker
 from model.ollama_client import warm_model
 from utils import llm_devices, study_log
-from utils.app_config import data_dir, list_subjects
+from utils.app_config import data_dir, list_subjects, patient_label, patient_source, patients
 from utils.windowing import WINDOW_STEPS, null_myocardium_window, step_window
 from utils.layouts import CINE_SPEEDS, MAX_GRID_COLS, MAX_GRID_ROWS, MAX_HALF
 from view.central_display_area_widget import CINE_TIME_AXIS
@@ -146,14 +147,41 @@ class ChatController:
         return self._available_subjects_cache
 
     def _resolve_subject(self, subject_id: str) -> str | None:
-        """Exact folder name, else the single one matching case-insensitively or by number ('3' -> 'QLGE03_')."""
+        """The folder of a hospital ID, a full name or a folder name (case and spaces ignored), else the
+        single folder with that number ('3' -> 'QLGE03_')."""
         names = self._available_subjects()
-        if subject_id in names:
-            return subject_id
+        key = re.sub(r"\s+", "", subject_id).lower()
+        for p in patients(names) if key else ():
+            if key in (p.folder.lower(), p.hospital_id.lower(), re.sub(r"\s+", "", p.name).lower()):
+                return p.folder
         digits = re.findall(r"\d+", subject_id)
-        matches = [n for n in names if n.lower() == subject_id.lower()
-                   or (len(digits) == 1 and int(digits[0]) in map(int, re.findall(r"\d+", n)))]
+        matches = [n for n in names if len(digits) == 1 and int(digits[0]) in map(int, re.findall(r"\d+", n))]
         return matches[0] if len(matches) == 1 else None
+
+    def _search_patients(self, query: str) -> str:
+        """The patients whose name, hospital ID or study folder contains query (all for none), or the one
+        it resolves to ('subject 3'); else the names that sound alike, e.g. from a misheard voice command."""
+        found = patients(self._available_subjects())
+        if not found:
+            return f"No patients in {patient_source()}."
+        q = query.strip().lower()
+        exact = self._resolve_subject(query)  # a whole ID, full name, folder or study number
+        hits = patients([exact]) if exact else [
+            p for p in found if all(any(n.startswith(w) for n in p.name.lower().split()) for w in q.split())
+            or q in p.folder.lower() or (len(q) >= 4 and q.replace(" ", "") in p.hospital_id.lower())]
+        heading = f"{len(hits)} patient{'s' * (len(hits) != 1)} {f'match {query!r}' if q else 'in the database'}"
+        if not hits:
+            variants = {}  # full name, first name and surname -> their patients
+            for p in found:
+                for v in (p.name, *p.name.split(" ", 1)) if p.name else ():
+                    variants.setdefault(v.lower(), []).append(p)
+            close = difflib.get_close_matches(q, variants, 3, 0.75)
+            hits = [p for p in found if any(p in variants[v] for v in close)]
+            heading = f"No patient matches {query!r}. Ask the user whether they meant one of these names that sound alike"
+        if not hits:
+            return f"No patient matches {query!r}."
+        return heading + ": " + "; ".join(
+            f"{p.name}, ID {p.hospital_id}, study {p.folder}" if p.name else p.folder for p in hits)
 
     def _context_snapshot(self) -> str:
         widget = self.view.display_area_widget
@@ -162,7 +190,7 @@ class ChatController:
             time_frame = (widget.current_time_index, self.model.num_time_frames)
         loading = self.dicom_controller.loading_series
         return build_state_block(
-            subject=self.model.subject_folder.name if self.model.subject_folder else "none",
+            subject=patient_label(self.model.subject_folder) if self.model.subject_folder else "none",
             loaded_series=sorted(set(self.model.series) - loading),
             loading_series=sorted(loading),
             time_frame=time_frame,
@@ -233,6 +261,9 @@ class ChatController:
         if self._worker is not None:
             self._hold(self._worker)  # tool calls can start the follow-up before this thread ends
         worker_cls = llm_devices.worker_class()
+        # The input is the user message in chat_start (or the tool results before it); the context is not logged.
+        self._llm_span = study_log.Span("llm", device=llm_devices.current().id, model=self._llm_model,
+                                        think=self._think)
         self._worker = worker_cls(messages, tools=self._build_tools(), model=self._llm_model,
                                   think=self._think)
         self._worker.token_received.connect(self.view.chat_widget.append_assistant_chunk)
@@ -250,7 +281,14 @@ class ChatController:
         if worker is self._worker:
             self._worker = None
 
+    def _log_reply(self, **outcome):
+        """The raw output of the request that just ended, with the token counts the server reports."""
+        w = self._worker
+        if w is not None:
+            self._llm_span.end(reply=w.reply, thinking=w.thinking, **w.usage, **outcome)
+
     def _on_finished(self):
+        self._log_reply()
         text = self.view.chat_widget.finalize_assistant_message()
         if text:
             self._history.append({"role": "assistant", "content": text})
@@ -258,12 +296,14 @@ class ChatController:
         self.view.chat_widget.set_enabled(True)
 
     def _on_error(self, message: str):
+        self._log_reply(error=message)
         self._chat_span.end(error=message)
         self.view.chat_widget.finalize_assistant_message()
         self.view.chat_widget.append_system_message(f"Error: {message}")
         self.view.chat_widget.set_enabled(True)
 
     def _on_tool_calls(self, calls: list):
+        self._log_reply(tool_calls=[{"name": n, "arguments": a} for n, a in calls])
         # load_subject loads in the background; remaining calls wait until its series are known.
         self._warm_model_in_background()
         self._execute_tool_sequence(list(calls))
@@ -308,6 +348,7 @@ class ChatController:
 
     def _append_tool_history(self, name: str, arguments: dict, result: str):
         study_log.log("tool_call", name=name, arguments=arguments, result=result)
+        self.view.log_screen()  # the screen after each step
         self._history.append({
             "role": "assistant", "content": "",
             "tool_calls": [{"function": {"name": name, "arguments": arguments}}],
@@ -318,26 +359,25 @@ class ChatController:
         subject_id = str(arguments.get("subject_id", ""))
         name = self._resolve_subject(subject_id)
         if name is None:
-            result = f"No single subject folder matches '{subject_id}'. Call list_subjects for the exact names."
+            result = f"No single patient matches '{subject_id}'. Call search_patients for the hospital ID."
             self._finish_load_subject(result, arguments, remaining, bubble)
             return
         path = data_dir() / name
 
         def _on_ready(success: bool):
             result = (
-                f"Loaded subject {name} from {path}."
+                f"Loaded the imaging of {patient_label(name)}."
                 if success
-                else f"Failed to load subject {name} (still busy loading a previous subject, or load failed)."
+                else f"Failed to load {patient_label(name)} (still busy loading a previous patient, or load failed)."
             )
             self._finish_load_subject(result, arguments, remaining, bubble)
 
         self.dicom_controller.load_patient(str(path), on_ready=_on_ready)
 
     def _finish_load_subject(self, result: str, arguments: dict, remaining: list, bubble):
+        # Planned for a patient that is now loaded, or that did not load: plan again either way.
+        result += _drop_planned(remaining, "this subject loaded" if result.startswith("Loaded") else "the load failed")
         bubble.set_result(result)
-        loaded = result.startswith("Loaded")
-        if loaded:
-            result += _drop_planned(remaining, "this subject loaded")
         self._append_tool_history("load_subject", arguments, result)
         # The cached segmentations (ED/ES, LV slices) are read as the CINE and LGE series load.
         segmentable = set(self.model.segmentable)
@@ -413,9 +453,8 @@ class ChatController:
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
         try:
-            if name == "list_subjects":
-                names = self._available_subjects()
-                return f"{len(names)} subjects in {data_dir()}: {', '.join(names)}" if names else f"No subject folders in {data_dir()}."
+            if name == "search_patients":
+                return self._search_patients(str(arguments.get("query") or ""))
 
             if name == "run_segmentation":
                 modality = str(arguments.get("modality", "")).upper()

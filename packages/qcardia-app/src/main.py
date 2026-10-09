@@ -17,7 +17,7 @@ from model.background_worker import CallableWorker
 from model.dicom_model import DICOMModel
 from model.voice_input import VOICE_AVAILABLE, preload_model
 from utils import llm_devices, study_log
-from utils.app_config import APP_DIR, data_dir
+from utils.app_config import APP_DIR, patient_source
 from view.theme import apply_theme
 from view.main_window import MainWindow, load_app_icon
 from view.ui_logger import install_ui_logger
@@ -70,19 +70,23 @@ def main():
 
     main_window.session_busy = _session_busy
 
+    study = []  # whether the running session is a named study session, which gets a report
+
     def _start_study_log():
+        # Always a session log: named in a study session, else a backup without a name.
         welcome = main_window.welcome_widget
-        if welcome.study_logging:
-            study_log.start_session(
-                welcome.participant_id, welcome.condition, assistant=not welcome.assistant_disabled,
-                cardisort_cache=welcome.use_cardisort_cache,
-                segmentation_cache=welcome.use_segmentation_cache, data_folder=str(data_dir()),
-            )
-            install_ui_logger(main_window)
+        study[:] = [welcome.study_logging]
+        study_log.start_session(
+            *((welcome.participant_id, welcome.condition) if welcome.study_logging else ("", "")),
+            study=welcome.study_logging, assistant=not welcome.assistant_disabled,
+            cardisort_cache=welcome.use_cardisort_cache,
+            segmentation_cache=welcome.use_segmentation_cache, patients=str(patient_source()),
+        )
+        install_ui_logger(main_window)
 
     def _end_study_log():
         path = study_log.end_session()
-        if path is not None:
+        if path is not None and study[0]:
             # Detached, so the report finishes after the app has closed.
             flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             subprocess.Popen([sys.executable, str(APP_DIR / "tests" / "study" / "study_report.py"), str(path)],

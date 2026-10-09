@@ -1,7 +1,7 @@
 """QThread bases: one for any blocking call, one for the streaming chat transports."""
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 
 
 class CallableWorker(QThread):
@@ -45,3 +45,7 @@ class ChatWorker(QThread):
         self._tools = tools
         self._model = model
         self._think = think
+        # The raw reply and the token counts the server reports, for the session log.
+        self.reply, self.thinking, self.usage = "", "", {}
+        self.token_received.connect(lambda t: setattr(self, "reply", self.reply + t), Qt.DirectConnection)
+        self.thinking_received.connect(lambda t: setattr(self, "thinking", self.thinking + t), Qt.DirectConnection)

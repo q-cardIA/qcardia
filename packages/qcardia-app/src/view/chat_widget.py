@@ -37,6 +37,7 @@ from utils.app_config import (
     discover_local_gguf_files,
     gguf_model_tag,
     import_gguf_model,
+    patient_name,
 )
 from view import theme
 from view.theme import thin_loading_bar
@@ -57,8 +58,8 @@ _FAILURE_MARKERS = ("failed", "not found", "not loaded", "out of range", "unknow
 # available on click, mirroring how agentic coding UIs collapse tool calls
 # to a summary line with an expandable detail underneath.
 _TOOL_SUMMARY_FORMATTERS = {
-    "list_subjects": lambda a: "List subjects",
-    "load_subject": lambda a: f"Load subject {a.get('subject_id')}",
+    "search_patients": lambda a: "Search patient database" + (f": {a['query']}" if a.get("query") else ""),
+    "load_subject": lambda a: f"Load {patient_name(a.get('subject_id'))}",
     "run_segmentation": lambda a: f"Run {a.get('modality')} segmentation",
     "apply_preset": lambda a: f"Apply {a.get('preset')} preset",
     "display_series": lambda a: (
@@ -519,7 +520,7 @@ class ChatWidget(QFrame):
         self._send_btn.setProperty("role", "composerSend")
         self._send_btn.setToolTip("Send (Enter)")
         self._send_btn.clicked.connect(self._on_send_clicked)
-        self._send_btn.hide()
+        self._send_btn.setEnabled(False)  # always there, so the mic never moves under a held mouse
         self._apply_composer_icons()
         theme.notifier.changed.connect(self._apply_composer_icons)
 
@@ -679,7 +680,8 @@ class ChatWidget(QFrame):
                                    f", thinking {'on' if self.think_enabled() else 'off'}")
 
     def _update_send_button(self):
-        self._send_btn.setVisible(self._busy or bool(self._input.text().strip()))
+        """Accent only when there is text to send; muted while empty or while a request runs."""
+        self._send_btn.setEnabled(not self._busy and bool(self._input.text().strip()))
 
     def _apply_composer_icons(self):
         for button, kind, token in ((self._mic_btn, "mic", "text_muted"), (self._send_btn, "arrow_up", "on_accent")):
@@ -787,7 +789,6 @@ class ChatWidget(QFrame):
 
     def set_enabled(self, enabled: bool):
         self._busy = not enabled
-        self._send_btn.setEnabled(enabled)
         if enabled:
             self._send_btn.stop_loading()
         else:
@@ -861,6 +862,7 @@ class ChatWidget(QFrame):
         self._mic_btn.setDown(True)
         self._voice_span = study_log.Span("voice")
         self._input.begin_preview()
+        self._input.setPlaceholderText("Listening…")  # without live text, nothing else shows it records
         self._mic_worker = MicrophoneWorker(self)
         self._mic_worker.partial.connect(self._input.show_preview)
         self._mic_worker.finished.connect(self._on_transcription_done)
@@ -880,6 +882,7 @@ class ChatWidget(QFrame):
         self._voice_span.end(text=text)
         self._mic_btn.stop_loading()
         self._mic_worker = None
+        self._input.setPlaceholderText("Ask something…")
         self._input.end_preview(text)
         self._input.setFocus()
         if self._send_after_voice:
@@ -892,6 +895,7 @@ class ChatWidget(QFrame):
         self._mic_btn.setDown(False)
         self._mic_btn.stop_loading()
         self._mic_worker = None
+        self._input.setPlaceholderText("Ask something…")
         self._input.end_preview(None)
         self.append_system_message(f"Voice error: {message}")
 

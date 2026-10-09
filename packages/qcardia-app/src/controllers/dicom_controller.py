@@ -41,6 +41,7 @@ class DICOMController:
         self.view.contours_requested.connect(self.show_contours_everywhere)
         self.view.window_requested.connect(self.window_everywhere)
         self.view.phase_requested.connect(self.go_to_phase)
+        self.view.panels_moved.connect(self._move_waiting)
 
     def is_busy(self) -> bool:
         return self._load_worker is not None or self._seg_worker is not None or bool(self._seg_queue)
@@ -82,6 +83,7 @@ class DICOMController:
         self._current_subject_folder = Path(folder_path)
         self._on_ready = on_ready
         self.view.show_loading(f"Loading {Path(folder_path).name}…")
+        self.view.results_widget.show_analysis({})  # the previous patient's, also when this load fails
         self._load_worker = CallableWorker(self.model.load_patient, folder_path, report=True)
         self._load_worker.progress.connect(self._on_load_progress)
         span = study_log.Span("load_subject", subject=Path(folder_path).name)
@@ -133,22 +135,22 @@ class DICOMController:
         self._last_result = result
         self._loading_keys = {e.key for e in result.entries if e.key is not None and e.is_primary}
         self._load_total = len(self._loading_keys)
-        # The layout stays: each panel shows its series again, of this patient, once that has loaded.
-        self._waiting = {a["idx"]: (PanelAssignment(a["idx"], a["series_key"], a["axis"]), Counter())
-                         for a in self._widget.panel_assignments() if a["series_key"]}
+        # A new patient starts on an empty 2x2.
+        self._waiting = {}
         self._widget.clear_series()
+        self._widget.refresh_panels()  # every panel's series is gone: all empty
+        self._widget.set_grid_size(2, 2)
         self._show_results()
-        for idx, (panel, _) in self._waiting.items():
-            self._widget.set_panel_waiting(idx, panel.key)
         self.view.series_browser_widget.populate(self._build_browser_cards(result, loading=True))
         self.view.series_browser_widget.set_load_progress(0, self._load_total)
-        self.view.sidebar.show_patient(self._current_subject_folder.name, 0)
+        self.view.sidebar.show_patient(self._current_subject_folder, 0)
         self.current_time_index = self._cine_frames = 0
         self.view.update_time_slider_range(0)
         self._ready(True)
 
     def _add_loaded_series(self, key: str, info: dict):
         self._register(key, info)
+        self.view.schedule_screen_log()  # a waiting panel may show it now
         self._last_result.loaded[key] = info
         self._loading_keys.discard(key)
         self._fill_waiting_panels()
@@ -158,7 +160,7 @@ class DICOMController:
         self.view.series_browser_widget.set_load_progress(self._load_total - len(self._loading_keys), self._load_total)
         path = next(e.path for e in self._last_result.entries if e.key == key and e.is_primary)
         self.view.series_browser_widget.update_card(path, self._widget.get_thumbnail(key), key)
-        self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
+        self.view.sidebar.show_patient(self._current_subject_folder, len(self._last_result.loaded))
         cine_frames = self._widget.n_frames(CINE_TIME_AXIS)
         if cine_frames != self._cine_frames:  # else a later cine would reset the frame shown
             self._cine_frames = cine_frames
@@ -218,7 +220,7 @@ class DICOMController:
 
         self._last_result.loaded[new_key] = info
         self.view.series_browser_widget.populate(self._build_browser_cards(self._last_result))
-        self.view.sidebar.show_patient(self._current_subject_folder.name, len(self._last_result.loaded))
+        self.view.sidebar.show_patient(self._current_subject_folder, len(self._last_result.loaded))
 
     def _register(self, key: str, info: dict):
         self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],
@@ -363,6 +365,7 @@ class DICOMController:
         self._widget.hide_segmentation_loading(series_key)
         self._widget.set_segmentation(series_key, result)
         self._show_results()
+        self.view.schedule_screen_log()
 
     def _show_results(self):
         self.view.results_widget.show_analysis(self.model.analysis)
@@ -398,8 +401,8 @@ class DICOMController:
             return 0, total
 
         rows, cols = preset.grid
-        self._widget.set_grid_size(rows, cols)
         self._waiting = {}
+        self._widget.set_grid_size(rows, cols)
         for panel, z in zip(preset.panels, slices):
             if z is not None:
                 self._widget.set_panel_series(panel.idx, panel.key, axis=panel.axis, slice_idx=z)
@@ -415,6 +418,12 @@ class DICOMController:
         """For a series that is still loading: the panel shows it once it has loaded."""
         self._waiting[panel_idx] = (PanelAssignment(panel_idx, series_key, axis), Counter())
         self._widget.set_panel_waiting(panel_idx, series_key)
+
+    def _move_waiting(self, moves: dict):
+        """The layout changed: a waiting panel moves with its cell, or stops waiting when its cell is gone."""
+        self._waiting = {moves[i]: waiting for i, waiting in self._waiting.items() if i in moves}
+        for idx, (panel, _) in self._waiting.items():
+            self._widget.set_panel_waiting(idx, panel.key)
 
     def _must_wait(self, panel: PanelAssignment) -> bool:
         """Its series, or the series its slice is matched to, is still loading."""

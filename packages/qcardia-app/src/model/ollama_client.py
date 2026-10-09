@@ -50,6 +50,7 @@ class OllamaWorker(ChatWorker):
                 self.error.emit(f"Could not reach Ollama at {OLLAMA_URL}: {e}")
             return
 
+        calls = []  # read on to the last chunk, which has the token counts
         try:
             for line in response.iter_lines():
                 if not line:
@@ -60,30 +61,29 @@ class OllamaWorker(ChatWorker):
                     continue
 
                 message = chunk.get("message", {})
-                tool_calls = message.get("tool_calls")
-                if tool_calls:
-                    calls = [
-                        (tc["function"]["name"], tc["function"].get("arguments", {}))
-                        for tc in tool_calls
-                    ]
-                    logging.info(f"[{self._model}] tool_calls: {calls}")
-                    self.tool_calls_ready.emit(calls)
-                    return
+                calls += [(tc["function"]["name"], tc["function"].get("arguments", {}))
+                          for tc in message.get("tool_calls") or []]
 
                 thinking = message.get("thinking")
                 if thinking:
                     self.thinking_received.emit(thinking)
 
                 content = message.get("content")
-                if content:
+                if content and not calls:
                     self.token_received.emit(content)
 
                 if chunk.get("done"):
+                    self.usage = {"prompt_tokens": chunk.get("prompt_eval_count"),
+                                  "output_tokens": chunk.get("eval_count")}
                     break
         except requests.RequestException as e:
             self.error.emit(f"Ollama stream interrupted: {e}")
             return
 
+        if calls:
+            logging.info(f"[{self._model}] tool_calls: {calls}")
+            self.tool_calls_ready.emit(calls)
+            return
         logging.info(f"[{self._model}] finished with no tool_calls (text-only reply)")
         self.finished_ok.emit()
 

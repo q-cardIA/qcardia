@@ -91,6 +91,7 @@ class OpenAIWorker(ChatWorker):
             "temperature": 0.2,
             # vLLM's way of asking for reasoning; ignored where it does not apply.
             "chat_template_kwargs": {"enable_thinking": self._think},
+            "stream_options": {"include_usage": True},  # token counts in the last chunk
         }
         # A live user choice, so it overrides only the device's pinned enable_thinking.
         for key, value in EXTRA_BODY.items():
@@ -138,6 +139,9 @@ class OpenAIWorker(ChatWorker):
                     self.error.emit(chunk["error"].get("message", "stream error"))
                     return
 
+                if chunk.get("usage"):
+                    self.usage = {"prompt_tokens": chunk["usage"].get("prompt_tokens"),
+                                  "output_tokens": chunk["usage"].get("completion_tokens")}
                 for choice in chunk.get("choices") or []:
                     finish = choice.get("finish_reason") or finish
                     delta = choice.get("delta") or {}

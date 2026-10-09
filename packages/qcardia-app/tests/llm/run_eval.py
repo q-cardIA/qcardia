@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Eval runner for qcardia-app-dev's chat-assistant tool-calling.
 
-Requires a local Ollama server reachable with the model pulled (default:
-see utils/app_config.OLLAMA_MODEL) — exercises the real prompt/tools
+Requires a local Ollama server reachable with the model pulled (default: the
+app's, utils/llm_devices.default_model()) — exercises the real prompt/tools
 against a live model, not a unit test, not meant to run in CI. See README.md.
 
 Usage:

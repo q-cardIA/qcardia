@@ -695,6 +695,7 @@ class DICOMModel:
         info["geometry"] = self.get_geometry(key)
         info["window"] = self._default_window(key, info["volume"])
         if key in self.segmentable:
+            self.analysis.pop(key, None)  # measured from the series this one replaces, e.g. on a reassign
             try:  # in the viewer and measured at once; a damaged cache must not stop the series from loading
                 info["segmentation"] = self.segment(key, cached_only=True)
             except Exception as e:
