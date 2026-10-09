@@ -229,7 +229,22 @@ _tokens: dict[str, tuple[str, float]] = {}  # device id -> (token, time.monotoni
 
 
 def _env(name: str) -> str:
-    return os.environ.get(name, "").strip() if name else ""
+    """An env var, falling back on Windows to the user's saved ones.
+
+    A process copies its env from its parent at start, so a variable set after the
+    terminal or IDE opened stays invisible here until that parent restarts as well.
+    """
+    if not name:
+        return ""
+    value = os.environ.get(name, "").strip()
+    if value or sys.platform != "win32":
+        return value
+    import winreg
+
+    with suppress(OSError):
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            return str(winreg.QueryValueEx(key, name)[0]).strip()
+    return ""
 
 
 def _key_source(device: Device) -> str:
