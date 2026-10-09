@@ -393,10 +393,10 @@ class DICOMController:
         present = lambda k: self._widget.is_series_registered(k) or k in self._loading_keys  # noqa: E731
         preset = preset.for_loaded(present)
 
-        total = len(preset.panels)
         slots = Counter(p.key for p in preset.panels if p.slice_slot is not None)
         slices = [None if self._must_wait(p) else self._preset_slice(p, slots) for p in preset.panels]
         filled = sum(z is not None or self._must_wait(p) for p, z in zip(preset.panels, slices))
+        total = filled + sum(not present(p.key) for p in preset.panels)  # a too-short SAX stack misses nothing
         if filled == 0:
             # Leave the current grid/panels untouched — a total no-op should
             # actually be a no-op, not silently wipe what was displayed.
@@ -414,9 +414,7 @@ class DICOMController:
             else:
                 self._widget.set_panel_empty(panel.idx)
         study_log.log("layout", preset=name, panels=self._widget.panel_assignments())
-        # Only panels whose series is not loaded count as unfilled: a SAX stack shorter than the preset's
-        # slots (functional_complex) leaves panels empty with nothing missing.
-        return filled, filled + sum(not present(p.key) for p in preset.panels)
+        return filled, total
 
     def show_series_when_loaded(self, panel_idx: int, series_key: str, axis: str = "transverse"):
         """For a series that is still loading: the panel shows it once it has loaded."""

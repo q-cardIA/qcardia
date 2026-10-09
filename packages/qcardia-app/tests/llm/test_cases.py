@@ -1278,17 +1278,13 @@ def _perfusion_over_cine(s):
         return f"bottom row {got}, expected CINE_SAX near slices {want}"
 
 
-def _lge_levels(s):
-    shown = sorted((k, sl if k == "LGE_SAX" else 0) for k, sl, _ in s["panels"] if k)
-    want = sorted([("LGE_2CH", 0), ("LGE_3CH", 0), ("LGE_4CH", 0), ("LGE_SAX", 3), ("LGE_SAX", 6), ("LGE_SAX", 9)])
-    return None if shown == want else f"panels {shown}, expected the three LGE LAX views and LGE_SAX 3, 6 and 9"
-
-
-def _cine_levels(s):
-    shown = sorted((k, sl if k == "CINE_SAX" else 0) for k, sl, _ in s["panels"] if k)
-    want = sorted([("CINE_2CH", 0), ("CINE_3CH", 0), ("CINE_4CH", 0), ("CINE_SAX", 3), ("CINE_SAX", 7),
-                   ("CINE_SAX", 11)])
-    return None if shown == want else f"panels {shown}, expected the three LAX cines and CINE_SAX 3, 7 and 11"
+def _levels(seq: str, slices: list[int]):
+    """Exactly the three long axes of seq and its SAX at slices, in any layout."""
+    def check(s):
+        shown = sorted((k, sl if k.endswith("SAX") else 0) for k, sl, _ in s["panels"] if k)
+        want = sorted([(f"{seq}_{v}", 0) for v in ("2CH", "3CH", "4CH")] + [(f"{seq}_SAX", z) for z in slices])
+        return None if shown == want else f"panels {shown}, expected the three {seq} long axes and SAX {slices}"
+    return check
 
 
 def _viability_es_contours(s):
@@ -1326,7 +1322,7 @@ _m, _v = _segmented(grid=(2, 2), lge=True)
 _add(
     id="preset_adjust_003", category="preset_adjust", description="The LGE views, the SAX at base, mid and apex",
     model=_m, view=_v, prompt="Show the LGE views, with the SAX at base, mid and apex",
-    expected_tool_calls=[], match_mode="state", expected_state=_lge_levels,
+    expected_tool_calls=[], match_mode="state", expected_state=_levels("LGE", [3, 6, 9]),
     notes="E.g. a 2x3: the three LGE long axes and LGE_SAX at its base, mid and apex (9, 6, 3).",
 )
 _m, _v = _segmented(grid=(2, 2), lge=True)
@@ -1346,7 +1342,7 @@ _m, _v = _segmented(grid=(2, 2))
 _add(
     id="preset_adjust_006", category="preset_adjust", description="Functional, the SAX at base, mid and apex",
     model=_m, view=_v, prompt="Show the functional views, but the SAX at base, mid and apex",
-    expected_tool_calls=[], match_mode="state", expected_state=_cine_levels,
+    expected_tool_calls=[], match_mode="state", expected_state=_levels("CINE", [3, 7, 11]),
     notes="E.g. a 2x3: the three LAX cines and CINE_SAX at its base, mid and apex (11, 7, 3 at frame 1).",
 )
 

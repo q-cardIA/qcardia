@@ -11,7 +11,7 @@ from view import theme
 class SidebarWidget(QFrame):
     load_patient_requested = Signal()
     preset_requested = Signal(str)
-    _ICONS = {"Patient Data": "folder", "Function": "heart", "LGE": "lge", "Perfusion": "uptake", "Flow": "flow"}
+    _ICONS = {"functional": "heart", "lge": "lge", "perfusion": "uptake", "flow": "flow"}  # by preset
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,7 +29,6 @@ class SidebarWidget(QFrame):
         self.btn_patient = QPushButton(" Patient Data")  # the space: a wider gap after the icon
         self.btn_patient.setProperty("role", "sidebarButton")
         self.btn_patient.setCheckable(True)
-        self.btn_patient.setObjectName("patientDataButton")  # open: grey, not the accent (theme.qss)
         self.layout.addWidget(self.btn_patient)
         patient_box = QFrame()
         box_layout = QVBoxLayout(patient_box)
@@ -60,8 +59,8 @@ class SidebarWidget(QFrame):
         theme.notifier.changed.connect(self._apply_icons)
 
     def _apply_icons(self):
-        for btn in (self.btn_patient, *self._preset_buttons.values()):
-            btn.setIcon(theme.line_icon(self._ICONS[btn.text().strip()], "text_muted"))
+        for btn, kind in ((self.btn_patient, "folder"), *((b, self._ICONS[n]) for n, b in self._preset_buttons.items())):
+            btn.setIcon(theme.line_icon(kind, "text_muted"))
             btn.setIconSize(QSize(18, 18))
 
     def set_available(self, presets: list[str]):

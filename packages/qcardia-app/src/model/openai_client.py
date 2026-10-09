@@ -129,9 +129,8 @@ class OpenAIWorker(ChatWorker):
             self.error.emit(str(e))
             return
 
-        # SSE carries no charset, so requests leaves encoding unset and would hand back
-        # raw bytes; without this the decode below is skipped and every line is bytes.
-        response.encoding = "utf-8"  # SSE is UTF-8; without a charset requests would guess ISO-8859-1
+        # SSE is UTF-8 and carries no charset, for which requests would guess ISO-8859-1.
+        response.encoding = "utf-8"
 
         # Arguments stream in fragments, so collect per index: one turn can request several tools.
         partial: dict[int, dict] = {}

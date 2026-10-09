@@ -357,7 +357,7 @@ def probe(device: Device, timeout: float = DEVICE_PROBE_TIMEOUT) -> ProbeResult:
 
     if device.protocol == "openai":
         try:
-            key = _api_key(device, refresh=True)  # a token device: prove the credentials still work
+            key = _api_key(device)  # a token device: its cached token, renewed near expiry
         except requests.ConnectionError:
             return ProbeResult(False, f"Could not reach the token server at {device.token_url}.")
         except (requests.RequestException, ValueError) as e:

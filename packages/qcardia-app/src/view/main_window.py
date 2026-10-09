@@ -473,7 +473,7 @@ class MainWindow(QMainWindow):
 
         # The simple grids as diagrams, beside View as in CVI42; the split layouts are the assistant's.
         self.grid_menu = StickyMenu("&Grid", bar)
-        self.grid_menu.aboutToShow.connect(lambda: self._rebuild_grid_menu(self.grid_menu))
+        self.grid_menu.aboutToShow.connect(self._rebuild_grid_menu)
         bar.addMenu(self.grid_menu)
 
         tools_menu = StickyMenu("&Tools", bar)
@@ -493,15 +493,14 @@ class MainWindow(QMainWindow):
             help_menu.addAction(label, lambda u=url: QDesktopServices.openUrl(QUrl(u)))
         return bar
 
-    def _rebuild_grid_menu(self, menu: QMenu):
-        """Rebuilt on opening: a preset or the assistant may have changed the grid since. Only the simple grids:
-        the split layouts are the assistant's."""
-        menu.clear()
-        group = QActionGroup(menu)
+    def _rebuild_grid_menu(self):
+        """Rebuilt on opening: a layout preset may have changed the grid since."""
+        self.grid_menu.clear()
+        group = QActionGroup(self.grid_menu)
         current = self.display_area_widget.grid_size
         split = self.display_area_widget.split
         for rows, cols in GRID_SIZES:
-            action = menu.addAction(theme.line_icon(f"grid:{rows}x{cols}", "text_muted"), f"{rows} \u00d7 {cols}")
+            action = self.grid_menu.addAction(theme.line_icon(f"grid:{rows}x{cols}", "text_muted"), f"{rows} \u00d7 {cols}")
             action.setCheckable(True)
             action.setChecked((rows, cols) == current and split is None)
             group.addAction(action)

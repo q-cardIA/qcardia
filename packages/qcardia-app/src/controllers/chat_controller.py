@@ -21,7 +21,7 @@ from model.background_worker import CallableWorker
 from model.ollama_client import warm_model
 from utils import llm_devices, study_log
 from utils.app_config import data_dir, list_subjects, patient_label, patient_source, patients
-from utils.hanging_protocols import preset_label
+from utils.hanging_protocols import PERF_KEY, PERF_REST_KEY, PERF_STRESS_KEY, preset_label
 from utils.windowing import WINDOW_STEPS, null_myocardium_window, step_window
 from utils.layouts import CINE_SPEEDS, MAX_GRID_COLS, MAX_GRID_ROWS, MAX_HALF
 from view.central_display_area_widget import CINE_TIME_AXIS
@@ -203,20 +203,22 @@ class ChatController:
             playing=self.view.is_playing() and widget.driven_time_axis == CINE_TIME_AXIS,
             split=widget.split,
             speed=self.view.cine_speed,
-            perfusion={k: (widget.time_index(k), widget.n_frames(k))
-                       for k in sorted(self.model.series) if k.startswith("PERF_") and widget.n_frames(k)},
+            perfusion={k: (widget.time_index(k), widget.n_frames(k)) for k in self._perfusion_runs()},
             perfusion_playing=widget.driven_time_axis if self.view.is_playing() else None,
             perfusion_speed=self.view.perfusion_speed,
         )
 
+    def _perfusion_runs(self) -> list[str]:
+        """The loaded perfusion runs, stress first as in the perfusion preset."""
+        return [k for k in (PERF_STRESS_KEY, PERF_REST_KEY, PERF_KEY) if self.view.display_area_widget.n_frames(k)]
+
     def _time_axes(self, arguments: dict) -> list[str] | str:
         """The time axes a frame or playback request is for: the cines by default, a perfusion run, or every
         loaded perfusion run for 'perfusion'; else the reason it is not done."""
-        widget = self.view.display_area_widget
         key = str(arguments.get("series_key") or CINE_TIME_AXIS).upper()
         if key in (CINE_TIME_AXIS, "CINES"):
             return [CINE_TIME_AXIS]
-        runs = [k for k in sorted(self.model.series) if k.startswith("PERF_") and widget.n_frames(k)]
+        runs = self._perfusion_runs()
         axes = runs if key == "PERFUSION" else [k for k in runs if k == key]
         return axes or f"Not done: no perfusion run '{key}' is loaded (loaded: {', '.join(runs) or 'none'})."
 

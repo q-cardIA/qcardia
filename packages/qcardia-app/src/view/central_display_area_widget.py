@@ -114,6 +114,7 @@ class CentralDisplayAreaWidget(QWidget):
         # The cines share one time axis; each perfusion run has its own, as its frame count differs.
         self._time_index: dict[str, int] = {}
         self._time_axis = CINE_TIME_AXIS
+        self._selected: int | None = None  # the panel last used, see _show_selected
 
         # Live panel widgets (rebuilt by set_grid_size)
         self._panels: list[_Panel] = []
@@ -262,6 +263,8 @@ class CentralDisplayAreaWidget(QWidget):
                 self._panels[i].viewer.new_series(self._view_of(i))
                 self._update_panel(i)
         self._show_cine_time_if_unseen()
+        self._selected = moves.get(self._selected)
+        self._show_selected()
         self.panels_moved.emit(moves)
 
     def _add_divider(self, horizontal: bool, row: int, col: int):
@@ -407,6 +410,7 @@ class CentralDisplayAreaWidget(QWidget):
         self._panels[panel_idx].title_label.setText(f"{series_key} / {axis}")
         self._update_panel(panel_idx)
         self._show_cine_time_if_unseen()
+        self._show_selected()
 
     def matching_slice(self, source_key: str, z: int, series_key: str) -> int | None:
         """The transverse slice of series_key nearest to slice z of source_key, if both stacks have
@@ -492,6 +496,7 @@ class CentralDisplayAreaWidget(QWidget):
         p.slider.setVisible(False)
         p.viewer.clear_display()
         self._show_cine_time_if_unseen()
+        self._show_selected()
 
     def get_thumbnail(self, series_key: str) -> np.ndarray | None:
         """Representative 2D uint8 slice (center transverse slice, t=0) for a browser card."""
@@ -629,10 +634,15 @@ class CentralDisplayAreaWidget(QWidget):
 
     def _select_time_axis(self, panel_idx: int):
         """The time slider follows the panel last used: a perfusion run's own axis, else the cines'."""
+        self._selected = panel_idx
         key = self._panel_series_key[panel_idx]
-        temporal = bool(key and self._is_temporal.get(key))
-        self._set_time_axis(self.time_axis(key) if temporal else CINE_TIME_AXIS)
-        self.panel_selected.emit(temporal)
+        self._set_time_axis(self.time_axis(key) if key and self._is_temporal.get(key) else CINE_TIME_AXIS)
+        self._show_selected()
+
+    def _show_selected(self):
+        """Whether the selected panel has frames, for the time bar; also after its series changes."""
+        key = self._panel_series_key[self._selected] if self._selected is not None else None
+        self.panel_selected.emit(key is None or bool(self._is_temporal.get(key)))
 
     def _set_time_axis(self, axis: str):
         """Let the time slider drive axis, at that axis' frame."""
@@ -855,8 +865,8 @@ class CentralDisplayAreaWidget(QWidget):
     def _physical(self, panel_idx: int, view) -> tuple[float, np.ndarray] | None:
         """A panel's view (zoom relative to fit, centre as offsets in image widths) as mm per screen pixel
         and the world point in the centre; None without a geometry, e.g. in a reformatted plane."""
-        geom = self._geometries.get(self._panel_series_key[panel_idx])
-        if view is None or geom is None or self._panel_axis[panel_idx] != "transverse":
+        geom = self._transverse_geometry(panel_idx)
+        if view is None or geom is None:
             return None
         zoom, fx, fy = view
         world = geom.pixel_to_world((0.5 + fy) * geom.n_rows, (0.5 + fx) * geom.n_cols, self._panel_slice_idx[panel_idx])
@@ -864,13 +874,20 @@ class CentralDisplayAreaWidget(QWidget):
 
     def _relative(self, panel_idx: int, physical, fallback):
         """A view in patient coordinates as this panel's own view, for its image size and field of view."""
-        geom = self._geometries.get(self._panel_series_key[panel_idx])
-        if physical is None or geom is None or self._panel_axis[panel_idx] != "transverse":
+        geom = self._transverse_geometry(panel_idx)
+        if physical is None or geom is None:
             return fallback
         mm_per_px, world = physical
-        row, col, _ = geom.world_to_pixel(world)
+        delta = world - geom.ipp_list[self._panel_slice_idx[panel_idx]]  # projected onto the panel's slice
+        row, col = delta @ geom.col_dir / geom.pixel_spacing[0], delta @ geom.row_dir / geom.pixel_spacing[1]
         return (geom.pixel_spacing[1] / mm_per_px / self._fit_scale(panel_idx, geom),
                 col / geom.n_cols - 0.5, row / geom.n_rows - 0.5)
+
+    def _transverse_geometry(self, panel_idx: int):
+        """The geometry of a panel's series in its acquired plane; None without one or in a reformat."""
+        if self._panel_axis[panel_idx] == "transverse":
+            return self._geometries.get(self._panel_series_key[panel_idx])
+        return None
 
     def _fit_scale(self, panel_idx: int, geom) -> float:
         """Screen pixels per image pixel with the whole image in the panel (as CustomQGraphicsView fits it)."""

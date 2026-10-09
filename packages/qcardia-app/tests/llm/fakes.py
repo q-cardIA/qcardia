@@ -16,6 +16,7 @@ import numpy as np
 
 from utils import app_config
 from utils.layouts import layout_cells, split_layout
+from view.volume_geometry import VolumeGeometry
 
 DEFAULT_CINE_MODALITIES = ("CINE_SAX", "CINE_2CH", "CINE_3CH", "CINE_4CH")
 
@@ -67,18 +68,6 @@ def phantom_lge() -> tuple[np.ndarray, np.ndarray]:
 
 DEFAULT_WINDOW = (300.0, 600.0)
 
-
-class _PhantomGeometry:
-    """What a preset uses of a VolumeGeometry, for a phantom stack: slice depths, slice 1 apical."""
-
-    def __init__(self, series_key: str):
-        self.ipp_list = phantom_depths(series_key)
-
-    def apex_to_base(self) -> list[int]:
-        return list(range(len(self.ipp_list)))
-
-    def nearest_slice(self, other: _PhantomGeometry, z: int) -> int:
-        return min(range(len(other.ipp_list)), key=lambda i: abs(other.ipp_list[i] - self.ipp_list[z]))
 
 # The patient database the cases see (the app reads patients.csv in the data folder): made-up names, two
 # Emilys for a request that must ask which one. The folders are the cases' default available_subjects.
@@ -313,7 +302,9 @@ class FakeModel:
         self.analysis = analysis or {}
 
     def get_geometry(self, series_key: str):
-        return _PhantomGeometry(series_key) if series_key in PHANTOM_STACKS else None
+        if series_key not in PHANTOM_STACKS:
+            return None  # a phantom stack: its slices at their depths, 1 mm pixels, slice 1 apical
+        return VolumeGeometry(*np.eye(3), [np.array([0.0, 0.0, d]) for d in phantom_depths(series_key)], (1.0, 1.0), 128, 128)
 
     @property
     def segmentable(self) -> tuple[str, ...]:

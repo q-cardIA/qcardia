@@ -24,7 +24,7 @@ class PanelAssignment:
 
 @dataclass
 class Preset:
-    label: str  # what it shows, for the assistant's tool results and bubbles: users never see preset names
+    label: str
     grid: tuple[int, int]
     panels: list[PanelAssignment] = field(default_factory=list)
     # Trigger phrases the chat assistant recognizes (see llm.prompt._preset_rules).

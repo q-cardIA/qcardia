@@ -20,6 +20,11 @@ from utils.windowing import WINDOW_STEPS
 _ALL_OR_SOME_PANELS = {"type": "array", "items": {"type": "integer"},
                        "description": "Panel numbers; leave out for all panels."}
 
+# set_time_frame and set_playback act on the cines, or on a perfusion run's own frames.
+_TIME_SERIES_KEY = {"type": "string", "description": (
+    "Leave out for the cines. A perfusion run (PERF_STRESS_SAX, PERF_REST_SAX, PERF_SAX) for its own "
+    "frames, or 'perfusion' for every perfusion run.")}
+
 TOOL_SPECS = [
     {
         "type": "function",
@@ -190,13 +195,7 @@ TOOL_SPECS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "series_key": {
-                        "type": "string",
-                        "description": (
-                            "Leave out for the cines. A perfusion run (PERF_STRESS_SAX, PERF_REST_SAX, "
-                            "PERF_SAX) for its own frames, or 'perfusion' for every perfusion run."
-                        ),
-                    },
+                    "series_key": _TIME_SERIES_KEY,
                     "frame": {
                         "type": "integer",
                         "description": (
@@ -352,13 +351,7 @@ TOOL_SPECS = [
                 "type": "object",
                 "properties": {
                     "playing": {"type": "boolean", "description": "true = play, false = stop."},
-                    "series_key": {
-                        "type": "string",
-                        "description": (
-                            "Leave out for the cines. A perfusion run (PERF_STRESS_SAX, PERF_REST_SAX, "
-                            "PERF_SAX) for its own frames, or 'perfusion' for every perfusion run."
-                        ),
-                    },
+                    "series_key": _TIME_SERIES_KEY,
                     "speed": {
                         "type": "number",
                         "enum": list(CINE_SPEEDS),

@@ -112,10 +112,6 @@ def main():
         print("shortcuts:", {a.text(): a.shortcut().toString() for a in (w.toggle_sidebar_action, w.toggle_series_browser_action,
               w.toggle_chat_action, w.full_screen_action, w.contour_edit_action)})
         print("patient line:", w.sidebar._patient_label.text())
-        w.sidebar.btn_edit_contours.click()
-        print("sidebar Edit Contours -> menu action checked:", w.contour_edit_action.isChecked(), "| island shown:", w.contour_island.isVisible())
-        w.contour_edit_action.setChecked(False)
-        print("menu off -> sidebar button checked:", w.sidebar.btn_edit_contours.isChecked())
 
     def preset_step(name: str):
         def run():
