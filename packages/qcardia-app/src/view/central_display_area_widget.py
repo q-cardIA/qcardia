@@ -101,7 +101,8 @@ class CentralDisplayAreaWidget(QWidget):
         self._panel_slice_idx: list[int] = []
         self._panel_depth: list[int] = []
         self._panel_linked: list[bool] = []
-        self._group_views: dict[tuple[str, str], tuple[float, float, float]] = {}
+        # Per linked plane: the last view as its panel had it, and in patient coordinates (see _physical).
+        self._group_views: dict[tuple[str, str], tuple[tuple[float, float, float], tuple | None]] = {}
         self._panel_contours: list[bool] = []  # show the segmentation in this panel
         self._panel_window: list[tuple[float, float] | None] = []  # a panel's own window, else its series'
 
@@ -442,6 +443,12 @@ class CentralDisplayAreaWidget(QWidget):
                 viewer.set_zoom(percent / 100)
             self._group_views.pop(self._group(i), None)  # a series dropped in later starts fitted
             done.append(i)
+        if mode == "roi":  # one framing per linked plane, the first panel's, so perfusion and LGE match
+            for group in {self._group(i) for i in done if self._panel_linked[i]}:
+                first, *rest = [i for i in done if self._panel_linked[i] and self._group(i) == group]
+                physical = self._physical(first, self._panels[first].viewer.view())
+                for i in rest:
+                    self._panels[i].viewer.set_view(self._relative(i, physical, None))
         return done
 
     def _roi_in_panel(self, panel_idx: int, boxes: dict) -> tuple[float, float, float, float] | None:
@@ -842,15 +849,42 @@ class CentralDisplayAreaWidget(QWidget):
         return [i for i in range(self.n_panels) if self._panel_linked[i] and self._group(i) == group]
 
     def _view_of(self, panel_idx: int) -> tuple[float, float, float] | None:
-        return self._group_views.get(self._group(panel_idx)) if self._panel_linked[panel_idx] else None
+        stored = self._group_views.get(self._group(panel_idx)) if self._panel_linked[panel_idx] else None
+        return self._relative(panel_idx, stored[1], stored[0]) if stored else None
+
+    def _physical(self, panel_idx: int, view) -> tuple[float, np.ndarray] | None:
+        """A panel's view (zoom relative to fit, centre as offsets in image widths) as mm per screen pixel
+        and the world point in the centre; None without a geometry, e.g. in a reformatted plane."""
+        geom = self._geometries.get(self._panel_series_key[panel_idx])
+        if view is None or geom is None or self._panel_axis[panel_idx] != "transverse":
+            return None
+        zoom, fx, fy = view
+        world = geom.pixel_to_world((0.5 + fy) * geom.n_rows, (0.5 + fx) * geom.n_cols, self._panel_slice_idx[panel_idx])
+        return geom.pixel_spacing[1] / (self._fit_scale(panel_idx, geom) * zoom), world
+
+    def _relative(self, panel_idx: int, physical, fallback):
+        """A view in patient coordinates as this panel's own view, for its image size and field of view."""
+        geom = self._geometries.get(self._panel_series_key[panel_idx])
+        if physical is None or geom is None or self._panel_axis[panel_idx] != "transverse":
+            return fallback
+        mm_per_px, world = physical
+        row, col, _ = geom.world_to_pixel(world)
+        return (geom.pixel_spacing[1] / mm_per_px / self._fit_scale(panel_idx, geom),
+                col / geom.n_cols - 0.5, row / geom.n_rows - 0.5)
+
+    def _fit_scale(self, panel_idx: int, geom) -> float:
+        """Screen pixels per image pixel with the whole image in the panel (as CustomQGraphicsView fits it)."""
+        port = self._panels[panel_idx].viewer.viewport()
+        return max(min(port.width() / geom.n_cols, port.height() / geom.n_rows), 1e-6)
 
     def _on_view_changed(self, source: int, view: tuple[float, float, float]):
         group = self._group(source)
         if self._panel_linked[source] and group:
-            self._group_views[group] = view
+            physical = self._physical(source, view)
+            self._group_views[group] = view, physical
             for i in self._linked_with(source):
                 if i != source:
-                    self._panels[i].viewer.set_view(view)
+                    self._panels[i].viewer.set_view(self._relative(i, physical, view))
 
     def _set_slice(self, panel_idx: int, z: int) -> bool:
         """Set a panel's slice and slider without triggering the slider's own handler; returns whether it changed."""
