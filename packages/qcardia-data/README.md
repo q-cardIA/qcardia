@@ -1,20 +1,3 @@
-> [!IMPORTANT]
-> **This repository has moved.** `qcardia-data` is now developed in the
-> [q-cardIA/qcardia](https://github.com/q-cardIA/qcardia), under
-> `packages/qcardia-data/`.
->
-> This repository is archived and read-only. Please open issues and pull
-> requests in the main repo.
->
-> Existing installs are unaffected — the `v1.0.0` tag here still works. For
-> the current version, install from the main repo:
->
-> ```
-> pip install "git+https://github.com/q-cardIA/qcardia#subdirectory=packages/qcardia-data"
-> ```
-
----
-
 ## Quantitative cardiac image analysis data module: `qcardia-data`
 
 A PyTorch and MONAI based library to build and handle medical imaging data pipelines. Can be used to quickly get highly customizable Dataloaders for deep learning purposes, especially for already supported datasets. Currently supported public datasets (i.e. reformatting is available):
