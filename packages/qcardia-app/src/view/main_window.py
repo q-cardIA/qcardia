@@ -230,6 +230,11 @@ class MainWindow(QMainWindow):
         viewer_layout.setSpacing(0)
         viewer_layout.addWidget(self.display_area_widget, 1)
         viewer_layout.addWidget(time_controls_container)
+        # Hidden while a panel without frames (LGE) is selected; its space stays, so the panels do not move.
+        keep = time_controls_container.sizePolicy()
+        keep.setRetainSizeWhenHidden(True)
+        time_controls_container.setSizePolicy(keep)
+        self.display_area_widget.panel_selected.connect(time_controls_container.setVisible)
         self.contour_island = _ContourIsland(viewer_column)
         self.contour_island.tool_changed.connect(self.display_area_widget.set_contour_edit_tool)
         self.contour_island.save_requested.connect(self.emit_save_signal)

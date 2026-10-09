@@ -74,7 +74,7 @@ _TOOL_SUMMARY_FORMATTERS = {
     "set_grid": lambda a: f"Set a {a.get('rows')}x{a.get('cols')} grid",
     "set_split_grid": lambda a: (f"Split: {a.get('left_rows')}x{a.get('left_cols')} left, "
                                  f"{a.get('right_rows')}x{a.get('right_cols')} right"),
-    "zoom": lambda a: f"Zoom ({a.get('mode')})",
+    "zoom": lambda a: f"Zoom ({'ROI' if a.get('mode') == 'roi' else a.get('mode')})",
     "set_window": lambda a: (f"Window {a.get('series_key')}: {str(a.get('mode', '')).replace('_', ' ')}"
                              + (f" x{a['steps']}" if (a.get("steps") or 1) > 1 else "")
                              + (f" (panels {', '.join(map(str, a['panels']))})" if a.get("panels") else "")),
@@ -167,9 +167,13 @@ class _ToolCallBubble(QFrame):
         layout.setContentsMargins(8, 5, 8, 5)
         layout.setSpacing(2)
 
-        self._header = QPushButton(_tool_call_summary(name, arguments))
+        self._summary = _tool_call_summary(name, arguments)
+        self._header = QPushButton(self._summary)
         self._header.setProperty("role", "toolCallHeader")
         self._header.setCursor(Qt.PointingHandCursor)
+        self._header.setToolTip(self._summary)
+        # Never wider than the panel: a long summary is cut with "…" (resizeEvent), not the whole chat.
+        self._header.setSizePolicy(QSizePolicy.Ignored, self._header.sizePolicy().verticalPolicy())
         self._header.clicked.connect(self._toggle)
         layout.addWidget(self._header)
 
@@ -197,6 +201,11 @@ class _ToolCallBubble(QFrame):
         self._expanded = not self._expanded
         self._detail.setVisible(self._expanded)
         self._result_label.setVisible(self._expanded and self._has_notable_result)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        room = self._header.width() - 4  # spare, so the cut text never touches the edge
+        self._header.setText(self._header.fontMetrics().elidedText(self._summary, Qt.ElideRight, room))
 
     def set_result(self, result: str):
         self._has_notable_result = any(m in result.lower() for m in _FAILURE_MARKERS)

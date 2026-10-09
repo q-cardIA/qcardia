@@ -26,7 +26,7 @@ class SidebarWidget(QFrame):
 
         # Patient Data opens to the loaded patient and a button to load another (cardisort classifies and
         # loads every recognized series of a patient folder); pressed again, it closes.
-        self.btn_patient = QPushButton("Patient Data")
+        self.btn_patient = QPushButton(" Patient Data")  # the space: a wider gap after the icon
         self.btn_patient.setProperty("role", "sidebarButton")
         self.btn_patient.setCheckable(True)
         self.btn_patient.setObjectName("patientDataButton")  # open: grey, not the accent (theme.qss)
@@ -49,7 +49,7 @@ class SidebarWidget(QFrame):
         # The presets a user picks directly; greyed out until a patient has their series (set_available).
         self._preset_buttons = {}
         for text, preset_name in SIDEBAR_PRESETS.items():
-            btn = self._preset_buttons[preset_name] = QPushButton(text)
+            btn = self._preset_buttons[preset_name] = QPushButton(f" {text}")
             btn.setProperty("role", "sidebarButton")
             btn.setEnabled(False)
             btn.clicked.connect(lambda _, name=preset_name: self.preset_requested.emit(name))
@@ -61,7 +61,7 @@ class SidebarWidget(QFrame):
 
     def _apply_icons(self):
         for btn in (self.btn_patient, *self._preset_buttons.values()):
-            btn.setIcon(theme.line_icon(self._ICONS[btn.text()], "text_muted"))
+            btn.setIcon(theme.line_icon(self._ICONS[btn.text().strip()], "text_muted"))
             btn.setIconSize(QSize(18, 18))
 
     def set_available(self, presets: list[str]):

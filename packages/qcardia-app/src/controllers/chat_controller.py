@@ -645,7 +645,7 @@ class ChatController:
                 done = widget.zoom_panels(panels, mode, percent, self.model.analysis)
                 assignments = widget.panel_assignments()
                 skipped = [i for i in panels if i not in done and assignments[i]["series_key"]]
-                result = f"Zoomed {_panels_text(done) if done else 'no panel'} ({mode})."
+                result = f"Zoomed {_panels_text(done) if done else 'no panel'} ({'ROI' if mode == 'roi' else mode})."
                 if skipped:
                     result += f" Not done for {_panels_text(skipped)}: no segmentation of their plane to zoom to."
                 return result

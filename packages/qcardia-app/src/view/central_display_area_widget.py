@@ -72,6 +72,7 @@ class CentralDisplayAreaWidget(QWidget):
     play_toggle_requested = Signal()
     time_axis_changed = Signal(int, int)  # (frames, frame) of the time axis the time slider now drives
     segmentation_requested = Signal(str)  # the contour toggle of a panel whose series has no segmentation yet
+    panel_selected = Signal(bool)  # a panel was selected: whether its series has frames
     panels_moved = Signal(object)  # after a layout change: old panel index -> new, for the panels that stay
 
     def __init__(self, parent=None):
@@ -622,7 +623,9 @@ class CentralDisplayAreaWidget(QWidget):
     def _select_time_axis(self, panel_idx: int):
         """The time slider follows the panel last used: a perfusion run's own axis, else the cines'."""
         key = self._panel_series_key[panel_idx]
-        self._set_time_axis(self.time_axis(key) if key and self._is_temporal.get(key) else CINE_TIME_AXIS)
+        temporal = bool(key and self._is_temporal.get(key))
+        self._set_time_axis(self.time_axis(key) if temporal else CINE_TIME_AXIS)
+        self.panel_selected.emit(temporal)
 
     def _set_time_axis(self, axis: str):
         """Let the time slider drive axis, at that axis' frame."""
