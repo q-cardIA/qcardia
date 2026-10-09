@@ -36,6 +36,24 @@
           "enable_thinking": false
         }
       }
+    },
+    {
+      "id": "example-token-gateway",
+      "label": "Hosted endpoint with short-lived tokens",
+      "mode": "http",
+      "protocol": "openai",
+      "url": "https://endpoint.example.org/v1",
+      "token_url": "https://auth.example.org/api/v1/token",
+      "client_id_env": "MY_CLIENT_ID",
+      "client_secret_env": "MY_CLIENT_SECRET",
+      "model": "some-model",
+      "patient_data_ok": false,
+      "note": "For an endpoint whose key is a short-lived token, such as a Run:ai inference endpoint on SPIKE. Set token_url and the two env-var names in place of api_key_env. The app trades the client id and secret for a token (client-credentials grant) and renews it before it expires.",
+      "extra_body": {
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
     }
   ]
 }
