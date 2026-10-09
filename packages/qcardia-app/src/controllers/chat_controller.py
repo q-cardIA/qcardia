@@ -21,6 +21,7 @@ from model.background_worker import CallableWorker
 from model.ollama_client import warm_model
 from utils import llm_devices, study_log
 from utils.app_config import data_dir, list_subjects, patient_label, patient_source, patients
+from utils.hanging_protocols import preset_label
 from utils.windowing import WINDOW_STEPS, null_myocardium_window, step_window
 from utils.layouts import CINE_SPEEDS, MAX_GRID_COLS, MAX_GRID_ROWS, MAX_HALF
 from view.central_display_area_widget import CINE_TIME_AXIS
@@ -483,14 +484,14 @@ class ChatController:
                 if result is None:
                     return f"Unknown preset '{preset_name}'."
                 filled, total = result
+                shows = preset_label(preset_name)  # the user never sees preset names
                 if filled == 0:
-                    return f"Could not apply '{preset_name}': none of its required series are loaded for this subject."
+                    return f"Not done: none of the series for {shows} are loaded for this patient."
                 if filled < total:
-                    return (
-                        f"Applied '{preset_name}' preset ({filled}/{total} panels filled; "
-                        f"the rest need series not loaded for this subject)."
-                    )
-                return f"Applied '{preset_name}' preset."
+                    return (f"Showing {shows} ({filled}/{total} panels filled; the rest need series not "
+                            f"loaded for this patient).")
+                return (f"Showing {shows}. If the request asks for more or different (with, but, only, "
+                        f"below it ...), change it now: the panels are in the state block.")
 
             if name == "display_series":
                 widget = self.view.display_area_widget

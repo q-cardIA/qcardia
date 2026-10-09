@@ -33,6 +33,7 @@ from model.voice_input import (
     selected_input_device,
 )
 from utils import bindings, llm_devices
+from utils.hanging_protocols import preset_label
 from utils.app_config import (
     discover_local_gguf_files,
     gguf_model_tag,
@@ -61,7 +62,7 @@ _TOOL_SUMMARY_FORMATTERS = {
     "search_patients": lambda a: "Search patient database" + (f": {a['query']}" if a.get("query") else ""),
     "load_subject": lambda a: f"Load {patient_name(a.get('subject_id'))}",
     "run_segmentation": lambda a: f"Run {a.get('modality')} segmentation",
-    "apply_preset": lambda a: f"Apply {a.get('preset')} preset",
+    "apply_preset": lambda a: f"Show {preset_label(a.get('preset'))}",
     "display_series": lambda a: (
         f"Show {a.get('series_key')} in panel {a.get('panel_idx')}"
         # "transverse" is the default axis, not worth echoing back.

@@ -47,10 +47,10 @@ _BASE_PROMPT = (
     "planes). 'LAX' ('long axis') is NOT a plane itself and never appears in "
     "a series_key — it means 'any of 2CH/3CH/4CH', the OPPOSITE of SAX. "
     "Sequences: CINE = functional cine; LGE = late gadolinium enhancement "
-    "(scar, viability, fibrosis, infarct, transmurality — maps to the "
-    "viability preset); EGE = early gadolinium enhancement, a DIFFERENT "
+    "(scar, fibrosis, infarct, transmurality — maps to the lge preset); "
+    "EGE = early gadolinium enhancement, a DIFFERENT "
     "acquisition from LGE despite the similar name — always a plain "
-    "display_series call on EGE_*, never the viability preset; PERF = "
+    "display_series call on EGE_*, never an LGE preset; PERF = "
     "perfusion/stress/ischaemia/CAD imaging. 'The LGE version of the <N>CH "
     "view' means the same-plane substitution LGE_<N>CH (e.g. swapping out "
     "CINE_2CH means LGE_2CH) — never substitute LGE_SAX for a long-axis "
@@ -130,8 +130,8 @@ _BASE_PROMPT = (
     "reset zoom' = 'fit'; 'zoom 150%' = 'percent'. 'roi' works for every series "
     "under 'Segmentation available', also when its contours are drawn in no "
     "panel: then just zoom, do not run or offer a segmentation. Leave out panels for all "
-    "panels. 'Extended LV function and make all images fit' = "
-    "apply_preset(functional_complex), then zoom(mode='fill'), in the same reply.\n"
+    "panels. 'All the cine SAX slices next to the LAX ones and make all images "
+    "fit' = apply_preset(functional_complex), then zoom(mode='fill'), in the same reply.\n"
     "\n"
     "WINDOW — brightness and contrast: set_window. 'Make the myocardium dark "
     "/ null the myocardium / the usual LGE window' = mode null_myocardium on "
@@ -170,7 +170,14 @@ def _preset_rules() -> str:
     (every trigger phrase, not a sample — a truncated list previously hid
     valid phrasings from the model), so the prompt can't drift out of sync
     with the actual preset definitions."""
-    lines = ["PRESET SHORTCUTS — use apply_preset(preset=...) when the request matches:"]
+    lines = ["PRESETS — the starting point for a general request: apply_preset(preset=...) "
+             "when the request matches. A request that names a preset's views and asks for more "
+             "or different ('<views> with ...', 'but ...', 'only ...', 'below it ...') = apply "
+             "that preset, then make the changes in the same reply: the preset alone is not "
+             "done. E.g. 'the cines at end-systole with contours' = functional, set_time_frame "
+             "to ES, set_contours. Never "
+             "name a preset to the user: say what is on screen, e.g. 'Showing the four LGE views "
+             "in a 2x2.':"]
     for name, preset in PRESETS.items():
         if preset.triggers:
             trig = " / ".join(f'"{t}"' for t in preset.triggers)
@@ -182,7 +189,7 @@ def _preset_rules() -> str:
         "available now. apply_preset's 'preset' parameter only lists the values it can "
         "actually satisfy for THIS subject in its enum (see the tool definition) — before "
         "calling apply_preset, check that your target preset name is one of those enum "
-        "values. If it is not (e.g. no LGE loaded so 'viability' is absent from the enum), "
+        "values. If it is not (e.g. no LGE loaded so 'lge' is absent from the enum), "
         "do NOT call apply_preset with it anyway, EVEN IF the trigger phrase matches "
         "strongly — call no tools and say the data is unavailable for this subject.\n"
         "  DON'T ASK FIRST — if the request matches a trigger above and that preset IS in "
@@ -239,9 +246,9 @@ GENERAL_EXAMPLES = [
         (_one("search_patients", query="Jane Example"),
          "1 patient match 'Jane Example': Jane Example, ID 00XX0X0X0X, study example-03"),
         (_one("load_subject", subject_id="00XX0X0X0X"), "Loaded the imaging of Jane Example (ID 00XX0X0X0X)."),
-        (_one("apply_preset", preset="functional"), "Applied 'functional' preset."),
+        (_one("apply_preset", preset="functional"), "Showing the four cines in a 2x2."),
         (_one("run_segmentation", modality="CINE_SAX"), "Requested CINE_SAX segmentation."),
-        reply="Loaded the imaging of Jane Example, ID 00XX0X0X0X, applied the functional preset, and "
+        reply="Loaded the imaging of Jane Example, ID 00XX0X0X0X, showed the four cines in a 2x2, and "
               "started CINE_SAX segmentation.",
     ),
 ]
@@ -249,18 +256,18 @@ GENERAL_EXAMPLES = [
 PRESET_EXAMPLES = [
     *_turn(
         "Show me the cine function assessment",
-        (_one("apply_preset", preset="functional"), "Applied 'functional' preset."),
-        reply="Applied the functional preset.",
+        (_one("apply_preset", preset="functional"), "Showing the four cines in a 2x2."),
+        reply="Showing the four cines in a 2x2.",
     ),
     *_turn(
         "I need to look for infarct scarring",
-        (_one("apply_preset", preset="viability"), "Applied 'viability' preset."),
-        reply="Applied the viability preset.",
+        (_one("apply_preset", preset="lge"), "Showing the four LGE views in a 2x2."),
+        reply="Showing the four LGE views in a 2x2.",
     ),
     *_turn(
         "Set up the stress imaging protocol",
-        (_one("apply_preset", preset="perfusion"), "Applied 'perfusion' preset."),
-        reply="Applied the perfusion preset.",
+        (_one("apply_preset", preset="perfusion"), "Showing the perfusion slices, a row per run."),
+        reply="Showing the perfusion slices, stress above rest.",
     ),
     # Unavailable despite a strong trigger match — names the missing series.
     *_turn(
@@ -275,18 +282,19 @@ PRESET_EXAMPLES = [
     # doesn't stop to ask "would you like me to apply X?" first.
     *_turn(
         "I'd like to check on this patient's wall motion",
-        (_one("apply_preset", preset="functional"), "Applied 'functional' preset."),
-        reply="Applied the functional preset.",
+        (_one("apply_preset", preset="functional"), "Showing the four cines in a 2x2."),
+        reply="Showing the four cines in a 2x2 for the wall motion.",
     ),
     # A second unavailable-despite-trigger-match example, "protocol"-phrased.
     *_turn(
         "Run the ischaemia workup protocol",
         reply="No perfusion series is loaded for this subject, so the ischaemia workup isn't available here.",
     ),
-    # Preset + explicit panel override — the preset alone doesn't satisfy this.
+    # A preset as the starting point, then changed — the preset alone doesn't satisfy this.
     *_turn(
-        "Apply the perfusion preset but replace the bottom row of LGE images with the cine sax, 4ch, and 2ch",
-        (_one("apply_preset", preset="perfusion"), "Applied 'perfusion' preset."),
+        "Perfusion with LGE, but replace the bottom row of LGE images with the cine sax, 4ch, and 2ch",
+        (_one("apply_preset", preset="perfusion_lge"),
+         "Showing the perfusion slices above the LGE SAX at matching depths."),
         (
             _many(
                 "display_series",
@@ -295,7 +303,7 @@ PRESET_EXAMPLES = [
             ),
             "Displaying CINE_SAX, CINE_4CH, CINE_2CH.",
         ),
-        reply="Applied the perfusion preset and swapped the bottom row for CINE_SAX, CINE_4CH, and CINE_2CH.",
+        reply="Showing the perfusion slices, with CINE_SAX, CINE_4CH and CINE_2CH in the bottom row.",
     ),
 ]
 

@@ -24,7 +24,7 @@ class PanelAssignment:
 
 @dataclass
 class Preset:
-    label: str
+    label: str  # what it shows, for the assistant's tool results and bubbles: users never see preset names
     grid: tuple[int, int]
     panels: list[PanelAssignment] = field(default_factory=list)
     # Trigger phrases the chat assistant recognizes (see llm.prompt._preset_rules).
@@ -46,7 +46,7 @@ class Preset:
 
 PRESETS: dict[str, Preset] = {
     "functional": Preset(
-        label="Functional",
+        label="the four cines in a 2x2",
         grid=(2, 2),
         panels=[
             PanelAssignment(0, "CINE_4CH"),
@@ -61,7 +61,7 @@ PRESETS: dict[str, Preset] = {
         ],
     ),
     "viability": Preset(
-        label="Viability",
+        label="the four cines above their LGE views",
         grid=(2, 4),
         panels=[
             PanelAssignment(0, "CINE_4CH"),
@@ -74,14 +74,27 @@ PRESETS: dict[str, Preset] = {
             PanelAssignment(7, "LGE_SAX"),
         ],
         triggers=[
-            "viability", "scar", "LGE", "late gadolinium enhancement", "late enhancement",
-            "infarct", "myocardial infarction", "transmurality", "scar assessment",
-            "myocardial scar", "fibrosis", "MI",
+            "viability", "viability assessment", "the cines next to the LGE", "cine and LGE side by side",
+            "compare the cines with the LGE", "wall motion and scar together",
+        ],
+    ),
+    "lge": Preset(
+        label="the four LGE views in a 2x2",
+        grid=(2, 2),
+        panels=[
+            PanelAssignment(0, "LGE_4CH"),
+            PanelAssignment(1, "LGE_3CH"),
+            PanelAssignment(2, "LGE_2CH"),
+            PanelAssignment(3, "LGE_SAX"),
+        ],
+        triggers=[
+            "LGE", "late gadolinium enhancement", "late enhancement", "late gad", "scar", "scar assessment",
+            "myocardial scar", "infarct", "myocardial infarction", "MI", "fibrosis", "transmurality",
         ],
     ),
     # Long-axis views in column 0, SAX slices basal to apical in the other panels.
     "functional_complex": Preset(
-        label="Functional (Extended)",
+        label="the long-axis cines next to every cine SAX slice",
         grid=(3, 6),
         panels=[
             PanelAssignment(0, "CINE_4CH"),
@@ -92,14 +105,28 @@ PRESETS: dict[str, Preset] = {
             for slot, idx in enumerate(i for i in range(18) if i % 6)
         ],
         triggers=[
-            "extended functional", "extended function", "full functional", "per-slice function",
-            "per slice", "all SAX slices", "every SAX slice", "SAX stack", "basal to apical",
-            "detailed function", "complete functional assessment",
+            "all the cine SAX slices next to the LAX ones", "all SAX slices", "every SAX slice",
+            "the whole SAX stack", "LV function per slice", "per-slice function",
         ],
     ),
-    # A row per perfusion run, its slices from apex to base, and below them the nearest LGE slices.
+    # A row per perfusion run (stress above rest), its slices from apex to base.
     "perfusion": Preset(
-        label="Perfusion",
+        label="the perfusion slices, a row per run",
+        grid=(3, 3),
+        panels=[
+            PanelAssignment(row * 3 + slot, key, slice_slot=slot)
+            for row, key in enumerate((PERF_STRESS_KEY, PERF_REST_KEY, PERF_KEY))
+            for slot in range(3)
+        ],
+        triggers=[
+            "perfusion", "stress perfusion", "rest perfusion", "ischaemia", "inducible ischaemia", "CAD",
+            "coronary artery disease", "adenosine", "stress test", "perfusion defect", "myocardial perfusion",
+        ],
+        drop_empty_rows=True,
+    ),
+    # As perfusion, and below it the LGE slices nearest to the perfusion slices.
+    "perfusion_lge": Preset(
+        label="the perfusion slices above the LGE SAX at matching depths",
         grid=(4, 3),
         panels=[
             PanelAssignment(row * 3 + slot, key, slice_slot=slot,
@@ -108,16 +135,15 @@ PRESETS: dict[str, Preset] = {
             for slot in range(3)
         ],
         triggers=[
-            "perfusion", "stress perfusion", "ischaemia", "inducible ischaemia", "CAD",
-            "coronary artery disease", "adenosine", "stress test", "perfusion defect",
-            "myocardial perfusion", "perfusion and scar",
+            "perfusion with LGE", "perfusion and LGE", "perfusion and scar", "perfusion with the scar images",
+            "ischaemia and scar", "stress perfusion with LGE",
         ],
         drop_empty_rows=True,
     ),
     # Velocity on the left, magnitude on the right: aortic flow on top, pulmonary below, or the
     # one of the two that was acquired.
     "flow": Preset(
-        label="Flow",
+        label="the flow velocity and magnitude images",
         grid=(2, 2),
         panels=[
             PanelAssignment(row * 2 + col, FLOW_KEYS[vessel] + suffix)
@@ -132,7 +158,7 @@ PRESETS: dict[str, Preset] = {
         drop_empty_rows=True,
     ),
     "flow_aortic": Preset(
-        label="Aortic Flow",
+        label="the aortic flow velocity and magnitude",
         grid=(1, 2),
         panels=[
             PanelAssignment(0, FLOW_KEYS["aorta"]),
@@ -141,7 +167,7 @@ PRESETS: dict[str, Preset] = {
         triggers=["aortic flow", "aortic stenosis", "aortic regurgitation"],
     ),
     "flow_pulmonary": Preset(
-        label="Pulmonary Flow",
+        label="the pulmonary flow velocity and magnitude",
         grid=(1, 2),
         panels=[
             PanelAssignment(0, FLOW_KEYS["pulmonary"]),
@@ -151,7 +177,8 @@ PRESETS: dict[str, Preset] = {
     ),
 }
 
-PRESET_BUTTON_ORDER = ["functional", "functional_complex", "viability", "perfusion", "flow", "flow_aortic", "flow_pulmonary"]
+# The patient sidebar's buttons: the presets a user picks directly. The others are the assistant's.
+SIDEBAR_PRESETS = {"Functional": "functional", "LGE": "lge", "Perfusion": "perfusion", "Flow": "flow"}
 
 
 def preset_label(name: str) -> str:
@@ -169,11 +196,11 @@ def available_presets(loaded_series: set[str]) -> list[str]:
     if any(pa.key in loaded_series for pa in PRESETS["functional"].panels):
         names += ["functional", "functional_complex"]
     if any(k in loaded_series for k in _LGE_KEYS):
-        names.append("viability")
+        names += ["viability", "lge"]
     # LGE_SAX alone doesn't count — 'perfusion' needs real perfusion data,
     # matching the tool's own stated precondition.
     if any(k in loaded_series for k in _PERFUSION_KEYS):
-        names.append("perfusion")
+        names += ["perfusion", *(["perfusion_lge"] if "LGE_SAX" in loaded_series else [])]
     if any(k in loaded_series for k in FLOW_KEYS.values()):
         names.append("flow")
     if FLOW_KEYS["aorta"] in loaded_series:

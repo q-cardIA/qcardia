@@ -85,9 +85,10 @@ TOOL_SPECS = [
             "name": "apply_preset",
             "description": (
                 "Apply a clinical hanging protocol: sets the grid AND fills the "
-                "panels, replacing the current layout. Prefer this over several "
-                "display_series calls. To also show a custom panel, call "
-                "apply_preset first, then display_series. Only offered for a "
+                "panels, replacing the current layout. The starting point for a "
+                "general request ('perfusion'); for a more specific one apply the "
+                "nearest preset first, then change it (display_series, set_grid, "
+                "set_time_frame, ...) in the same reply. Only offered for a "
                 "preset when at least one of its required series is loaded; if "
                 "a preset you want isn't in the enum below, say the data is "
                 "unavailable rather than calling a different tool. Fills every "
@@ -99,18 +100,21 @@ TOOL_SPECS = [
                 "properties": {
                     "preset": {
                         "type": "string",
-                        "enum": ["functional", "functional_complex", "viability", "perfusion",
-                                 "flow", "flow_aortic", "flow_pulmonary"],
+                        "enum": ["functional", "functional_complex", "viability", "lge", "perfusion",
+                                 "perfusion_lge", "flow", "flow_aortic", "flow_pulmonary"],
                         "description": (
                             "functional: ventricular/LV/RV function, ejection "
                             "fraction, volumes, wall motion (CINE only). "
-                            "functional_complex: extended functional, long-axis "
-                            "views plus SAX slices from apex to base; for "
-                            "per-slice or full SAX views. "
-                            "viability: scar, late gadolinium enhancement, "
-                            "infarct, fibrosis, transmurality (needs LGE). "
-                            "perfusion: perfusion, ischaemia, CAD, stress testing "
-                            "(needs PERF_STRESS_SAX, PERF_REST_SAX, or PERF_SAX). "
+                            "functional_complex: all cine SAX slices from base to "
+                            "apex next to the long-axis cines. "
+                            "lge: the four LGE views in a 2x2; scar, late gadolinium "
+                            "enhancement, infarct, fibrosis, transmurality (needs LGE). "
+                            "viability: the four cines above their LGE views (needs LGE). "
+                            "perfusion: a row of 3 slices per perfusion run, stress above "
+                            "rest; ischaemia, CAD, stress testing (needs PERF_STRESS_SAX, "
+                            "PERF_REST_SAX, or PERF_SAX). "
+                            "perfusion_lge: perfusion with the LGE SAX at the matching "
+                            "depths below it (needs perfusion and LGE_SAX). "
                             "flow: flow, phase contrast, cardiac output, regurgitation, "
                             "Qp:Qs; aortic flow on top and pulmonary flow below, or "
                             "whichever of the two was acquired (needs PC_AORTA or PC_MPA). "

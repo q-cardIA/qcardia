@@ -66,6 +66,19 @@ def phantom_lge() -> tuple[np.ndarray, np.ndarray]:
 
 DEFAULT_WINDOW = (300.0, 600.0)
 
+
+class _PhantomGeometry:
+    """What a preset uses of a VolumeGeometry, for a phantom stack: slice depths, slice 1 apical."""
+
+    def __init__(self, series_key: str):
+        self.ipp_list = phantom_depths(series_key)
+
+    def apex_to_base(self) -> list[int]:
+        return list(range(len(self.ipp_list)))
+
+    def nearest_slice(self, other: _PhantomGeometry, z: int) -> int:
+        return min(range(len(other.ipp_list)), key=lambda i: abs(other.ipp_list[i] - self.ipp_list[z]))
+
 # The patient database the cases see (the app reads patients.csv in the data folder): made-up names, two
 # Emilys for a request that must ask which one. The folders are the cases' default available_subjects.
 _NAMES = ["Lucy Hughes", "Isabel Hall", "Michael King", "Alice White", "William Wilson", "Florence Johnson",
@@ -287,7 +300,7 @@ class FakeModel:
         self.analysis = analysis or {}
 
     def get_geometry(self, series_key: str):
-        return None
+        return _PhantomGeometry(series_key) if series_key in PHANTOM_STACKS else None
 
     @property
     def segmentable(self) -> tuple[str, ...]:
