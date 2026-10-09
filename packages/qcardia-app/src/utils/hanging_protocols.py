@@ -76,6 +76,7 @@ PRESETS: dict[str, Preset] = {
         triggers=[
             "viability", "viability assessment", "the cines next to the LGE", "cine and LGE side by side",
             "compare the cines with the LGE", "wall motion and scar together",
+            "compare these with the LGE (with cines on screen)", "add the LGE to these cines",
         ],
     ),
     "lge": Preset(

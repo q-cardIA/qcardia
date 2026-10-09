@@ -114,7 +114,8 @@ TOOL_SPECS = [
                             "apex next to the long-axis cines. "
                             "lge: the four LGE views in a 2x2; scar, late gadolinium "
                             "enhancement, infarct, fibrosis, transmurality (needs LGE). "
-                            "viability: the four cines above their LGE views (needs LGE). "
+                            "viability: the four cines above their LGE views (needs LGE); also "
+                            "'compare these with the LGE' while cines are shown. "
                             "perfusion: a row of 3 slices per perfusion run, stress above "
                             "rest; ischaemia, CAD, stress testing (needs PERF_STRESS_SAX, "
                             "PERF_REST_SAX, or PERF_SAX). "
@@ -191,11 +192,21 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "set_time_frame",
-            "description": "Jump all cine panels, or a perfusion run's panels, to a specific time frame.",
+            "description": (
+                "Jump all cine panels, or a perfusion run's panels, to a specific time frame. With panels, "
+                "only those panels go to the frame, as their own frame (e.g. ED in one panel, ES in another)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "series_key": _TIME_SERIES_KEY,
+                    "panels": {
+                        "type": "array", "items": {"type": "integer"},
+                        "description": (
+                            "Panel numbers that get this frame as their own; the other panels keep theirs. Leave "
+                            "out to put every panel of the series on this frame, also panels with their own."
+                        ),
+                    },
                     "frame": {
                         "type": "integer",
                         "description": (

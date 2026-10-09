@@ -942,6 +942,46 @@ _add(
 )
 
 
+
+def frames_are(*frames: int):
+    """The panels with frames show these frames, in any panel order."""
+    def check(s):
+        shown = sorted(f for f in s["panel_frames"] if f is not None)
+        return None if shown == sorted(frames) else f"frames shown {shown}, expected {sorted(frames)}"
+    return check
+
+
+def _same_series(key: str):
+    return lambda s: None if [k for k, _, _ in s["panels"]] == [key, key] else (
+        f"panels {[k for k, _, _ in s['panels']]}, expected {key} twice")
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_4CH"}, {"idx": 1, "series_key": "CINE_4CH"}], grid=(1, 2))
+_add(
+    id="frame_own_001", category="frame", description="ED and ES side by side, the series in place",
+    model=_m, view=_v, prompt="Show ED on the left and ES on the right",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(_same_series("CINE_4CH"), lambda s: None if s["panel_frames"] == [28, 11] else
+                          f"frames {s['panel_frames']}, expected [28, 11]"),
+)
+_m, _v = _segmented([{"idx": i, "series_key": k} for i, k in enumerate(["CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"])])
+_add(
+    id="frame_own_002", category="frame", description="Compare the cine SAX at ED and ES in a 1x2",
+    model=_m, view=_v, prompt="Compare the cine sax in a 1x2 at ED and ES",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(1, 2), _same_series("CINE_SAX"), frames_are(28, 11)),
+    notes="The demo of 2026-10-09: the model sent set_time_frame(panels='[1]') before the tool took panels.",
+)
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_4CH"}, {"idx": 1, "series_key": "CINE_4CH", "frame": 10}],
+                    grid=(1, 2))
+_add(
+    id="frame_own_003", category="frame", description="One frame for all again after ED/ES side by side",
+    model=_m, view=_v, prompt="Show end diastole in both",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(frames_are(28, 28)),
+    notes="Panel 1 holds ES (frame 11) as its own frame: set_time_frame without panels.",
+)
+
+
 # === NAVIGATION — layout, phase and slice levels in one request =================
 
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
@@ -1296,6 +1336,13 @@ def _viability_es_contours(s):
         return f"contours {s['contours'][:4]} on the cines, expected all on"
 
 
+def _cines_over_lge(s):
+    keys = [k for k, _, _ in s["panels"]]
+    if s["grid"] != (2, 4) or set(keys[:4]) != {"CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"} \
+            or set(keys[4:]) != {"LGE_4CH", "LGE_3CH", "LGE_2CH", "LGE_SAX"}:
+        return f"grid {s['grid']}, panels {keys}: expected the cines above their LGE views"
+
+
 def _lge_dark(s):
     keys = {k for k, _, _ in s["panels"]}
     if s["grid"] != (2, 2) or keys != {"LGE_4CH", "LGE_3CH", "LGE_2CH", "LGE_SAX"}:
@@ -1338,6 +1385,14 @@ _add(
     model=_m, view=_v, prompt="Show the LGE with the myocardium dark",
     expected_tool_calls=[], match_mode="state", expected_state=_lge_dark,
 )
+for i, prompt in enumerate(["Compare these with LGE", "And now the LGE next to these"], start=7):
+    _m, _v = _displaying([{"idx": j, "series_key": k} for j, k in enumerate(["CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"])])
+    _add(
+        id=f"preset_adjust_{i:03d}", category="preset_adjust", description="The cines on screen, compared with the LGE",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[], match_mode="state", expected_state=_cines_over_lge,
+        notes="The four cines in a 2x2 (functional), then the LGE: viability, the cines above their LGE views.",
+    )
 _m, _v = _segmented(grid=(2, 2))
 _add(
     id="preset_adjust_006", category="preset_adjust", description="Functional, the SAX at base, mid and apex",

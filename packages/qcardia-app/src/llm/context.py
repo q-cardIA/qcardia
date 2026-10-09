@@ -50,6 +50,8 @@ def build_state_block(
             line += "  seg hidden"
         if panel.get("own_window"):
             line += "  own window"
+        if panel.get("own_frame"):
+            line += "  own frame %d/%d" % (panel["own_frame"][0] + 1, panel["own_frame"][1])
         if panel.get("loading"):
             line += "  (loading)"
         panel_lines.append(line)

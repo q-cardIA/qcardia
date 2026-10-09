@@ -94,6 +94,7 @@ class FakeDisplayAreaWidget:
         for p in panels or []:
             self._panels[p["idx"]] = self._empty()
             self._show(p["idx"], p["series_key"], p.get("axis", "transverse"), p.get("slice"))
+            self._panels[p["idx"]]["frame"] = p.get("frame")  # an own frame, 0-based
             if p.get("has_segmentation"):
                 self.segmented.add(p["series_key"])
                 self._panels[p["idx"]]["contours"] = True
@@ -110,11 +111,12 @@ class FakeDisplayAreaWidget:
 
     @staticmethod
     def _empty() -> dict:
-        return {"series_key": None, "axis": "transverse", "slice": 0, "zoom": None, "contours": False, "window": None}
+        return {"series_key": None, "axis": "transverse", "slice": 0, "zoom": None, "contours": False, "window": None,
+                "frame": None}
 
     def _show(self, idx: int, key: str, axis: str, slice_idx: int | None):
         n = self.n_slices(key, axis)
-        self._panels[idx].update(series_key=key, axis=axis, zoom=None,
+        self._panels[idx].update(series_key=key, axis=axis, zoom=None, frame=None,
                                  slice=n // 2 if slice_idx is None else slice_idx)
 
     @property
@@ -134,6 +136,8 @@ class FakeDisplayAreaWidget:
             n = self.n_slices(p["series_key"], p["axis"]) if p["series_key"] else 0
             if n > 1:
                 panel.update(slice=p["slice"], n_slices=n)
+            if p["frame"] is not None:
+                panel["own_frame"] = (p["frame"], self.panel_frames(i))
             out.append(panel)
         return out
 
@@ -150,6 +154,7 @@ class FakeDisplayAreaWidget:
             "windows": dict(self.windows),
             "panel_windows": [p["window"] for p in self._panels],
             "contours": [self._shows_contours(p) for p in self._panels],
+            "panel_frames": [self._frame_of(i) for i in range(self.n_panels)],
             "panels": [(p["series_key"], p["slice"] + 1 if p["series_key"] else None, p["zoom"])
                        for p in self._panels],
         }
@@ -181,6 +186,31 @@ class FakeDisplayAreaWidget:
         if time_axis.startswith("PERF_"):
             return PERFUSION_FRAMES if time_axis in self._known_series else 0
         return CINE_FRAMES if any(k.startswith("CINE_") for k in self._known_series) else 0
+
+    @staticmethod
+    def _axis(key: str) -> str:
+        return key if key.startswith("PERF_") else "CINE"
+
+    def panel_frames(self, panel_idx: int) -> int:
+        key = self._panels[panel_idx]["series_key"]
+        return self.n_frames(self._axis(key)) if key and key.startswith(("CINE_", "PERF_")) else 0
+
+    def _frame_of(self, panel_idx: int) -> int | None:
+        """The frame a panel shows, 1-based; None without frames."""
+        p = self._panels[panel_idx]
+        if not self.panel_frames(panel_idx):
+            return None
+        return (p["frame"] if p["frame"] is not None else self.time_index(self._axis(p["series_key"]))) + 1
+
+    def hold_frame(self, panels: list[int], t: int):
+        for i in panels:
+            if self.panel_frames(i):
+                self._panels[i]["frame"] = t
+
+    def release_frames(self, axis: str):
+        for p in self._panels:
+            if p["series_key"] and self._axis(p["series_key"]) == axis:
+                p["frame"] = None
 
     def time_index(self, axis: str) -> int:
         return self.perfusion_frames.get(axis, 0) if axis.startswith("PERF_") else self.current_time_index
