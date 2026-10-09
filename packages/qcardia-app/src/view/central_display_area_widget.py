@@ -545,9 +545,13 @@ class CentralDisplayAreaWidget(QWidget):
         self._sync_toggles(panel_idx)
         self._update_panel(panel_idx)
 
-    def drive_cine_time(self):
-        """Let the time slider drive the cines, e.g. before playing them."""
-        self._set_time_axis(CINE_TIME_AXIS)
+    def drive_time(self, axis: str = CINE_TIME_AXIS):
+        """Let the time slider drive the cines, or a perfusion run, e.g. before playing them."""
+        self._set_time_axis(axis)
+
+    def time_index(self, axis: str) -> int:
+        """The frame (0-based) that the panels of a time axis show."""
+        return self._time_index.get(axis, 0)
 
     def show_segmentation(self, series_key: str) -> list[int]:
         """Turn the contours on in every panel of series_key, also before its segmentation arrives.

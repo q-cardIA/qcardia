@@ -24,6 +24,7 @@ PHANTOM_STACKS = {"CINE_SAX": (14, -137.3, 8.0), "LGE_SAX": (12, -142.0, 10.0),
                   "PERF_SAX": (3, -115.0, 25.0), "PERF_STRESS_SAX": (3, -115.0, 25.0),
                   "PERF_REST_SAX": (3, -115.0, 25.0)}
 CINE_FRAMES = 30
+PERFUSION_FRAMES = 60
 
 
 def phantom_depths(series_key: str) -> list[float]:
@@ -114,6 +115,8 @@ class FakeDisplayAreaWidget:
             else {p["series_key"] for p in (panels or []) if p.get("series_key")}
         )
         self.current_time_index = 0
+        self.perfusion_frames: dict[str, int] = {}  # run -> frame (0-based)
+        self.driven_time_axis = "CINE"
         self.windows: dict[str, tuple[float, float]] = {}
 
     @staticmethod
@@ -153,6 +156,8 @@ class FakeDisplayAreaWidget:
             "cells": list(self._cells),
             "split": self.split,
             "frame": self.current_time_index + 1,
+            "perfusion_frames": {k: t + 1 for k, t in self.perfusion_frames.items()},
+            "driven": self.driven_time_axis,
             "windows": dict(self.windows),
             "panel_windows": [p["window"] for p in self._panels],
             "contours": [self._shows_contours(p) for p in self._panels],
@@ -184,7 +189,12 @@ class FakeDisplayAreaWidget:
         return PHANTOM_STACKS.get(series_key, (1,))[0] if axis == "transverse" else 128
 
     def n_frames(self, time_axis: str) -> int:
+        if time_axis.startswith("PERF_"):
+            return PERFUSION_FRAMES if time_axis in self._known_series else 0
         return CINE_FRAMES if any(k.startswith("CINE_") for k in self._known_series) else 0
+
+    def time_index(self, axis: str) -> int:
+        return self.perfusion_frames.get(axis, 0) if axis.startswith("PERF_") else self.current_time_index
 
     def segmentation(self, series_key: str):
         return None  # no panel shows contours: the controller reads the cache (FakeModel.segment)
@@ -214,8 +224,8 @@ class FakeDisplayAreaWidget:
     def set_panel_contours(self, panel_idx: int, shown: bool):
         self._panels[panel_idx]["contours"] = shown
 
-    def drive_cine_time(self):
-        pass
+    def drive_time(self, axis: str = "CINE"):
+        self.driven_time_axis = axis
 
     def has_segmentation(self, series_key: str) -> bool:
         return series_key in self.segmented
@@ -248,7 +258,10 @@ class FakeDisplayAreaWidget:
         self.set_panel_empty(panel_idx)
 
     def set_time_index(self, t: int, axis: str | None = None):
-        self.current_time_index = t
+        if axis and axis.startswith("PERF_"):
+            self.perfusion_frames[axis] = t
+        else:
+            self.current_time_index = t
 
     def zoom_panels(self, panels, mode, percent=100.0, analysis=None) -> list[int]:
         boxes = {k: a["box"] for k, a in (analysis or {}).items() if a.get("box")}
@@ -269,7 +282,7 @@ class FakeView:
     def __init__(self, display_area_widget: FakeDisplayAreaWidget, playing: bool = False):
         self.display_area_widget = display_area_widget
         self.playing = playing
-        self.cine_speed = 1.0
+        self.cine_speed = self.perfusion_speed = 1.0
 
     def is_playing(self) -> bool:
         return self.playing
@@ -277,8 +290,8 @@ class FakeView:
     def log_screen(self):
         pass
 
-    def set_cine_speed(self, speed: float):
-        self.cine_speed = speed
+    def set_cine_speed(self, speed: float, perfusion: bool = False):
+        setattr(self, "perfusion_speed" if perfusion else "cine_speed", speed)
 
     def toggle_cine(self):
         self.playing = not self.playing

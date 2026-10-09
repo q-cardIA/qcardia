@@ -1412,6 +1412,39 @@ def playing_is(playing: bool):
     return lambda s: None if s["playing"] == playing else f"playing {s['playing']}, expected {playing}"
 
 
+def perfusion_frames_are(frames: dict):
+    return lambda s: None if s["perfusion_frames"] == frames else f"perfusion frames {s['perfusion_frames']}, expected {frames}"
+
+
+_PERF_PANELS = [{"idx": 0, "series_key": "PERF_STRESS_SAX"}, {"idx": 1, "series_key": "PERF_REST_SAX"},
+                {"idx": 2, "series_key": "CINE_SAX"}]
+_m, _v = _displaying(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="frame_perf_001", category="frame", description="A frame of every perfusion run",
+    model=_m, view=_v, prompt="Set the perfusion to frame 40",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(perfusion_frames_are({"PERF_REST_SAX": 40, "PERF_STRESS_SAX": 40}), frame_is(1)),
+    notes="Both runs; the cines keep their frame.",
+)
+_m, _v = _displaying(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="frame_perf_002", category="frame", description="A frame of one perfusion run",
+    model=_m, view=_v, prompt="Go to frame 60 of the rest perfusion",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(perfusion_frames_are({"PERF_REST_SAX": 60}), frame_is(1)),
+)
+_m, _v = _displaying(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="playback_perf_001", category="playback", description="Play a perfusion run at its own speed",
+    model=_m, view=_v, prompt="Play the stress perfusion at half speed",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(playing_is(True),
+                          lambda s: None if (s["driven"], s["perfusion_speed"], s["speed"]) == ("PERF_STRESS_SAX", 0.5, 1.0)
+                          else f"playing {s['driven']} at perfusion speed {s['perfusion_speed']}, cine speed {s['speed']}"),
+    notes="The perfusion speed changes, the cines' speed stays.",
+)
+
+
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
     id="playback_001", category="playback", description="Play the cines",

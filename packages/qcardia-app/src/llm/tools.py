@@ -186,10 +186,17 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "set_time_frame",
-            "description": "Jump all cine panels to a specific time frame.",
+            "description": "Jump all cine panels, or a perfusion run's panels, to a specific time frame.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "series_key": {
+                        "type": "string",
+                        "description": (
+                            "Leave out for the cines. A perfusion run (PERF_STRESS_SAX, PERF_REST_SAX, "
+                            "PERF_SAX) for its own frames, or 'perfusion' for every perfusion run."
+                        ),
+                    },
                     "frame": {
                         "type": "integer",
                         "description": (
@@ -337,17 +344,28 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "set_playback",
-            "description": "Play the cines as a movie or stop them, optionally at another speed.",
+            "description": (
+                "Play the cines, or a perfusion run, as a movie or stop them, optionally at another speed. "
+                "The cines and the perfusion have a speed each."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "playing": {"type": "boolean", "description": "true = play, false = stop."},
+                    "series_key": {
+                        "type": "string",
+                        "description": (
+                            "Leave out for the cines. A perfusion run (PERF_STRESS_SAX, PERF_REST_SAX, "
+                            "PERF_SAX) for its own frames, or 'perfusion' for every perfusion run."
+                        ),
+                    },
                     "speed": {
                         "type": "number",
                         "enum": list(CINE_SPEEDS),
                         "description": (
-                            "Heartbeats per second: 1 = normal, 0.5 = half speed / slow motion, 2 = twice as "
-                            "fast. Leave out to keep the current speed (see 'cines playing at' in the state)."
+                            "1 = normal (cines: a heartbeat per second; perfusion: a run in four seconds), "
+                            "0.5 = half speed / slow motion, 2 = twice as fast. Leave out to keep the current "
+                            "speed (see the state block)."
                         ),
                     },
                 },

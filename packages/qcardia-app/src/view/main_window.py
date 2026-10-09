@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
         self.session_busy = lambda: None  # set by main: why the session cannot end yet, or None
         self._play_timer = QTimer(self)
         self._play_timer.timeout.connect(lambda: self.step_time_frame(self._play_step))
-        self._cine_speed, self._play_step = 1.0, 1
+        self._cine_speed, self._perfusion_speed, self._play_step = 1.0, 1.0, 1
         # One state record per burst of user input.
         self._screen_log_timer = QTimer(self, singleShot=True, interval=300, timeout=self.log_screen)
         self.full_screen_action = QAction("&Full Screen", self)
@@ -506,14 +506,18 @@ class MainWindow(QMainWindow):
         menu = self.playback_menu
         menu.clear()
         menu.addAction("&Pause" if self.is_playing() else "&Play", self.toggle_cine)
-        speeds = self.speed_menu = menu.addMenu("&Speed")  # kept: a submenu built here must outlive this call
-        group = QActionGroup(speeds)
-        for speed in CINE_SPEEDS:
-            action = speeds.addAction(f"{speed:g}\u00d7" + (" (one heartbeat per second)" if speed == 1 else ""))
-            action.setCheckable(True)
-            action.setChecked(speed == self._cine_speed)
-            group.addAction(action)
-            action.triggered.connect(lambda _=False, s=speed: self.set_cine_speed(s))
+        self.speed_menus = []  # kept: a submenu built here must outlive this call
+        for title, perfusion, one in (("&Speed", False, "one heartbeat per second"),
+                                      ("P&erfusion Speed", True, "a run in four seconds")):
+            speeds = menu.addMenu(title)
+            self.speed_menus.append(speeds)
+            group = QActionGroup(speeds)
+            for speed in CINE_SPEEDS:
+                action = speeds.addAction(f"{speed:g}\u00d7" + (f" ({one})" if speed == 1 else ""))
+                action.setCheckable(True)
+                action.setChecked(speed == (self._perfusion_speed if perfusion else self._cine_speed))
+                group.addAction(action)
+                action.triggered.connect(lambda _=False, s=speed, p=perfusion: self.set_cine_speed(s, p))
         menu.addSeparator()
         menu.addAction("Go to &End-Diastole", lambda: self.phase_requested.emit("ED"))
         menu.addAction("Go to End-&Systole", lambda: self.phase_requested.emit("ES"))
@@ -586,7 +590,7 @@ class MainWindow(QMainWindow):
         """The screen to the session log, as far as it changed since the last time."""
         if hasattr(self, "display_area_widget"):
             study_log.log_state({**self.display_area_widget.state(), "playing": self.is_playing(),
-                                 "speed": self._cine_speed})
+                                 "speed": self._cine_speed, "perfusion_speed": self._perfusion_speed})
 
     def schedule_screen_log(self):
         self._screen_log_timer.start()
@@ -598,9 +602,16 @@ class MainWindow(QMainWindow):
     def cine_speed(self) -> float:
         return self._cine_speed
 
-    def set_cine_speed(self, speed: float):
-        """Heartbeats per second; also while playing."""
-        self._cine_speed = speed
+    @property
+    def perfusion_speed(self) -> float:
+        return self._perfusion_speed
+
+    def set_cine_speed(self, speed: float, perfusion: bool = False):
+        """The cines' speed (heartbeats per second), or the perfusion's; also while playing."""
+        if perfusion:
+            self._perfusion_speed = speed
+        else:
+            self._cine_speed = speed
         if self._play_timer.isActive():
             self._play_timer.start(self._play_interval())
 
@@ -608,7 +619,7 @@ class MainWindow(QMainWindow):
         """ms per step: one heartbeat per second at speed 1, and a perfusion run (one contrast passage) in
         four seconds. At most 50 steps per second, so faster playback skips frames."""
         perfusion = self.display_area_widget.driven_time_axis.startswith("PERF_")
-        fps = (self.time_slider.maximum() + 1) * self._cine_speed * (0.25 if perfusion else 1)
+        fps = (self.time_slider.maximum() + 1) * (self._perfusion_speed / 4 if perfusion else self._cine_speed)
         self._play_step = max(1, math.ceil(fps / 50))
         return max(20, round(1000 * self._play_step / fps))
 
