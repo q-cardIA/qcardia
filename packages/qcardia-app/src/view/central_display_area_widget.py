@@ -402,7 +402,6 @@ class CentralDisplayAreaWidget(QWidget):
                                               if i != panel_idx and self._panel_series_key[i] == series_key)
         self._panel_window[panel_idx] = None
         self._sync_toggles(panel_idx)
-        self._panels[panel_idx].viewer.new_series(self._view_of(panel_idx))
 
         n = self._n_slices(series_key, axis)
         sl = self._panels[panel_idx].slider
@@ -413,6 +412,8 @@ class CentralDisplayAreaWidget(QWidget):
         sl.setVisible(n > 1)
         self._set_slice(panel_idx, n // 2 if slice_idx is None else slice_idx)
         self._panel_depth[panel_idx] = self._panel_slice_idx[panel_idx]
+        # After the slice: the linked view is found on the panel's slice of the new series.
+        self._panels[panel_idx].viewer.new_series(self._view_of(panel_idx))
 
         self._panels[panel_idx].title_label.setText(f"{series_key} / {axis}")
         self._update_panel(panel_idx)
