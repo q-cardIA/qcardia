@@ -582,6 +582,11 @@ class CentralDisplayAreaWidget(QWidget):
         """The cines' frame."""
         return self._time_index.get(CINE_TIME_AXIS, 0)
 
+    @property
+    def driven_time_axis(self) -> str:
+        """The time axis the time slider drives: the cines', or a perfusion or flow series'."""
+        return self._time_axis
+
     @staticmethod
     def time_axis(series_key: str) -> str:
         if series_key.startswith(("PERF_", "PC_")):

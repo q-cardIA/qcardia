@@ -43,7 +43,7 @@ def load_app_icon() -> QIcon | None:
 
 
 _TAB_DRAG_OUT_PX = 24  # how far past its tab bar a tab must be dragged to unstack its panel
-GRID_SIZES = ((1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (2, 4), (3, 3), (3, 4))  # rows x columns, as diagrams
+GRID_SIZES = ((1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (2, 4), (2, 5), (3, 3), (3, 4), (3, 5))  # rows x columns
 
 
 class _ContourIsland(QFrame):
@@ -605,9 +605,10 @@ class MainWindow(QMainWindow):
             self._play_timer.start(self._play_interval())
 
     def _play_interval(self) -> int:
-        """ms per step: one heartbeat per second at speed 1. At most 50 steps per second, so faster
-        playback skips frames."""
-        fps = (self.time_slider.maximum() + 1) * self._cine_speed
+        """ms per step: one heartbeat per second at speed 1, and a perfusion run (one contrast passage) in
+        four seconds. At most 50 steps per second, so faster playback skips frames."""
+        perfusion = self.display_area_widget.driven_time_axis.startswith("PERF_")
+        fps = (self.time_slider.maximum() + 1) * self._cine_speed * (0.25 if perfusion else 1)
         self._play_step = max(1, math.ceil(fps / 50))
         return max(20, round(1000 * self._play_step / fps))
 

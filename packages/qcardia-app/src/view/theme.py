@@ -260,12 +260,12 @@ def _draw_lge(painter: QPainter):
     painter.drawArc(QRectF(7, 7, 18, 18), 20 * 16, 80 * 16)
 
 
-def _draw_drop(painter: QPainter):
-    path = QPainterPath(QPointF(16, 5))
-    path.cubicTo(QPointF(22, 13), QPointF(25, 17), QPointF(25, 20))
-    path.cubicTo(QPointF(25, 25), QPointF(21, 28), QPointF(16, 28))
-    path.cubicTo(QPointF(11, 28), QPointF(7, 25), QPointF(7, 20))
-    path.cubicTo(QPointF(7, 17), QPointF(10, 13), QPointF(16, 5))
+def _draw_uptake(painter: QPainter):
+    """A perfusion signal curve: flat, then the contrast arrives and it ends a bit higher."""
+    path = QPainterPath(QPointF(4, 23))
+    path.lineTo(QPointF(13, 23))
+    path.cubicTo(QPointF(17, 23), QPointF(18, 8), QPointF(22, 8))
+    path.cubicTo(QPointF(25, 8), QPointF(25.5, 13), QPointF(28, 13))
     painter.drawPath(path)
 
 
@@ -280,7 +280,7 @@ def _draw_flow(painter: QPainter):
 
 _LINE_ICONS = {"mic": _draw_mic, "arrow_up": _draw_arrow_up, "close": _draw_close,
                "chevron_down": _draw_chevron_down, "chevron_up": _draw_chevron_up, "chevron_right": _draw_chevron_right,
-               "folder": _draw_folder, "heart": _draw_heart, "lge": _draw_lge, "drop": _draw_drop, "flow": _draw_flow}
+               "folder": _draw_folder, "heart": _draw_heart, "lge": _draw_lge, "uptake": _draw_uptake, "flow": _draw_flow}
 
 
 def line_icon(kind: str, token: str) -> QIcon:

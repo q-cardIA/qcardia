@@ -11,7 +11,7 @@ from view import theme
 class SidebarWidget(QFrame):
     load_patient_requested = Signal()
     preset_requested = Signal(str)
-    _ICONS = {"Patient Data": "folder", "Function": "heart", "LGE": "lge", "Perfusion": "drop", "Flow": "flow"}
+    _ICONS = {"Patient Data": "folder", "Function": "heart", "LGE": "lge", "Perfusion": "uptake", "Flow": "flow"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
