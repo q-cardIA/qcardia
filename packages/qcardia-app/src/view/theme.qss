@@ -377,8 +377,8 @@ QLabel[role="sidebarStatus"] {
 	padding: 0px @sp2 @sp1 @sp2;
 }
 QPushButton[role="sidebarButton"]:checked {
-	background-color: @accent_soft;
-	color: @accent;
+	background-color: @bg2;
+	color: @text;
 }
 
 

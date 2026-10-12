@@ -21,6 +21,7 @@ from model.background_worker import CallableWorker
 from model.ollama_client import warm_model
 from utils import llm_devices, study_log
 from utils.app_config import data_dir, list_subjects, patient_label, patient_source, patients
+from utils.hanging_protocols import PERF_KEY, PERF_REST_KEY, PERF_STRESS_KEY, preset_label
 from utils.windowing import WINDOW_STEPS, null_myocardium_window, step_window
 from utils.layouts import CINE_SPEEDS, MAX_GRID_COLS, MAX_GRID_ROWS, MAX_HALF
 from view.central_display_area_widget import CINE_TIME_AXIS
@@ -199,10 +200,47 @@ class ChatController:
             analysis=self.model.analysis,
             segmentable=self.model.segmentable,
             level_matches=self._level_matches(),
-            playing=self.view.is_playing(),
+            playing=self.view.is_playing() and widget.driven_time_axis == CINE_TIME_AXIS,
             split=widget.split,
             speed=self.view.cine_speed,
+            perfusion={k: (widget.time_index(k), widget.n_frames(k)) for k in self._perfusion_runs()},
+            perfusion_playing=widget.driven_time_axis if self.view.is_playing() else None,
+            perfusion_speed=self.view.perfusion_speed,
         )
+
+    def _perfusion_runs(self) -> list[str]:
+        """The loaded perfusion runs, stress first as in the perfusion preset."""
+        return [k for k in (PERF_STRESS_KEY, PERF_REST_KEY, PERF_KEY) if self.view.display_area_widget.n_frames(k)]
+
+    def _time_axes(self, arguments: dict) -> list[str] | str:
+        """The time axes a frame or playback request is for: the cines by default, a perfusion run, or every
+        loaded perfusion run for 'perfusion'; else the reason it is not done."""
+        key = str(arguments.get("series_key") or CINE_TIME_AXIS).upper()
+        if key in (CINE_TIME_AXIS, "CINES"):
+            return [CINE_TIME_AXIS]
+        runs = self._perfusion_runs()
+        axes = runs if key == "PERFUSION" else [k for k in runs if k == key]
+        return axes or f"Not done: no perfusion run '{key}' is loaded (loaded: {', '.join(runs) or 'none'})."
+
+    def _hold_frame(self, arguments: dict) -> str:
+        """set_time_frame with panels: those panels show the frame as their own, e.g. ED next to ES."""
+        widget = self.view.display_area_widget
+        panels = _panel_list(arguments, widget.n_panels)
+        if isinstance(panels, str):
+            return panels
+        frame = int(arguments["frame"])
+        totals = {i: n for i in panels if (n := widget.panel_frames(i))}
+        if not totals:
+            return f"Not done: {_panels_text(panels)} show no series with frames."
+        if any(not (1 <= frame <= n) for n in totals.values()):
+            return "frame out of range (" + ", ".join(f"panel {i}: 1-{n}" for i, n in totals.items()) + ")."
+        stopped = self.view.is_playing()  # a frame asked for is a frame to look at
+        if stopped:
+            self.view.toggle_cine()
+        widget.hold_frame(list(totals), frame - 1)
+        return (f"{'Stopped playing; showing' if stopped else 'Showing'} frame {frame} in {_panels_text(totals)} only, "
+                f"as {'their' if len(totals) > 1 else 'its'} own frame; set_time_frame without panels puts every "
+                "panel on one frame again.")
 
     def _level_matches(self) -> dict[str, list[int]]:
         """For each other loaded short-axis stack, its slices nearest the CINE_SAX base, mid and apex
@@ -483,14 +521,14 @@ class ChatController:
                 if result is None:
                     return f"Unknown preset '{preset_name}'."
                 filled, total = result
+                shows = preset_label(preset_name)  # the user never sees preset names
                 if filled == 0:
-                    return f"Could not apply '{preset_name}': none of its required series are loaded for this subject."
+                    return f"Not done: none of the series for {shows} are loaded for this patient."
                 if filled < total:
-                    return (
-                        f"Applied '{preset_name}' preset ({filled}/{total} panels filled; "
-                        f"the rest need series not loaded for this subject)."
-                    )
-                return f"Applied '{preset_name}' preset."
+                    return (f"Showing {shows} ({filled}/{total} panels filled; the rest need series not "
+                            f"loaded for this patient).")
+                return (f"Showing {shows}. If the request asks for more or different (with, but, only, "
+                        f"below it ...), change it now: the panels are in the state block.")
 
             if name == "display_series":
                 widget = self.view.display_area_widget
@@ -527,16 +565,24 @@ class ChatController:
                 return f"Displaying {series_key} ({axis}) in panel {panel_idx}{at}."
 
             if name == "set_time_frame":
+                if arguments.get("panels"):  # e.g. ED next to ES; [] or "" is no panel
+                    return self._hold_frame(arguments)
                 widget = self.view.display_area_widget
-                total = widget.n_frames(CINE_TIME_AXIS)
+                axes = self._time_axes(arguments)
+                if isinstance(axes, str):
+                    return axes
                 frame = int(arguments["frame"])
-                if not (1 <= frame <= total):
-                    return f"frame out of range (1-{total})."
+                totals = {axis: widget.n_frames(axis) for axis in axes}
+                if any(not (1 <= frame <= total) for total in totals.values()):
+                    return "frame out of range (" + ", ".join(f"{a}: 1-{n}" for a, n in totals.items()) + ")."
                 stopped = self.view.is_playing()  # a frame asked for is a frame to look at
                 if stopped:
                     self.view.toggle_cine()
-                widget.set_time_index(frame - 1, CINE_TIME_AXIS)
-                return f"{'Stopped the cines; showing' if stopped else 'Showing'} cine frame {frame}/{total}."
+                for axis in axes:
+                    widget.release_frames(axis)
+                    widget.set_time_index(frame - 1, axis)
+                shown = ", ".join(("cine" if a == CINE_TIME_AXIS else a) + f" frame {frame}/{n}" for a, n in totals.items())
+                return f"{'Stopped playing; showing' if stopped else 'Showing'} {shown}."
 
             if name == "set_window":
                 panels = _panel_list(arguments, self.view.display_area_widget.n_panels) if arguments.get("panels") else None
@@ -571,22 +617,31 @@ class ChatController:
 
             if name == "set_playback":
                 widget = self.view.display_area_widget
-                if not widget.n_frames(CINE_TIME_AXIS):
+                axes = self._time_axes(arguments)
+                if isinstance(axes, str):
+                    return axes
+                axis = axes[0]  # the time slider plays one series: of several perfusion runs, the first
+                perfusion = axis != CINE_TIME_AXIS
+                what = axis if perfusion else "the cines"
+                if perfusion and not any(p["series_key"] == axis for p in widget.panel_assignments()):
+                    return f"Not done: no panel shows {axis}; display it first."
+                if not widget.n_frames(axis):
                     return "No cine is loaded to play."
                 playing = bool(arguments.get("playing", True))  # a speed alone means: play at it
                 if arguments.get("speed") is not None:
                     speed = float(arguments["speed"])
                     if speed not in CINE_SPEEDS:
                         return f"speed must be one of {', '.join(f'{s:g}' for s in CINE_SPEEDS)}."
-                    self.view.set_cine_speed(speed)
-                widget.drive_cine_time()
+                    self.view.set_cine_speed(speed, perfusion)
+                widget.drive_time(axis)
                 if self.view.is_playing() != playing:
                     self.view.toggle_cine()
                 if playing and not self.view.is_playing():
-                    return "Not done: the cines have a single frame, so there is nothing to play."
+                    return f"Not done: {what} have a single frame, so there is nothing to play."
                 if playing:
-                    return f"Playing the cines at {self.view.cine_speed:g}x (heartbeats per second)."
-                return f"Cines stopped at frame {widget.current_time_index + 1}."
+                    speed = self.view.perfusion_speed if perfusion else self.view.cine_speed
+                    return f"Playing {what} at {speed:g}x ({'a run in four seconds' if perfusion else 'heartbeats per second'} at 1x)."
+                return f"Stopped {what} at frame {widget.time_index(axis) + 1}."
 
             if name == "set_grid":
                 widget = self.view.display_area_widget
@@ -617,7 +672,7 @@ class ChatController:
                 done = widget.zoom_panels(panels, mode, percent, self.model.analysis)
                 assignments = widget.panel_assignments()
                 skipped = [i for i in panels if i not in done and assignments[i]["series_key"]]
-                result = f"Zoomed {_panels_text(done) if done else 'no panel'} ({mode})."
+                result = f"Zoomed {_panels_text(done) if done else 'no panel'} ({'ROI' if mode == 'roi' else mode})."
                 if skipped:
                     result += f" Not done for {_panels_text(skipped)}: no segmentation of their plane to zoom to."
                 return result

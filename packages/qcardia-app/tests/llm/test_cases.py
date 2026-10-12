@@ -72,6 +72,7 @@ CINE_ONLY = {"CINE_SAX": True, "CINE_2CH": True, "CINE_3CH": True, "CINE_4CH": T
 CINE_LGE = {**CINE_ONLY, "LGE_SAX": True, "LGE_2CH": True, "LGE_3CH": True, "LGE_4CH": True}
 FULL = {**CINE_LGE, "PERF_SAX": True}
 FULL_STRESS = {**FULL, "PERF_STRESS_SAX": True}
+STRESS_REST = {**CINE_LGE, "PERF_STRESS_SAX": True, "PERF_REST_SAX": True}
 
 
 # --- Fixture helpers --------------------------------------------------------
@@ -355,13 +356,38 @@ for i, prompt in enumerate([
 for i, prompt in enumerate([
     "Set up a viability assessment",
     "Show the viability sequences",
-    "I'm assessing for myocardial infarction",
+    "Show the cines next to the LGE",
 ], start=1):
     _m, _v = _loaded(FULL, grid=(2, 4))
     _add(
         id=f"preset_viab_{i:03d}", category="preset", description="Viability trigger phrase",
         model=_m, view=_v, prompt=prompt,
         expected_tool_calls=[preset("viability")], match_mode="subset",
+    )
+
+# --- Positive: LGE (needs LGE) ---
+for i, prompt in enumerate([
+    "I'm assessing for myocardial infarction",
+    "Show me the scar imaging",
+    "Let me look at the late enhancement",
+], start=1):
+    _m, _v = _loaded(FULL, grid=(2, 2))
+    _add(
+        id=f"preset_lge_{i:03d}", category="preset", description="LGE trigger phrase",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[preset("lge")], match_mode="subset",
+    )
+
+# --- Positive: perfusion with LGE (needs perfusion and LGE_SAX) ---
+for i, prompt in enumerate([
+    "Show the perfusion with LGE",
+    "I want the perfusion and scar images together",
+], start=1):
+    _m, _v = _loaded(FULL_STRESS, grid=(2, 3))
+    _add(
+        id=f"preset_perflge_{i:03d}", category="preset", description="Perfusion with LGE trigger phrase",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[preset("perfusion_lge")], match_mode="subset",
     )
 
 # --- Positive: perfusion (needs PERF_STRESS_SAX / PERF_REST_SAX / PERF_SAX) ---
@@ -415,7 +441,7 @@ _add(
 
 for i, prompt in enumerate([
     "Show LV function per slice",
-    "Extended functional view please",
+    "Show me all the cine SAX slices next to the LAX ones",
     "I want to see all SAX slices",
 ], start=1):
     _m, _v = _loaded()
@@ -916,6 +942,45 @@ _add(
 )
 
 
+def frames_are(*frames: int):
+    """The panels with frames show these frames, in any panel order."""
+    def check(s):
+        shown = sorted(f for f in s["panel_frames"] if f is not None)
+        return None if shown == sorted(frames) else f"frames shown {shown}, expected {sorted(frames)}"
+    return check
+
+
+def _same_series(key: str):
+    return lambda s: None if [k for k, _, _ in s["panels"]] == [key, key] else (
+        f"panels {[k for k, _, _ in s['panels']]}, expected {key} twice")
+
+
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_4CH"}, {"idx": 1, "series_key": "CINE_4CH"}], grid=(1, 2))
+_add(
+    id="frame_own_001", category="frame", description="ED and ES side by side, the series in place",
+    model=_m, view=_v, prompt="Show ED on the left and ES on the right",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(_same_series("CINE_4CH"), lambda s: None if s["panel_frames"] == [28, 11] else
+                          f"frames {s['panel_frames']}, expected [28, 11]"),
+)
+_m, _v = _segmented([{"idx": i, "series_key": k} for i, k in enumerate(["CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"])])
+_add(
+    id="frame_own_002", category="frame", description="Compare the cine SAX at ED and ES in a 1x2",
+    model=_m, view=_v, prompt="Compare the cine sax in a 1x2 at ED and ES",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(grid_is(1, 2), _same_series("CINE_SAX"), frames_are(28, 11)),
+    notes="The demo of 2026-10-09: the model sent set_time_frame(panels='[1]') before the tool took panels.",
+)
+_m, _v = _segmented([{"idx": 0, "series_key": "CINE_4CH"}, {"idx": 1, "series_key": "CINE_4CH", "frame": 10}],
+                    grid=(1, 2))
+_add(
+    id="frame_own_003", category="frame", description="One frame for all again after ED/ES side by side",
+    model=_m, view=_v, prompt="Show end diastole in both",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(frames_are(28, 28)),
+    notes="Panel 1 holds ES (frame 11) as its own frame: set_time_frame without panels.",
+)
+
+
 # === NAVIGATION — layout, phase and slice levels in one request =================
 
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}], grid=(1, 1))
@@ -1079,14 +1144,14 @@ def _moved(before_keys: list, before_slices: list, old_cols: int, new_cols: int,
 
 def _column(panels: list[int], keys: list[str], ordered: bool = True):
     def check(s):
-        shown = [s["panels"][i][0] for i in panels]
+        shown = [s["panels"][i][0] if i < len(s["panels"]) else None for i in panels]
         ok = shown == keys if ordered else sorted(shown, key=str) == sorted(keys)
         return None if ok else f"panels {panels} show {shown}, expected {keys}"
     return check
 
 
 _LAX_CINES = ["CINE_2CH", "CINE_3CH", "CINE_4CH"]
-_m, _v = _after_preset("perfusion")
+_m, _v = _after_preset("perfusion_lge")
 _add(
     id="adv_001", category="advanced", description="Perfusion 3x3, the three LAX cines in a new right column",
     model=_m, view=_v, prompt="Display the three long-axis cines on the right",
@@ -1095,7 +1160,7 @@ _add(
                           _moved(_keys(_v), _slices(_v), 3, 4)),
     notes="set_grid(3, 4) keeps the 3x3 on the left; the new column is panels 3, 7 and 11.",
 )
-_m, _v = _after_preset("perfusion")
+_m, _v = _after_preset("perfusion_lge")
 _add(
     id="adv_002", category="advanced", description="Perfusion 3x3, the three LGE LAX views in a new left column",
     model=_m, view=_v, prompt="Put the three long-axis LGE views in a column on the left",
@@ -1182,7 +1247,7 @@ _add(
                           and "CINE_4CH" in [k for k, _, _ in s["panels"][1:5]]
                           else f"panels 1-4 show {s['panels'][1:5]}"),
 )
-_m, _v = _after_preset("perfusion")
+_m, _v = _after_preset("perfusion_lge")
 _lge_row = [(i, sl) for i, (k, sl) in enumerate(zip(_keys(_v), _slices(_v))) if k == "LGE_SAX"]
 _add(
     id="adv_008", category="advanced", description="Perfusion 3x3, the LGE row swapped for cine SAX in place",
@@ -1218,6 +1283,119 @@ _add(
            "base, mid and apex at end-systole with segmentation",
     expected_tool_calls=[], match_mode="state", expected_state=_lge_over_cine,
     notes="The LGE levels nearest the CINE_SAX base, mid and apex are 9, 6 and 3 at frame 1 and at ES.",
+)
+
+
+# === PRESET_ADJUST — a preset as the starting point, then changed (issue #42) ===
+
+def _rows_of(s, cols: int) -> list[list[tuple]]:
+    return [s["panels"][r * cols:(r + 1) * cols] for r in range(s["grid"][0])]
+
+
+def _stress_over_lge(s):
+    """Stress perfusion on top, below it the LGE SAX slice nearest each stress slice; no rest row."""
+    if s["grid"] != (2, 3):
+        return f"grid {s['grid']}, expected (2, 3)"
+    top, bottom = _rows_of(s, 3)
+    if any(k != "PERF_STRESS_SAX" for k, _, _ in top) or any(k != "LGE_SAX" for k, _, _ in bottom):
+        return f"rows {top} / {bottom}, expected stress perfusion over LGE_SAX"
+    want = [nearest("LGE_SAX", phantom_depths("PERF_STRESS_SAX")[sl - 1]) for _, sl, _ in top]
+    if [sl for _, sl, _ in bottom] != want:
+        return f"LGE_SAX slices {[sl for _, sl, _ in bottom]}, expected {want} (nearest the stress slices)"
+
+
+def _perfusion_over_cine(s):
+    """The stress and rest rows, and below them the CINE_SAX slice nearest each perfusion column."""
+    if s["grid"] != (3, 3):
+        return f"grid {s['grid']}, expected (3, 3)"
+    stress, rest, bottom = _rows_of(s, 3)
+    if any(k != "PERF_STRESS_SAX" for k, _, _ in stress) or any(k != "PERF_REST_SAX" for k, _, _ in rest):
+        return f"rows {stress} / {rest}, expected the stress and the rest row"
+    want = [nearest("CINE_SAX", phantom_depths("PERF_STRESS_SAX")[sl - 1]) for _, sl, _ in stress]
+    got = [(k, sl) for k, sl, _ in bottom]
+    if any(k != "CINE_SAX" or abs(sl - w) > 1 for (k, sl), w in zip(got, want)):
+        return f"bottom row {got}, expected CINE_SAX near slices {want}"
+
+
+def _levels(seq: str, slices: list[int]):
+    """Exactly the three long axes of seq and its SAX at slices, in any layout."""
+    def check(s):
+        shown = sorted((k, sl if k.endswith("SAX") else 0) for k, sl, _ in s["panels"] if k)
+        want = sorted([(f"{seq}_{v}", 0) for v in ("2CH", "3CH", "4CH")] + [(f"{seq}_SAX", z) for z in slices])
+        return None if shown == want else f"panels {shown}, expected the three {seq} long axes and SAX {slices}"
+    return check
+
+
+def _cines_over_lge(s):
+    keys = [k for k, _, _ in s["panels"]]
+    if s["grid"] != (2, 4) or set(keys[:4]) != {"CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"} \
+            or set(keys[4:]) != {"LGE_4CH", "LGE_3CH", "LGE_2CH", "LGE_SAX"}:
+        return f"grid {s['grid']}, panels {keys}: expected the cines above their LGE views"
+
+
+def _viability_es_contours(s):
+    if problem := _cines_over_lge(s):
+        return problem
+    if not all(s["contours"][:4]):
+        return f"contours {s['contours'][:4]} on the cines, expected all on"
+
+
+def _lge_dark(s):
+    keys = {k for k, _, _ in s["panels"]}
+    if s["grid"] != (2, 2) or keys != {"LGE_4CH", "LGE_3CH", "LGE_2CH", "LGE_SAX"}:
+        return f"grid {s['grid']}, panels {keys}: expected the four LGE views in a 2x2"
+    if "LGE_SAX" not in s["windows"] and not any(s["panel_windows"]):
+        return "no nulled-myocardium window on the LGE"
+
+
+_m, _v = _loaded(STRESS_REST, grid=(2, 2))
+_add(
+    id="preset_adjust_001", category="preset_adjust", description="Perfusion with LGE, only the stress run",
+    model=_m, view=_v, prompt="Show the perfusion with LGE, but only the stress run",
+    expected_tool_calls=[], match_mode="state", expected_state=_stress_over_lge,
+    notes="perfusion_lge (stress, rest, LGE), then without the rest row: the LGE row matches the stress slices.",
+)
+_m, _v = _loaded(STRESS_REST, grid=(2, 2))
+_add(
+    id="preset_adjust_002", category="preset_adjust", description="Perfusion with the cine SAX at its depths below",
+    model=_m, view=_v, prompt="Show the perfusion, and below it the cine SAX at the same depths",
+    expected_tool_calls=[], match_mode="state", expected_state=_perfusion_over_cine,
+    notes="perfusion_lge with the LGE row swapped for CINE_SAX in place, or perfusion and a matched cine row.",
+)
+_m, _v = _segmented(grid=(2, 2), lge=True)
+_add(
+    id="preset_adjust_003", category="preset_adjust", description="The LGE views, the SAX at base, mid and apex",
+    model=_m, view=_v, prompt="Show the LGE views, with the SAX at base, mid and apex",
+    expected_tool_calls=[], match_mode="state", expected_state=_levels("LGE", [3, 6, 9]),
+    notes="E.g. a 2x3: the three LGE long axes and LGE_SAX at its base, mid and apex (9, 6, 3).",
+)
+_m, _v = _segmented(grid=(2, 2), lge=True)
+_m.analysis.update({"CINE_2CH": {"box": (60, 50, 200, 190)}, "CINE_3CH": {"box": (60, 50, 200, 190)}})
+_add(
+    id="preset_adjust_004", category="preset_adjust", description="Viability at end-systole, contours on the cines",
+    model=_m, view=_v, prompt="Show viability at end-systole with the contours on the cines",
+    expected_tool_calls=[], match_mode="state", expected_state=screen(frame_is(11), _viability_es_contours),
+)
+_m, _v = _segmented(grid=(2, 2), lge=True)
+_add(
+    id="preset_adjust_005", category="preset_adjust", description="The LGE views with the myocardium dark",
+    model=_m, view=_v, prompt="Show the LGE with the myocardium dark",
+    expected_tool_calls=[], match_mode="state", expected_state=_lge_dark,
+)
+for i, prompt in enumerate(["Compare these with LGE", "And now the LGE next to these"], start=7):
+    _m, _v = _displaying([{"idx": j, "series_key": k} for j, k in enumerate(["CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"])])
+    _add(
+        id=f"preset_adjust_{i:03d}", category="preset_adjust", description="The cines on screen, compared with the LGE",
+        model=_m, view=_v, prompt=prompt,
+        expected_tool_calls=[], match_mode="state", expected_state=_cines_over_lge,
+        notes="The four cines in a 2x2 (functional), then the LGE: viability, the cines above their LGE views.",
+    )
+_m, _v = _segmented(grid=(2, 2))
+_add(
+    id="preset_adjust_006", category="preset_adjust", description="Functional, the SAX at base, mid and apex",
+    model=_m, view=_v, prompt="Show the functional views, but the SAX at base, mid and apex",
+    expected_tool_calls=[], match_mode="state", expected_state=_levels("CINE", [3, 7, 11]),
+    notes="E.g. a 2x3: the three LAX cines and CINE_SAX at its base, mid and apex (11, 7, 3 at frame 1).",
 )
 
 
@@ -1280,6 +1458,39 @@ _add(
 
 def playing_is(playing: bool):
     return lambda s: None if s["playing"] == playing else f"playing {s['playing']}, expected {playing}"
+
+
+def perfusion_frames_are(frames: dict):
+    return lambda s: None if s["perfusion_frames"] == frames else f"perfusion frames {s['perfusion_frames']}, expected {frames}"
+
+
+_PERF_PANELS = [{"idx": 0, "series_key": "PERF_STRESS_SAX"}, {"idx": 1, "series_key": "PERF_REST_SAX"},
+                {"idx": 2, "series_key": "CINE_SAX"}]
+_m, _v = _displaying(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="frame_perf_001", category="frame", description="A frame of every perfusion run",
+    model=_m, view=_v, prompt="Set the perfusion to frame 40",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(perfusion_frames_are({"PERF_REST_SAX": 40, "PERF_STRESS_SAX": 40}), frame_is(1)),
+    notes="Both runs; the cines keep their frame.",
+)
+_m, _v = _displaying(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="frame_perf_002", category="frame", description="A frame of one perfusion run",
+    model=_m, view=_v, prompt="Go to frame 60 of the rest perfusion",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(perfusion_frames_are({"PERF_REST_SAX": 60}), frame_is(1)),
+)
+_m, _v = _displaying(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="playback_perf_001", category="playback", description="Play a perfusion run at its own speed",
+    model=_m, view=_v, prompt="Play the stress perfusion at half speed",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(playing_is(True),
+                          lambda s: None if (s["driven"], s["perfusion_speed"], s["speed"]) == ("PERF_STRESS_SAX", 0.5, 1.0)
+                          else f"playing {s['driven']} at perfusion speed {s['perfusion_speed']}, cine speed {s['speed']}"),
+    notes="The perfusion speed changes, the cines' speed stays.",
+)
 
 
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])

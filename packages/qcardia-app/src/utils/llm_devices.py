@@ -44,6 +44,9 @@ class Device:
     port: int = 11434
     url: str = ""                  # full base URL; a gateway needs a scheme and path
     api_key_env: str = ""          # env var holding the bearer token, never the key
+    token_url: str = ""            # set instead of api_key_env when the key is a short-lived token
+    client_id_env: str = ""        # env vars holding the client id and secret traded at token_url
+    client_secret_env: str = ""
     model: str = ""                # default tag; a gateway shares none with Ollama
     extra_body: dict = field(default_factory=dict)  # non-standard request fields, e.g. vLLM's
     ssh_alias: str | None = None   # ~/.ssh/config entry, so no credentials live here
@@ -221,9 +224,71 @@ atexit.register(shutdown)
 
 # --- Probing ---------------------------------------------------------------
 
-def _api_key(device: Device) -> str:
-    """Read at call time from the env var the config names, so no key is stored here."""
-    return os.environ.get(device.api_key_env, "").strip() if device.api_key_env else ""
+TOKEN_REFRESH_MARGIN: float = 120.0  # renew a token this long before it expires
+_tokens: dict[str, tuple[str, float]] = {}  # device id -> (token, time.monotonic() it expires)
+
+
+def _env(name: str) -> str:
+    """An env var, falling back on Windows to the user's saved ones.
+
+    A process copies its env from its parent at start, so a variable set after the
+    terminal or IDE opened stays invisible here until that parent restarts as well.
+    """
+    if not name:
+        return ""
+    value = os.environ.get(name, "").strip()
+    if value or sys.platform != "win32":
+        return value
+    import winreg
+
+    with suppress(OSError):
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            return str(winreg.QueryValueEx(key, name)[0]).strip()
+    return ""
+
+
+def _key_source(device: Device) -> str:
+    """The env vars to name when the key is missing or rejected."""
+    if device.token_url:
+        return f"{device.client_id_env or 'client_id_env'} and {device.client_secret_env or 'client_secret_env'}"
+    return device.api_key_env or "api_key_env"
+
+
+def _fetch_token(device: Device) -> str:
+    """Trade the client id and secret for a bearer token (Run:ai's client-credentials grant).
+
+    Raises requests.RequestException if the token server refuses or cannot be reached,
+    and ValueError if it answers without a token.
+    """
+    client_id, secret = _env(device.client_id_env), _env(device.client_secret_env)
+    if not (client_id and secret):
+        return ""
+    response = requests.post(
+        device.token_url,
+        json={"grantType": "client_credentials", "clientId": client_id, "clientSecret": secret},
+        timeout=DEVICE_PROBE_TIMEOUT,
+    )
+    response.raise_for_status()
+    body = response.json()
+    token = body.get("accessToken") if isinstance(body, dict) else None
+    if not token:
+        raise ValueError(f"The token server at {device.token_url} answered without an accessToken.")
+    _tokens[device.id] = (token, time.monotonic() + float(body.get("expiresIn") or 1800))
+    return token
+
+
+def _api_key(device: Device, refresh: bool = False) -> str:
+    """The bearer key, read at call time so no key is stored here.
+
+    A token device gets a fresh token when the cached one is near expiry, or when
+    `refresh` says the server just rejected it. Can raise like _fetch_token.
+    """
+    if not device.token_url:
+        return _env(device.api_key_env)
+    cached = _tokens.get(device.id)
+    if refresh or cached is None or cached[1] - time.monotonic() < TOKEN_REFRESH_MARGIN:
+        return _fetch_token(device)
+    return cached[0]
 
 
 def _auth(device: Device) -> dict:
@@ -245,7 +310,8 @@ def _fetch_models(device: Device, timeout: float) -> list[dict]:
     response.raise_for_status()
     entries = [m for m in response.json().get("data", []) if m.get("accessible", True)]
     # GPU-resident models first: the rest pay a cold start that can run into minutes.
-    entries.sort(key=lambda m: (not m.get("running"), m.get("id", "")))
+    # A gateway marks each model; a single-model endpoint has no "running" and is always loaded.
+    entries.sort(key=lambda m: (not m.get("running", True), m.get("id", "")))
     out = []
     for m in entries:
         tag, status = m.get("id", ""), m.get("status_label", "")
@@ -253,7 +319,7 @@ def _fetch_models(device: Device, timeout: float) -> list[dict]:
             "tag": tag,
             "label": f"{tag} ({status})" if status else tag,
             "local": False,
-            "running": bool(m.get("running")),
+            "running": bool(m.get("running", True)),
         })
     return out
 
@@ -265,7 +331,7 @@ def _readable_error(device: Device, exc: Exception) -> str:
     if isinstance(exc, requests.HTTPError) and exc.response is not None:
         code = exc.response.status_code
         if code in (401, 403):
-            return f"Rejected the API key (HTTP {code}). Check {device.api_key_env}."
+            return f"Rejected the API key (HTTP {code}). Check {_key_source(device)}."
         return f"Answered with HTTP {code}."
     if isinstance(exc, requests.ConnectionError):
         if device.protocol == "openai":
@@ -289,8 +355,15 @@ def probe(device: Device, timeout: float = DEVICE_PROBE_TIMEOUT) -> ProbeResult:
     except RuntimeError as e:
         return ProbeResult(False, str(e))
 
-    if device.protocol == "openai" and not _api_key(device):
-        return ProbeResult(False, f"No API key. Set the {device.api_key_env or 'api_key_env'} environment variable.")
+    if device.protocol == "openai":
+        try:
+            key = _api_key(device)  # a token device: its cached token, renewed near expiry
+        except requests.ConnectionError:
+            return ProbeResult(False, f"Could not reach the token server at {device.token_url}.")
+        except (requests.RequestException, ValueError) as e:
+            return ProbeResult(False, _readable_error(device, e))
+        if not key:
+            return ProbeResult(False, f"No API key. Set the {_key_source(device)} environment variable(s).")
 
     try:
         models = _fetch_models(device, timeout)
@@ -346,7 +419,7 @@ def apply(device: Device) -> None:
         from model import openai_client
 
         openai_client.CHAT_URL = f"{base}/chat/completions"
-        openai_client.API_KEY = _api_key(device)
+        openai_client.get_api_key = lambda refresh=False: _api_key(device, refresh)
         openai_client.EXTRA_BODY = dict(device.extra_body)
 
     # Disambiguation sends DICOM headers, so it follows the device only when cleared for

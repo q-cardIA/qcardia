@@ -93,10 +93,15 @@ def patients(folders: list[str]) -> list[Patient]:
     return [db.get(f, Patient(f)) for f in folders]
 
 
-def patient_label(subject: str | Path) -> str:
-    """A subject's patient name and ID, by its path or its entry in the patient list; else its folder name."""
+def patient_of(subject: str | Path) -> Patient | None:
+    """A subject's patient, by its path or its entry in the patient list; None if the list does not name it."""
     same = lambda s: os.path.normcase(os.path.abspath(data_dir() / s))  # noqa: E731 (no disk access)
-    p = next((p for s, p in _patient_db().items() if same(s) == same(subject)), None)
+    return next((p for s, p in _patient_db().items() if same(s) == same(subject)), None)
+
+
+def patient_label(subject: str | Path) -> str:
+    """A subject's patient name and ID; else its folder name."""
+    p = patient_of(subject)
     return f"{p.name} (ID {p.hospital_id})" if p else Path(subject).name
 
 

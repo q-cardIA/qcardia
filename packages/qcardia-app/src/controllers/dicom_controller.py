@@ -5,7 +5,7 @@ from pathlib import Path
 from model.background_worker import CallableWorker
 from model.dicom_model import read_disk_thumbnail
 from utils import study_log
-from utils.hanging_protocols import PRESETS, PanelAssignment
+from utils.hanging_protocols import PRESETS, PanelAssignment, available_presets
 from utils.windowing import null_myocardium_window
 from view.central_display_area_widget import CINE_TIME_AXIS
 from view.series_browser_widget import SeriesCardInfo
@@ -135,6 +135,7 @@ class DICOMController:
         self._last_result = result
         self._loading_keys = {e.key for e in result.entries if e.key is not None and e.is_primary}
         self._load_total = len(self._loading_keys)
+        self.view.sidebar.set_available(available_presets(self._loading_keys))  # a preset's panels wait for its series
         # A new patient starts on an empty 2x2.
         self._waiting = {}
         self._widget.clear_series()
@@ -204,6 +205,7 @@ class DICOMController:
 
         study_log.log("reassign_series", series_folder=card_info.path.name, key=new_key)
         self._register(new_key, info)
+        self.view.sidebar.set_available(available_presets(set(self.model.series) | self._loading_keys))
         self._widget.refresh_panels(new_key)
 
         for entry in self._last_result.entries:
@@ -333,6 +335,7 @@ class DICOMController:
             self.view.show_info("Go to " + phase, "ED and ES come from the CINE SAX segmentation. "
                                 "Segment it first (Tools > Predict Labels).")
             return
+        self._widget.release_frames(CINE_TIME_AXIS)
         self._widget.set_time_index(sax[phase.lower()], CINE_TIME_AXIS)
 
     def is_segmenting(self, series_key: str) -> bool:
@@ -389,12 +392,13 @@ class DICOMController:
         if preset is None:
             logging.warning(f"apply_preset: unknown preset {name!r}")
             return None
-        preset = preset.for_loaded(lambda k: self._widget.is_series_registered(k) or k in self._loading_keys)
+        present = lambda k: self._widget.is_series_registered(k) or k in self._loading_keys  # noqa: E731
+        preset = preset.for_loaded(present)
 
-        total = len(preset.panels)
         slots = Counter(p.key for p in preset.panels if p.slice_slot is not None)
         slices = [None if self._must_wait(p) else self._preset_slice(p, slots) for p in preset.panels]
         filled = sum(z is not None or self._must_wait(p) for p, z in zip(preset.panels, slices))
+        total = filled + sum(not present(p.key) for p in preset.panels)  # a too-short SAX stack misses nothing
         if filled == 0:
             # Leave the current grid/panels untouched — a total no-op should
             # actually be a no-op, not silently wipe what was displayed.

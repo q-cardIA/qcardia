@@ -25,8 +25,7 @@ from PySide6.QtWidgets import (
 
 from utils import study_log
 from utils.app_config import ICON_PATH, ISSUES_URL, REPO_URL, SETTINGS, WIKI_URL
-from utils.hanging_protocols import PRESET_BUTTON_ORDER, preset_label
-from utils.layouts import CINE_SPEEDS, SPLIT_PRESETS
+from utils.layouts import CINE_SPEEDS
 from view.central_display_area_widget import CentralDisplayAreaWidget
 from view.dialogs import pick_directory
 from view.chat_widget import ChatWidget
@@ -44,7 +43,7 @@ def load_app_icon() -> QIcon | None:
 
 
 _TAB_DRAG_OUT_PX = 24  # how far past its tab bar a tab must be dragged to unstack its panel
-GRID_SIZES = ((1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (2, 4), (3, 3), (3, 4), (3, 6))  # rows x columns
+GRID_SIZES = ((1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (2, 4), (2, 5), (3, 3), (3, 4), (3, 5))  # rows x columns
 
 
 class _ContourIsland(QFrame):
@@ -155,7 +154,7 @@ class MainWindow(QMainWindow):
         self.session_busy = lambda: None  # set by main: why the session cannot end yet, or None
         self._play_timer = QTimer(self)
         self._play_timer.timeout.connect(lambda: self.step_time_frame(self._play_step))
-        self._cine_speed, self._play_step = 1.0, 1
+        self._cine_speed, self._perfusion_speed, self._play_step = 1.0, 1.0, 1
         # One state record per burst of user input.
         self._screen_log_timer = QTimer(self, singleShot=True, interval=300, timeout=self.log_screen)
         self.full_screen_action = QAction("&Full Screen", self)
@@ -177,7 +176,6 @@ class MainWindow(QMainWindow):
     def build_analysis_interface(self):
         self.sidebar = SidebarWidget(self)
         self.sidebar.load_patient_requested.connect(self.on_load_patient_clicked)
-        self.sidebar.save_requested.connect(self.emit_save_signal)
         self.sidebar.preset_requested.connect(self.preset_requested_signal.emit)
 
         self.display_area_widget = CentralDisplayAreaWidget(self)
@@ -232,6 +230,11 @@ class MainWindow(QMainWindow):
         viewer_layout.setSpacing(0)
         viewer_layout.addWidget(self.display_area_widget, 1)
         viewer_layout.addWidget(time_controls_container)
+        # Hidden while a panel without frames (LGE) is selected; its space stays, so the panels do not move.
+        keep = time_controls_container.sizePolicy()
+        keep.setRetainSizeWhenHidden(True)
+        time_controls_container.setSizePolicy(keep)
+        self.display_area_widget.panel_selected.connect(time_controls_container.setVisible)
         self.contour_island = _ContourIsland(viewer_column)
         self.contour_island.tool_changed.connect(self.display_area_widget.set_contour_edit_tool)
         self.contour_island.save_requested.connect(self.emit_save_signal)
@@ -281,7 +284,7 @@ class MainWindow(QMainWindow):
     def _build_docks(self):
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
         self.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
-        self.sidebar_dock = self._dock(self.sidebar, "Patient", "patientDock", Qt.LeftDockWidgetArea)
+        self.sidebar_dock = self._dock(self.sidebar, "Protocols", "patientDock", Qt.LeftDockWidgetArea)
         self.series_dock = self._dock(self.series_browser_widget, "Series", "seriesDock", Qt.RightDockWidgetArea)
         self.chat_dock = self._dock(self.chat_widget, "Assistant", "assistantDock", Qt.RightDockWidgetArea)
         self.splitDockWidget(self.series_dock, self.chat_dock, Qt.Horizontal)
@@ -295,7 +298,7 @@ class MainWindow(QMainWindow):
     def _settle_docks(self, screen_width: int):
         chat_width = min(int(screen_width * 0.15), self.chat_widget.maximumWidth())
         self.resizeDocks([self.sidebar_dock, self.series_dock, self.chat_dock],
-                         [self.sidebar.minimumWidth(), theme.scaled(200), chat_width],
+                         [self.sidebar.minimumSizeHint().width(), theme.scaled(200), chat_width],
                          Qt.Horizontal)
         self._default_dock_state = self.saveState()
         saved = SETTINGS.value("window/dock_state")
@@ -324,6 +327,7 @@ class MainWindow(QMainWindow):
         for bar in self.findChildren(QTabBar, options=Qt.FindDirectChildrenOnly):
             if not bar.property("watched"):
                 bar.setProperty("watched", True)
+                bar.setElideMode(Qt.ElideNone)  # a tab as wide as its title; too many tabs scroll instead
                 bar.currentChanged.connect(lambda _: self._dock_titles_timer.start())
                 bar.installEventFilter(self)
             if bar.isVisible() and bar.currentIndex() == 0:
@@ -428,7 +432,7 @@ class MainWindow(QMainWindow):
         bar.setObjectName("appMenu")
 
         file_menu = bar.addMenu("&File")
-        file_menu.addAction("&Load Patient...", QKeySequence.Open, self.on_load_patient_clicked)
+        file_menu.addAction("&Load Files...", QKeySequence.Open, self.on_load_patient_clicked)
         file_menu.addAction("&Save New Labels", QKeySequence.Save, self.emit_save_signal)
         file_menu.addSeparator()
         file_menu.addAction("&Return to Start Screen", self.return_to_start)
@@ -439,7 +443,7 @@ class MainWindow(QMainWindow):
         bar.addMenu(view_menu)
         view_menu.addAction(self.full_screen_action)
         view_menu.addSeparator()
-        self.toggle_sidebar_action = self._panel_action(view_menu, self.sidebar_dock, "&Patient", "Ctrl+B")
+        self.toggle_sidebar_action = self._panel_action(view_menu, self.sidebar_dock, "&Protocols", "Ctrl+B")
         # Ctrl+A stays "select all" while typing: text fields take their standard keys first.
         self.toggle_series_browser_action = self._panel_action(view_menu, self.series_dock, "&Series", "Ctrl+Shift+Q")
         self.toggle_chat_action = self._panel_action(view_menu, self.chat_dock, "&Assistant", "Ctrl+A")
@@ -453,12 +457,6 @@ class MainWindow(QMainWindow):
         crosshair.setChecked(SETTINGS.value("view/crosshair", True, type=bool))
         self.display_area_widget.set_crosshair_shown(crosshair.isChecked())
         view_menu.addSeparator()
-        self.grid_menu = StickyMenu("&Grid", view_menu)
-        self.grid_menu.aboutToShow.connect(self._rebuild_grid_menu)
-        view_menu.addMenu(self.grid_menu)
-        layouts = view_menu.addMenu("&Layout")
-        for name in PRESET_BUTTON_ORDER:
-            layouts.addAction(preset_label(name), lambda n=name: self.preset_requested_signal.emit(n))
         self.zoom_menu = view_menu.addMenu("&Zoom")
         for text, mode in (("Zoom to &Heart", "roi"), ("&Fill Panels", "fill"), ("Fit &Whole Image", "fit")):
             self.zoom_menu.addAction(text, lambda m=mode: self.zoom_requested.emit(m))
@@ -473,19 +471,23 @@ class MainWindow(QMainWindow):
         self.playback_menu.aboutToShow.connect(self._rebuild_playback_menu)
         view_menu.addMenu(self.playback_menu)
 
+        # The simple grids as diagrams, beside View as in CVI42; the split layouts are the assistant's.
+        self.grid_menu = StickyMenu("&Grid", bar)
+        self.grid_menu.aboutToShow.connect(self._rebuild_grid_menu)
+        # The native macOS menu bar hides an empty menu, so aboutToShow would never fire.
+        self._rebuild_grid_menu()
+        bar.addMenu(self.grid_menu)
+
         tools_menu = StickyMenu("&Tools", bar)
         bar.addMenu(tools_menu)
         self.predict_menu = QMenu("Predict &Labels", self)
         self.predict_menu.aboutToShow.connect(self._rebuild_predict_menu)
         tools_menu.addMenu(self.predict_menu)
-        self.sidebar.btn_predict.setMenu(self.predict_menu)
         tools_menu.addSeparator()
         self.contour_edit_action = tools_menu.addAction("&Edit Contours")
         self.contour_edit_action.setCheckable(True)
         self.contour_edit_action.setShortcut("Ctrl+E")
         self.contour_edit_action.toggled.connect(self._on_contour_edit_toggled)
-        self.contour_edit_action.toggled.connect(self.sidebar.btn_edit_contours.setChecked)
-        self.sidebar.btn_edit_contours.toggled.connect(self.contour_edit_action.setChecked)
 
         help_menu = bar.addMenu("&Help")
         for label, url in (("&Tutorials and Wiki", WIKI_URL), ("&Report an Issue", ISSUES_URL),
@@ -500,33 +502,29 @@ class MainWindow(QMainWindow):
         current = self.display_area_widget.grid_size
         split = self.display_area_widget.split
         for rows, cols in GRID_SIZES:
-            action = self.grid_menu.addAction(f"{rows} \u00d7 {cols}")
+            action = self.grid_menu.addAction(theme.line_icon(f"grid:{rows}x{cols}", "text_muted"), f"{rows} \u00d7 {cols}")
             action.setCheckable(True)
             action.setChecked((rows, cols) == current and split is None)
             group.addAction(action)
             action.triggered.connect(lambda _=False, r=rows, c=cols: self.display_area_widget.set_grid_size(r, c))
-        self.grid_menu.addSeparator()
-        for preset in SPLIT_PRESETS:
-            left, right = (("Large" if r * c == 1 else f"{r} \u00d7 {c}") for r, c in (preset[:2], preset[2:]))
-            action = self.grid_menu.addAction(f"{left}  |  {right}")
-            action.setCheckable(True)
-            action.setChecked(split == preset)
-            group.addAction(action)
-            action.triggered.connect(lambda _=False, p=preset: self.display_area_widget.set_split_layout(p))
 
     def _rebuild_playback_menu(self):
         """Rebuilt on opening, so the play state and the speed are current."""
         menu = self.playback_menu
         menu.clear()
         menu.addAction("&Pause" if self.is_playing() else "&Play", self.toggle_cine)
-        speeds = self.speed_menu = menu.addMenu("&Speed")  # kept: a submenu built here must outlive this call
-        group = QActionGroup(speeds)
-        for speed in CINE_SPEEDS:
-            action = speeds.addAction(f"{speed:g}\u00d7" + (" (one heartbeat per second)" if speed == 1 else ""))
-            action.setCheckable(True)
-            action.setChecked(speed == self._cine_speed)
-            group.addAction(action)
-            action.triggered.connect(lambda _=False, s=speed: self.set_cine_speed(s))
+        self.speed_menus = []  # kept: a submenu built here must outlive this call
+        for title, perfusion, one in (("&Speed", False, "one heartbeat per second"),
+                                      ("P&erfusion Speed", True, "a run in four seconds")):
+            speeds = menu.addMenu(title)
+            self.speed_menus.append(speeds)
+            group = QActionGroup(speeds)
+            for speed in CINE_SPEEDS:
+                action = speeds.addAction(f"{speed:g}\u00d7" + (f" ({one})" if speed == 1 else ""))
+                action.setCheckable(True)
+                action.setChecked(speed == (self._perfusion_speed if perfusion else self._cine_speed))
+                group.addAction(action)
+                action.triggered.connect(lambda _=False, s=speed, p=perfusion: self.set_cine_speed(s, p))
         menu.addSeparator()
         menu.addAction("Go to &End-Diastole", lambda: self.phase_requested.emit("ED"))
         menu.addAction("Go to End-&Systole", lambda: self.phase_requested.emit("ES"))
@@ -599,7 +597,7 @@ class MainWindow(QMainWindow):
         """The screen to the session log, as far as it changed since the last time."""
         if hasattr(self, "display_area_widget"):
             study_log.log_state({**self.display_area_widget.state(), "playing": self.is_playing(),
-                                 "speed": self._cine_speed})
+                                 "speed": self._cine_speed, "perfusion_speed": self._perfusion_speed})
 
     def schedule_screen_log(self):
         self._screen_log_timer.start()
@@ -611,16 +609,24 @@ class MainWindow(QMainWindow):
     def cine_speed(self) -> float:
         return self._cine_speed
 
-    def set_cine_speed(self, speed: float):
-        """Heartbeats per second; also while playing."""
-        self._cine_speed = speed
+    @property
+    def perfusion_speed(self) -> float:
+        return self._perfusion_speed
+
+    def set_cine_speed(self, speed: float, perfusion: bool = False):
+        """The cines' speed (heartbeats per second), or the perfusion's; also while playing."""
+        if perfusion:
+            self._perfusion_speed = speed
+        else:
+            self._cine_speed = speed
         if self._play_timer.isActive():
             self._play_timer.start(self._play_interval())
 
     def _play_interval(self) -> int:
-        """ms per step: one heartbeat per second at speed 1. At most 50 steps per second, so faster
-        playback skips frames."""
-        fps = (self.time_slider.maximum() + 1) * self._cine_speed
+        """ms per step: one heartbeat per second at speed 1, and a perfusion run (one contrast passage) in
+        four seconds. At most 50 steps per second, so faster playback skips frames."""
+        perfusion = self.display_area_widget.driven_time_axis.startswith("PERF_")
+        fps = (self.time_slider.maximum() + 1) * (self._perfusion_speed / 4 if perfusion else self._cine_speed)
         self._play_step = max(1, math.ceil(fps / 50))
         return max(20, round(1000 * self._play_step / fps))
 

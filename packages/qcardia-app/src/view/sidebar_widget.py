@@ -1,17 +1,17 @@
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
-from utils.app_config import patient_label
-from utils.hanging_protocols import PRESET_BUTTON_ORDER, preset_label
+from utils.app_config import patient_of
+from utils.hanging_protocols import SIDEBAR_PRESETS
 from view import theme
 
 
 class SidebarWidget(QFrame):
     load_patient_requested = Signal()
-    save_requested = Signal()
     preset_requested = Signal(str)
+    _ICONS = {"functional": "heart", "lge": "lge", "perfusion": "uptake", "flow": "flow"}  # by preset
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,50 +24,56 @@ class SidebarWidget(QFrame):
         self.layout.setContentsMargins(8, 0, 8, 8)
         self.layout.setSpacing(2)
 
-        # Load patient button - cardisort classifies and loads every recognized series
-        self.btn_load_patient = QPushButton("Load Patient…")
-        self.btn_load_patient.setProperty("role", "sidebarButton")
-        self.btn_load_patient.clicked.connect(self.load_patient_requested.emit)
-        self.layout.addWidget(self.btn_load_patient)
+        # Patient Data opens to the loaded patient and a button to load another (cardisort classifies and
+        # loads every recognized series of a patient folder); pressed again, it closes.
+        self.btn_patient = QPushButton(" Patient Data")  # the space: a wider gap after the icon
+        self.btn_patient.setProperty("role", "sidebarButton")
+        self.btn_patient.setCheckable(True)
+        self.layout.addWidget(self.btn_patient)
+        patient_box = QFrame()
+        box_layout = QVBoxLayout(patient_box)
+        box_layout.setContentsMargins(26, 0, 0, 4)  # under the button's text
+        box_layout.setSpacing(2)
         self._patient_label = QLabel("No patient loaded")
         self._patient_label.setProperty("role", "sidebarStatus")
-        self.layout.addWidget(self._patient_label)
+        box_layout.addWidget(self._patient_label)
+        self.btn_load_patient = QPushButton("Load a patient")
+        self.btn_load_patient.setProperty("role", "sidebarButton")
+        self.btn_load_patient.clicked.connect(self.load_patient_requested.emit)
+        box_layout.addWidget(self.btn_load_patient)
+        patient_box.hide()
+        self.btn_patient.toggled.connect(patient_box.setVisible)
+        self.layout.addWidget(patient_box)
 
-        self._section("Labels")
-        # The window gives this button its menu: one entry per view that has a segmentation model.
-        self.btn_predict = QPushButton("Predict Labels")
-        self.btn_predict.setProperty("role", "sidebarButton")
-        self.layout.addWidget(self.btn_predict)
-        # Checkable; the window keeps it in step with Tools > Edit Contours.
-        self.btn_edit_contours = QPushButton("Edit Contours")
-        self.btn_edit_contours.setProperty("role", "sidebarButton")
-        self.btn_edit_contours.setCheckable(True)
-        self.layout.addWidget(self.btn_edit_contours)
-        self.btn_save = QPushButton("Save New Labels")
-        self.btn_save.setProperty("role", "sidebarButton")
-        self.btn_save.clicked.connect(self.save_requested.emit)
-        self.layout.addWidget(self.btn_save)
-
-        self._section("Layouts")
-        for preset_name in PRESET_BUTTON_ORDER:
-            btn = QPushButton(preset_label(preset_name))
+        # The presets a user picks directly; greyed out until a patient has their series (set_available).
+        self._preset_buttons = {}
+        for text, preset_name in SIDEBAR_PRESETS.items():
+            btn = self._preset_buttons[preset_name] = QPushButton(f" {text}")
             btn.setProperty("role", "sidebarButton")
+            btn.setEnabled(False)
             btn.clicked.connect(lambda _, name=preset_name: self.preset_requested.emit(name))
             self.layout.addWidget(btn)
 
         self.layout.addStretch(1)
+        self._apply_icons()
+        theme.notifier.changed.connect(self._apply_icons)
 
-    def _section(self, title: str):
-        label = QLabel(title)
-        label.setProperty("role", "sidebarSectionTitle")
-        self.layout.addSpacing(10)
-        self.layout.addWidget(label)
+    def _apply_icons(self):
+        for btn, kind in ((self.btn_patient, "folder"), *((b, self._ICONS[n]) for n, b in self._preset_buttons.items())):
+            btn.setIcon(theme.line_icon(kind, "text_muted"))
+            btn.setIconSize(QSize(18, 18))
+
+    def set_available(self, presets: list[str]):
+        """Only the presets the loaded patient has the series for can be picked."""
+        for name, btn in self._preset_buttons.items():
+            btn.setEnabled(name in presets)
 
     def show_patient(self, folder: Path, n_series: int):
-        name = patient_label(folder)
-        self._patient_label.setText(f"{name} · {n_series} series")
-        self._patient_label.setToolTip(f"{name}\nStudy folder {folder}")
+        p = patient_of(folder)
+        self._patient_label.setText("\n".join([*((p.name, f"ID {p.hospital_id}") if p else (folder.name,)),
+                                               f"{n_series} series"]))
+        self._patient_label.setToolTip(f"Study folder {folder}")
+        self.btn_load_patient.setText("Load another patient")
 
     def _style(self):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        self.setMinimumWidth(theme.scaled(210))

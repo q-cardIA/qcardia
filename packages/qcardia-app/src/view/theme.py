@@ -10,7 +10,7 @@ import re
 import tempfile
 
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -228,12 +228,63 @@ def _draw_close(painter: QPainter):
     painter.drawLine(QPointF(23, 9), QPointF(9, 23))
 
 
+def _draw_grid(rows: int, cols: int, painter: QPainter):
+    """A diagram of a rows x cols grid, for the Grid button and menus."""
+    painter.drawRoundedRect(QRectF(4, 6, 24, 20), 2, 2)
+    for c in range(1, cols):
+        painter.drawLine(QPointF(4 + 24 * c / cols, 6), QPointF(4 + 24 * c / cols, 26))
+    for r in range(1, rows):
+        painter.drawLine(QPointF(4, 6 + 20 * r / rows), QPointF(28, 6 + 20 * r / rows))
+
+
+def _draw_folder(painter: QPainter):
+    painter.drawPolyline([QPointF(4, 25), QPointF(4, 8), QPointF(12, 8), QPointF(15, 11), QPointF(28, 11),
+                          QPointF(28, 25), QPointF(4, 25)])
+
+
+def _draw_heart(painter: QPainter):
+    path = QPainterPath(QPointF(16, 26))
+    path.cubicTo(QPointF(4, 18), QPointF(3, 9), QPointF(10, 7))
+    path.cubicTo(QPointF(13, 6), QPointF(15, 8), QPointF(16, 11))
+    path.cubicTo(QPointF(17, 8), QPointF(19, 6), QPointF(22, 7))
+    path.cubicTo(QPointF(29, 9), QPointF(28, 18), QPointF(16, 26))
+    painter.drawPath(path)
+
+
+def _draw_lge(painter: QPainter):
+    """A short-axis myocardium ring with a bright scar."""
+    painter.drawEllipse(QRectF(7, 7, 18, 18))
+    pen = painter.pen()
+    pen.setWidthF(5)
+    painter.setPen(pen)
+    painter.drawArc(QRectF(7, 7, 18, 18), 20 * 16, 80 * 16)
+
+
+def _draw_uptake(painter: QPainter):
+    """A perfusion signal curve: flat, then the contrast arrives and it ends a bit higher."""
+    path = QPainterPath(QPointF(4, 23))
+    path.lineTo(QPointF(13, 23))
+    path.cubicTo(QPointF(17, 23), QPointF(18, 8), QPointF(22, 8))
+    path.cubicTo(QPointF(25, 8), QPointF(25.5, 13), QPointF(28, 13))
+    painter.drawPath(path)
+
+
+def _draw_flow(painter: QPainter):
+    for y in (11, 20):
+        path = QPainterPath(QPointF(4, y))
+        path.cubicTo(QPointF(9, y - 5), QPointF(13, y + 5), QPointF(18, y))
+        path.cubicTo(QPointF(21, y - 3), QPointF(24, y - 3), QPointF(28, y))
+        painter.drawPath(path)
+    painter.drawPolyline([QPointF(24, 16.5), QPointF(28, 20), QPointF(24, 23.5)])
+
+
 _LINE_ICONS = {"mic": _draw_mic, "arrow_up": _draw_arrow_up, "close": _draw_close,
-               "chevron_down": _draw_chevron_down, "chevron_up": _draw_chevron_up, "chevron_right": _draw_chevron_right}
+               "chevron_down": _draw_chevron_down, "chevron_up": _draw_chevron_up, "chevron_right": _draw_chevron_right,
+               "folder": _draw_folder, "heart": _draw_heart, "lge": _draw_lge, "uptake": _draw_uptake, "flow": _draw_flow}
 
 
 def line_icon(kind: str, token: str) -> QIcon:
-    """A drawn line icon in a token colour, greyed out when its button is disabled."""
+    """A drawn line icon in a token colour, greyed out when its button is disabled. "grid:2x3" is a grid diagram."""
     return _line_icon(kind, color(token).name(), color("text_disabled").name())
 
 
@@ -250,7 +301,10 @@ def _line_icon(kind: str, normal: str, disabled: str) -> QIcon:
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
-        _LINE_ICONS[kind](painter)
+        if kind.startswith("grid:"):
+            _draw_grid(*map(int, kind[5:].split("x")), painter)
+        else:
+            _LINE_ICONS[kind](painter)
         painter.end()
         icon.addPixmap(pixmap, mode)
     return icon

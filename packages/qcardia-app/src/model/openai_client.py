@@ -2,7 +2,7 @@
 
 Kept apart from ollama_client rather than branching inside it, since the two share
 nothing but the Qt signals and only one is ever held at a time. utils.llm_devices picks
-the class and rebinds the two constants below, so both are read at call time.
+the class and rebinds the names below, so all are read at call time.
 
 Any /v1 endpoint with a bearer key works: anything non-standard a particular gateway
 needs goes in that device's `extra_body`, not in the payload built here.
@@ -10,13 +10,16 @@ needs goes in that device's `extra_body`, not in the payload built here.
 from __future__ import annotations
 
 import json
+from typing import Callable
 
 import requests
 
 from model.background_worker import ChatWorker
 
 CHAT_URL: str = ""  # rebound by utils.llm_devices.apply(); empty until a device is selected
-API_KEY: str = ""
+# Called per request, not a stored string: a token device's key lapses every 30 minutes.
+# refresh=True asks for a new token after the server rejected the old one.
+get_api_key: Callable[..., str] = lambda refresh=False: ""
 EXTRA_BODY: dict = {}  # the device's non-standard request fields, if it needs any
 
 MAX_TOKENS = 4096  # reply cap; quoted back to the user when a reply hits it
@@ -73,7 +76,7 @@ def _unreachable(exc: requests.RequestException, model: str) -> str:
         return f"Could not reach the gateway — is the VPN it needs connected? ({exc})"
     if response.status_code in (401, 403):
         return (f"The gateway rejected the API key (HTTP {response.status_code}). Check the "
-                f"variable named by this device's api_key_env.")
+                f"variables this device names in llm_devices.json.")
     if response.status_code == 404:
         return f"'{model}' is not available on this gateway — pick another in the model list."
     return f"The gateway answered HTTP {response.status_code}."
@@ -102,11 +105,18 @@ class OpenAIWorker(ChatWorker):
         if self._tools:
             payload["tools"] = self._tools
 
-        try:
-            response = requests.post(
-                CHAT_URL, json=payload, headers={"Authorization": f"Bearer {API_KEY}"},
+        def post(refresh: bool = False) -> requests.Response:
+            return requests.post(
+                CHAT_URL, json=payload, headers={"Authorization": f"Bearer {get_api_key(refresh)}"},
                 stream=True, timeout=180,
             )
+
+        try:
+            response = post()
+            if response.status_code == 401:
+                # A token can lapse between the cache check and the server; one new token settles it.
+                response.close()
+                response = post(refresh=True)
             response.raise_for_status()
         except requests.Timeout:
             # Headers don't arrive until generation starts, so a cold start times out here.
@@ -115,10 +125,12 @@ class OpenAIWorker(ChatWorker):
         except requests.RequestException as e:
             self.error.emit(_unreachable(e, self._model))
             return
+        except ValueError as e:  # the token server answered without a token
+            self.error.emit(str(e))
+            return
 
-        # SSE carries no charset, so requests leaves encoding unset and would hand back
-        # raw bytes; without this the decode below is skipped and every line is bytes.
-        response.encoding = response.encoding or "utf-8"
+        # SSE is UTF-8 and carries no charset, for which requests would guess ISO-8859-1.
+        response.encoding = "utf-8"
 
         # Arguments stream in fragments, so collect per index: one turn can request several tools.
         partial: dict[int, dict] = {}

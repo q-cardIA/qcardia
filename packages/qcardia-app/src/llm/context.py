@@ -19,12 +19,19 @@ def build_state_block(
     speed: float = 1.0,
     level_matches: dict[str, list[int]] | None = None,
     split: tuple[int, int, int, int] | None = None,
+    perfusion: dict[str, tuple[int, int]] | None = None,
+    perfusion_playing: str | None = None,
+    perfusion_speed: float = 1.0,
 ) -> str:
     if time_frame:
         current, total = time_frame
         time_line = f"Time frame: {current + 1} / {total}" + (f"  (cines playing at {speed:g}x)" if playing else "")
     else:
         time_line = "Time frame: n/a"
+    if perfusion:  # run -> (frame, frames), the frame 0-based
+        time_line += ("\nPerfusion frames: " + ", ".join(f"{k} {t + 1} / {n}" for k, (t, n) in perfusion.items())
+                      + f"  (perfusion speed {perfusion_speed:g}x"
+                      + (f", {perfusion_playing} playing)" if perfusion_playing in perfusion else ")"))
 
     rows, cols = grid
     panel_lines = []
@@ -43,6 +50,8 @@ def build_state_block(
             line += "  seg hidden"
         if panel.get("own_window"):
             line += "  own window"
+        if panel.get("own_frame"):
+            line += "  own frame %d/%d" % (panel["own_frame"][0] + 1, panel["own_frame"][1])
         if panel.get("loading"):
             line += "  (loading)"
         panel_lines.append(line)

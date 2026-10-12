@@ -23,7 +23,7 @@ _KEY_ACTIONS = {
     "slice_prev": ("slice", -1), "slice_next": ("slice", 1),
     "first_slice": ("first", 0), "last_slice": ("last", 0),
     "frame_prev": ("frame", -1), "frame_next": ("frame", 1), "play": ("play", 0),
-    "link": ("link", 0), "contours": ("contours", 0),
+    "link": ("link", 0), "own_frame": ("own_frame", 0), "contours": ("contours", 0),
 }
 _REPEATING = {"slice_prev", "slice_next", "frame_prev", "frame_next", "zoom_in", "zoom_out"}
 
@@ -51,6 +51,12 @@ def _draw_link(painter):  # two chain links at 45 degrees
     painter.drawRoundedRect(QRectF(-2, -5, 16, 10), 5, 5)
 
 
+def _draw_clock(painter):  # a clock face at ten past
+    painter.drawEllipse(QPointF(16, 16), 12, 12)
+    painter.drawLine(QPointF(16, 16), QPointF(16, 8))
+    painter.drawLine(QPointF(16, 16), QPointF(22, 19))
+
+
 def _draw_contours(painter):  # short-axis cine segmentation: thick LV ring, RV crescent at the upper left
     rv = QPainterPath(QPointF(23.6, 10.0))  # LV at 70 degrees
     rv.cubicTo(QPointF(12, -4), QPointF(-4, 11), QPointF(13.6, 24.3))  # to 220 degrees
@@ -67,7 +73,7 @@ class CustomQGraphicsView(QGraphicsView):
 
     coordinates_changed = Signal(int, int)
     contours_updated = Signal(list)
-    action_requested = Signal(str, int)  # ("slice"|"frame", step), or (first|last|play|reset|link|contours, 0)
+    action_requested = Signal(str, int)  # ("slice"|"frame", step), or (first|last|play|reset|link|own_frame|contours, 0)
     window_dragged = Signal(float, float)  # screen pixels moved (dx, dy)
     view_changed = Signal(float, float, float)
     focused = Signal()
@@ -165,6 +171,8 @@ class CustomQGraphicsView(QGraphicsView):
         buttons = []
         for action, tip, draw in (("link", "Link zoom, pan and scrolling with the other linked panels of this view (SAX, 4CH, ...)",
                                    _draw_link),
+                                  ("own_frame", "Own time frame: the others play and scroll without this panel; select it "
+                                   "to scrub it alone (e.g. ED next to ES)", _draw_clock),
                                   ("contours", "Show contours in this panel", _draw_contours)):
             button = QToolButton(self)
             button.setCheckable(True)
@@ -176,22 +184,29 @@ class CustomQGraphicsView(QGraphicsView):
             button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(lambda _=False, a=action: self.action_requested.emit(a, 0))
             buttons.append(button)
-        self._link_button, self._contour_button = buttons
-        self._toggle_draws = list(zip(buttons, (_draw_link, _draw_contours)))
-        self._link_fade = QGraphicsOpacityEffect(self._link_button)
-        self._link_button.setGraphicsEffect(self._link_fade)
+        self._link_button, self._time_button, self._contour_button = buttons
+        self._toggle_draws = list(zip(buttons, (_draw_link, _draw_clock, _draw_contours)))
+        for button in (self._link_button, self._time_button):  # visible, faded, while off the default
+            button.setGraphicsEffect(QGraphicsOpacityEffect(button))
+        self._has_frames = False
         self._contour_button.setChecked(True)
         self.__show_toggles(False)
 
-    def set_panel_toggles(self, linked: bool, contours: bool):
+    def set_panel_toggles(self, linked: bool, contours: bool, own_frame: bool | None = None):
+        """own_frame None: the series has no frames, so no clock."""
         self._link_button.setChecked(linked)
         self._contour_button.setChecked(contours)
+        self._has_frames = own_frame is not None
+        self._time_button.setChecked(bool(own_frame))
         self.__show_toggles(self.underMouse())
 
     def __show_toggles(self, hover: bool):
         self._contour_button.setVisible(hover)
         self._link_button.setVisible(hover or not self._link_button.isChecked())
-        self._link_fade.setOpacity(1.0 if hover else 0.45)
+        self._time_button.setVisible(self._has_frames and (hover or self._time_button.isChecked()))
+        for button in (self._link_button, self._time_button):
+            button.graphicsEffect().setOpacity(1.0 if hover else 0.45)
+        self.__position_toggles()
 
     def enterEvent(self, event):
         self.__show_toggles(True)
@@ -203,7 +218,8 @@ class CustomQGraphicsView(QGraphicsView):
 
     def __position_toggles(self):
         margin, spacing = 8, 4
-        for i, button in enumerate((self._link_button, self._contour_button)):
+        shown = [b for b in (self._link_button, self._time_button, self._contour_button) if not b.isHidden()]
+        for i, button in enumerate(shown):  # right to left, no gap for a hidden one
             button.move(self.width() - margin - (i + 1) * (button.width() + spacing) + spacing,
                         self.height() - margin - button.height())
             button.raise_()

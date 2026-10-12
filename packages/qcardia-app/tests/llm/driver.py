@@ -105,7 +105,7 @@ def screen_after(cc: ChatController, calls: list[dict] = ()) -> dict:
     already: pass none."""
     run_calls(cc, list(calls))
     return {**cc.view.display_area_widget.state(), "segmentations": cc.dicom_controller.segmentations,
-            "playing": cc.view.playing, "speed": cc.view.cine_speed,
+            "playing": cc.view.playing, "speed": cc.view.cine_speed, "perfusion_speed": cc.view.perfusion_speed,
             "loaded": getattr(cc, "loaded_subjects", [])}
 
 

@@ -20,6 +20,11 @@ from utils.windowing import WINDOW_STEPS
 _ALL_OR_SOME_PANELS = {"type": "array", "items": {"type": "integer"},
                        "description": "Panel numbers; leave out for all panels."}
 
+# set_time_frame and set_playback act on the cines, or on a perfusion run's own frames.
+_TIME_SERIES_KEY = {"type": "string", "description": (
+    "Leave out for the cines. A perfusion run (PERF_STRESS_SAX, PERF_REST_SAX, PERF_SAX) for its own "
+    "frames, or 'perfusion' for every perfusion run.")}
+
 TOOL_SPECS = [
     {
         "type": "function",
@@ -85,9 +90,10 @@ TOOL_SPECS = [
             "name": "apply_preset",
             "description": (
                 "Apply a clinical hanging protocol: sets the grid AND fills the "
-                "panels, replacing the current layout. Prefer this over several "
-                "display_series calls. To also show a custom panel, call "
-                "apply_preset first, then display_series. Only offered for a "
+                "panels, replacing the current layout. The starting point for a "
+                "general request ('perfusion'); for a more specific one apply the "
+                "nearest preset first, then change it (display_series, set_grid, "
+                "set_time_frame, ...) in the same reply. Only offered for a "
                 "preset when at least one of its required series is loaded; if "
                 "a preset you want isn't in the enum below, say the data is "
                 "unavailable rather than calling a different tool. Fills every "
@@ -99,18 +105,22 @@ TOOL_SPECS = [
                 "properties": {
                     "preset": {
                         "type": "string",
-                        "enum": ["functional", "functional_complex", "viability", "perfusion",
-                                 "flow", "flow_aortic", "flow_pulmonary"],
+                        "enum": ["functional", "functional_complex", "viability", "lge", "perfusion",
+                                 "perfusion_lge", "flow", "flow_aortic", "flow_pulmonary"],
                         "description": (
                             "functional: ventricular/LV/RV function, ejection "
                             "fraction, volumes, wall motion (CINE only). "
-                            "functional_complex: extended functional, long-axis "
-                            "views plus SAX slices from apex to base; for "
-                            "per-slice or full SAX views. "
-                            "viability: scar, late gadolinium enhancement, "
-                            "infarct, fibrosis, transmurality (needs LGE). "
-                            "perfusion: perfusion, ischaemia, CAD, stress testing "
-                            "(needs PERF_STRESS_SAX, PERF_REST_SAX, or PERF_SAX). "
+                            "functional_complex: all cine SAX slices from base to "
+                            "apex next to the long-axis cines. "
+                            "lge: the four LGE views in a 2x2; scar, late gadolinium "
+                            "enhancement, infarct, fibrosis, transmurality (needs LGE). "
+                            "viability: the four cines above their LGE views (needs LGE); also "
+                            "'compare these with the LGE' while cines are shown. "
+                            "perfusion: a row of 3 slices per perfusion run, stress above "
+                            "rest; ischaemia, CAD, stress testing (needs PERF_STRESS_SAX, "
+                            "PERF_REST_SAX, or PERF_SAX). "
+                            "perfusion_lge: perfusion with the LGE SAX at the matching "
+                            "depths below it (needs perfusion and LGE_SAX). "
                             "flow: flow, phase contrast, cardiac output, regurgitation, "
                             "Qp:Qs; aortic flow on top and pulmonary flow below, or "
                             "whichever of the two was acquired (needs PC_AORTA or PC_MPA). "
@@ -182,10 +192,21 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "set_time_frame",
-            "description": "Jump all cine panels to a specific time frame.",
+            "description": (
+                "Jump all cine panels, or a perfusion run's panels, to a specific time frame. With panels, "
+                "only those panels go to the frame, as their own frame (e.g. ED in one panel, ES in another)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "series_key": _TIME_SERIES_KEY,
+                    "panels": {
+                        "type": "array", "items": {"type": "integer"},
+                        "description": (
+                            "Panel numbers that get this frame as their own; the other panels keep theirs. Leave "
+                            "out to put every panel of the series on this frame, also panels with their own."
+                        ),
+                    },
                     "frame": {
                         "type": "integer",
                         "description": (
@@ -333,17 +354,22 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "set_playback",
-            "description": "Play the cines as a movie or stop them, optionally at another speed.",
+            "description": (
+                "Play the cines, or a perfusion run, as a movie or stop them, optionally at another speed. "
+                "The cines and the perfusion have a speed each."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "playing": {"type": "boolean", "description": "true = play, false = stop."},
+                    "series_key": _TIME_SERIES_KEY,
                     "speed": {
                         "type": "number",
                         "enum": list(CINE_SPEEDS),
                         "description": (
-                            "Heartbeats per second: 1 = normal, 0.5 = half speed / slow motion, 2 = twice as "
-                            "fast. Leave out to keep the current speed (see 'cines playing at' in the state)."
+                            "1 = normal (cines: a heartbeat per second; perfusion: a run in four seconds), "
+                            "0.5 = half speed / slow motion, 2 = twice as fast. Leave out to keep the current "
+                            "speed (see the state block)."
                         ),
                     },
                 },

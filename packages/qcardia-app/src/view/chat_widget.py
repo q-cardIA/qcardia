@@ -33,6 +33,7 @@ from model.voice_input import (
     selected_input_device,
 )
 from utils import bindings, llm_devices
+from utils.hanging_protocols import preset_label
 from utils.app_config import (
     discover_local_gguf_files,
     gguf_model_tag,
@@ -61,7 +62,7 @@ _TOOL_SUMMARY_FORMATTERS = {
     "search_patients": lambda a: "Search patient database" + (f": {a['query']}" if a.get("query") else ""),
     "load_subject": lambda a: f"Load {patient_name(a.get('subject_id'))}",
     "run_segmentation": lambda a: f"Run {a.get('modality')} segmentation",
-    "apply_preset": lambda a: f"Apply {a.get('preset')} preset",
+    "apply_preset": lambda a: f"Show {preset_label(a.get('preset'))}",
     "display_series": lambda a: (
         f"Show {a.get('series_key')} in panel {a.get('panel_idx')}"
         # "transverse" is the default axis, not worth echoing back.
@@ -73,7 +74,7 @@ _TOOL_SUMMARY_FORMATTERS = {
     "set_grid": lambda a: f"Set a {a.get('rows')}x{a.get('cols')} grid",
     "set_split_grid": lambda a: (f"Split: {a.get('left_rows')}x{a.get('left_cols')} left, "
                                  f"{a.get('right_rows')}x{a.get('right_cols')} right"),
-    "zoom": lambda a: f"Zoom ({a.get('mode')})",
+    "zoom": lambda a: f"Zoom ({'ROI' if a.get('mode') == 'roi' else a.get('mode')})",
     "set_window": lambda a: (f"Window {a.get('series_key')}: {str(a.get('mode', '')).replace('_', ' ')}"
                              + (f" x{a['steps']}" if (a.get("steps") or 1) > 1 else "")
                              + (f" (panels {', '.join(map(str, a['panels']))})" if a.get("panels") else "")),
@@ -166,9 +167,13 @@ class _ToolCallBubble(QFrame):
         layout.setContentsMargins(8, 5, 8, 5)
         layout.setSpacing(2)
 
-        self._header = QPushButton(_tool_call_summary(name, arguments))
+        self._summary = _tool_call_summary(name, arguments)
+        self._header = QPushButton(self._summary)
         self._header.setProperty("role", "toolCallHeader")
         self._header.setCursor(Qt.PointingHandCursor)
+        self._header.setToolTip(self._summary)
+        # Never wider than the panel: a long summary is cut with "…" (resizeEvent), not the whole chat.
+        self._header.setSizePolicy(QSizePolicy.Ignored, self._header.sizePolicy().verticalPolicy())
         self._header.clicked.connect(self._toggle)
         layout.addWidget(self._header)
 
@@ -196,6 +201,11 @@ class _ToolCallBubble(QFrame):
         self._expanded = not self._expanded
         self._detail.setVisible(self._expanded)
         self._result_label.setVisible(self._expanded and self._has_notable_result)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        room = self._header.width() - 4  # spare, so the cut text never touches the edge
+        self._header.setText(self._header.fontMetrics().elidedText(self._summary, Qt.ElideRight, room))
 
     def set_result(self, result: str):
         self._has_notable_result = any(m in result.lower() for m in _FAILURE_MARKERS)
