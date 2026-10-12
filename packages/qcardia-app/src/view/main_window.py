@@ -474,6 +474,8 @@ class MainWindow(QMainWindow):
         # The simple grids as diagrams, beside View as in CVI42; the split layouts are the assistant's.
         self.grid_menu = StickyMenu("&Grid", bar)
         self.grid_menu.aboutToShow.connect(self._rebuild_grid_menu)
+        # The native macOS menu bar hides an empty menu, so aboutToShow would never fire.
+        self._rebuild_grid_menu()
         bar.addMenu(self.grid_menu)
 
         tools_menu = StickyMenu("&Tools", bar)
