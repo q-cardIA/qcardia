@@ -506,6 +506,7 @@ class CentralDisplayAreaWidget(QWidget):
             return
         self._panel_series_key[panel_idx] = None
         self._panel_time[panel_idx] = None
+        self._sync_toggles(panel_idx)
         p = self._panels[panel_idx]
         p.title_label.setText(_EMPTY_TITLE)
         p.slice_label.setText("")
@@ -592,6 +593,7 @@ class CentralDisplayAreaWidget(QWidget):
             if self._panel_time[i] is None:
                 self._own_axes += 1
                 self._panel_time[i] = f"{self.time_axis(self._panel_series_key[i])}#{self._own_axes}"
+                self._sync_toggles(i)
             self.set_time_index(t, self._panel_time[i])
         if self._selected in panels:  # the time slider follows the selected panel
             self._set_time_axis(self._panel_time_axis(self._selected) or CINE_TIME_AXIS)
@@ -599,12 +601,15 @@ class CentralDisplayAreaWidget(QWidget):
     def release_frames(self, axis: str):
         """Panels with their own frame of axis (see hold_frame) show axis' frame again."""
         for i in range(self.n_panels):
-            own = self._panel_time[i]
-            if own and self.time_axis(self._panel_series_key[i]) == axis:
-                self._panel_time[i] = None
-                self._time_index.pop(own, None)
-                self._update_panel(i)
+            if self._panel_time[i] and self.time_axis(self._panel_series_key[i]) == axis:
+                self._release_frame(i)
         self._show_cine_time_if_unseen()
+
+    def _release_frame(self, panel_idx: int):
+        self._time_index.pop(self._panel_time[panel_idx], None)
+        self._panel_time[panel_idx] = None
+        self._sync_toggles(panel_idx)
+        self._update_panel(panel_idx)
 
     def panel_frames(self, panel_idx: int) -> int:
         """The frame count of a panel's series; 0 without frames."""
@@ -966,8 +971,9 @@ class CentralDisplayAreaWidget(QWidget):
 
     def _sync_toggles(self, panel_idx: int):
         # Lit only while contours show: a series without a segmentation has none to show.
+        own = bool(self._panel_time[panel_idx]) if self._panel_time_axis(panel_idx) else None
         self._panels[panel_idx].viewer.set_panel_toggles(self._panel_linked[panel_idx],
-                                                        self._shows_segmentation(panel_idx))
+                                                        self._shows_segmentation(panel_idx), own)
 
     # ── Viewer input ─────────────────────────────────────────────────────
 
@@ -1000,6 +1006,12 @@ class CentralDisplayAreaWidget(QWidget):
             self._sync_toggles(panel_idx)
             if linked:
                 self._panels[panel_idx].viewer.set_view(self._view_of(panel_idx))
+        elif action == "own_frame" and self._panel_time_axis(panel_idx):
+            if self._panel_time[panel_idx]:
+                self._release_frame(panel_idx)  # back on the others' frame
+            else:
+                self.hold_frame([panel_idx], self._time_index.get(self._panel_time_axis(panel_idx), 0))
+            self._select_time_axis(panel_idx)  # the time slider: this panel alone, or the others again
         elif action == "contours":
             if key in self._segmentations:
                 self._panel_contours[panel_idx] = not self._panel_contours[panel_idx]
