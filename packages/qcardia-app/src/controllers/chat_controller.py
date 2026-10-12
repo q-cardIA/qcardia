@@ -222,6 +222,26 @@ class ChatController:
         axes = runs if key == "PERFUSION" else [k for k in runs if k == key]
         return axes or f"Not done: no perfusion run '{key}' is loaded (loaded: {', '.join(runs) or 'none'})."
 
+    def _hold_frame(self, arguments: dict) -> str:
+        """set_time_frame with panels: those panels show the frame as their own, e.g. ED next to ES."""
+        widget = self.view.display_area_widget
+        panels = _panel_list(arguments, widget.n_panels)
+        if isinstance(panels, str):
+            return panels
+        frame = int(arguments["frame"])
+        totals = {i: n for i in panels if (n := widget.panel_frames(i))}
+        if not totals:
+            return f"Not done: {_panels_text(panels)} show no series with frames."
+        if any(not (1 <= frame <= n) for n in totals.values()):
+            return "frame out of range (" + ", ".join(f"panel {i}: 1-{n}" for i, n in totals.items()) + ")."
+        stopped = self.view.is_playing()  # a frame asked for is a frame to look at
+        if stopped:
+            self.view.toggle_cine()
+        widget.hold_frame(list(totals), frame - 1)
+        return (f"{'Stopped playing; showing' if stopped else 'Showing'} frame {frame} in {_panels_text(totals)} only, "
+                f"as {'their' if len(totals) > 1 else 'its'} own frame; set_time_frame without panels puts every "
+                "panel on one frame again.")
+
     def _level_matches(self) -> dict[str, list[int]]:
         """For each other loaded short-axis stack, its slices nearest the CINE_SAX base, mid and apex
         slices at the current frame (0-based), so the model can show those levels in it too."""
@@ -545,38 +565,24 @@ class ChatController:
                 return f"Displaying {series_key} ({axis}) in panel {panel_idx}{at}."
 
             if name == "set_time_frame":
+                if arguments.get("panels"):  # e.g. ED next to ES; [] or "" is no panel
+                    return self._hold_frame(arguments)
                 widget = self.view.display_area_widget
+                axes = self._time_axes(arguments)
+                if isinstance(axes, str):
+                    return axes
                 frame = int(arguments["frame"])
-                if arguments.get("panels") is not None:  # their own frame, e.g. ED next to ES
-                    panels = _panel_list(arguments, widget.n_panels)
-                    if isinstance(panels, str):
-                        return panels
-                    totals = {i: widget.panel_frames(i) for i in panels if widget.panel_frames(i)}
-                    if not totals:
-                        return f"Not done: {_panels_text(panels)} show no series with frames."
-                    if any(not (1 <= frame <= n) for n in totals.values()):
-                        return "frame out of range (" + ", ".join(f"panel {i}: 1-{n}" for i, n in totals.items()) + ")."
-                    axes = []
-                else:
-                    axes = self._time_axes(arguments)
-                    if isinstance(axes, str):
-                        return axes
-                    totals = {axis: widget.n_frames(axis) for axis in axes}
-                    if any(not (1 <= frame <= total) for total in totals.values()):
-                        return "frame out of range (" + ", ".join(f"{a}: 1-{n}" for a, n in totals.items()) + ")."
+                totals = {axis: widget.n_frames(axis) for axis in axes}
+                if any(not (1 <= frame <= total) for total in totals.values()):
+                    return "frame out of range (" + ", ".join(f"{a}: 1-{n}" for a, n in totals.items()) + ")."
                 stopped = self.view.is_playing()  # a frame asked for is a frame to look at
                 if stopped:
                     self.view.toggle_cine()
-                done = "Stopped playing; showing" if stopped else "Showing"
-                if not axes:
-                    widget.hold_frame(list(totals), frame - 1)
-                    return (f"{done} frame {frame} in {_panels_text(totals)} only, as {'their' if len(totals) > 1 else 'its'} own frame; "
-                            "set_time_frame without panels puts every panel on one frame again.")
                 for axis in axes:
                     widget.release_frames(axis)
                     widget.set_time_index(frame - 1, axis)
                 shown = ", ".join(("cine" if a == CINE_TIME_AXIS else a) + f" frame {frame}/{n}" for a, n in totals.items())
-                return f"{done} {shown}."
+                return f"{'Stopped playing; showing' if stopped else 'Showing'} {shown}."
 
             if name == "set_window":
                 panels = _panel_list(arguments, self.view.display_area_widget.n_panels) if arguments.get("panels") else None

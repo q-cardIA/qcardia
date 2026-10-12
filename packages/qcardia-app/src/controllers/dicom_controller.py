@@ -335,6 +335,7 @@ class DICOMController:
             self.view.show_info("Go to " + phase, "ED and ES come from the CINE SAX segmentation. "
                                 "Segment it first (Tools > Predict Labels).")
             return
+        self._widget.release_frames(CINE_TIME_AXIS)
         self._widget.set_time_index(sax[phase.lower()], CINE_TIME_AXIS)
 
     def is_segmenting(self, series_key: str) -> bool:

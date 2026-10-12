@@ -186,11 +186,8 @@ class CustomQGraphicsView(QGraphicsView):
             buttons.append(button)
         self._link_button, self._time_button, self._contour_button = buttons
         self._toggle_draws = list(zip(buttons, (_draw_link, _draw_clock, _draw_contours)))
-        self._fades = []  # link and clock stay visible, faded, while they show a state off the default
-        for button in (self._link_button, self._time_button):
-            fade = QGraphicsOpacityEffect(button)
-            button.setGraphicsEffect(fade)
-            self._fades.append(fade)
+        for button in (self._link_button, self._time_button):  # visible, faded, while off the default
+            button.setGraphicsEffect(QGraphicsOpacityEffect(button))
         self._has_frames = False
         self._contour_button.setChecked(True)
         self.__show_toggles(False)
@@ -207,8 +204,8 @@ class CustomQGraphicsView(QGraphicsView):
         self._contour_button.setVisible(hover)
         self._link_button.setVisible(hover or not self._link_button.isChecked())
         self._time_button.setVisible(self._has_frames and (hover or self._time_button.isChecked()))
-        for fade in self._fades:
-            fade.setOpacity(1.0 if hover else 0.45)
+        for button in (self._link_button, self._time_button):
+            button.graphicsEffect().setOpacity(1.0 if hover else 0.45)
         self.__position_toggles()
 
     def enterEvent(self, event):

@@ -942,7 +942,6 @@ _add(
 )
 
 
-
 def frames_are(*frames: int):
     """The panels with frames show these frames, in any panel order."""
     def check(s):
@@ -1327,20 +1326,18 @@ def _levels(seq: str, slices: list[int]):
     return check
 
 
-def _viability_es_contours(s):
-    keys = [k for k, _, _ in s["panels"]]
-    if s["grid"] != (2, 4) or set(keys[:4]) != {"CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"} \
-            or set(keys[4:]) != {"LGE_4CH", "LGE_3CH", "LGE_2CH", "LGE_SAX"}:
-        return f"grid {s['grid']}, panels {keys}: expected the cines above their LGE views"
-    if not all(s["contours"][:4]):
-        return f"contours {s['contours'][:4]} on the cines, expected all on"
-
-
 def _cines_over_lge(s):
     keys = [k for k, _, _ in s["panels"]]
     if s["grid"] != (2, 4) or set(keys[:4]) != {"CINE_4CH", "CINE_3CH", "CINE_2CH", "CINE_SAX"} \
             or set(keys[4:]) != {"LGE_4CH", "LGE_3CH", "LGE_2CH", "LGE_SAX"}:
         return f"grid {s['grid']}, panels {keys}: expected the cines above their LGE views"
+
+
+def _viability_es_contours(s):
+    if problem := _cines_over_lge(s):
+        return problem
+    if not all(s["contours"][:4]):
+        return f"contours {s['contours'][:4]} on the cines, expected all on"
 
 
 def _lge_dark(s):

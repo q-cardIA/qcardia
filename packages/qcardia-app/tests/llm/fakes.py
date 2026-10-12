@@ -68,7 +68,6 @@ def phantom_lge() -> tuple[np.ndarray, np.ndarray]:
 
 DEFAULT_WINDOW = (300.0, 600.0)
 
-
 # The patient database the cases see (the app reads patients.csv in the data folder): made-up names, two
 # Emilys for a request that must ask which one. The folders are the cases' default available_subjects.
 _NAMES = ["Lucy Hughes", "Isabel Hall", "Michael King", "Alice White", "William Wilson", "Florence Johnson",
