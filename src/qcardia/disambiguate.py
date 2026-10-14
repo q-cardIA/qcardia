@@ -66,11 +66,25 @@ Given the metadata below for each candidate series, identify which ONE series \
 is the primary series for this class, and briefly classify the role of each \
 of the others (planning, repeat, or other).
 
-Candidates:
+{class_preference}Candidates:
 {candidates_json}
 
 Respond with the primary series name and a role + one-sentence reasoning for \
 every candidate, including the primary one."""
+
+# Extra guidance for some sequence classes, added to the prompt before the
+# candidates. It only decides between series that are otherwise suitable. The
+# cardisort sequence label (e.g. DBLGE or WBLGE) is not used for this: it is not
+# reliable enough.
+CLASS_PREFERENCES = {
+    "LGE": (
+        "For LGE, prefer a dark-blood (black-blood, DB, flow-independent "
+        "dark-blood, FIDDLE, etc.) series over a bright/white-blood one when both "
+        "look diagnostic. This preference applies only between otherwise suitable "
+        "series; the rules above still decide what is planning or a repeat. Judge "
+        "this only from the metadata given; sites name these series differently."
+    ),
+}
 
 
 def summarize_sequence_dir(sequence_dir: Path, datasets: list[pydicom.Dataset]) -> dict:
@@ -97,9 +111,11 @@ def disambiguate_duplicates(
     Raises RuntimeError if Ollama is unreachable or returns an unparsable response.
     """
     sequence_name, plane_name = class_label
+    class_preference = CLASS_PREFERENCES.get(sequence_name)
     prompt = PROMPT_TEMPLATE.format(
         sequence_name=sequence_name,
         plane_name=plane_name,
+        class_preference=f"{class_preference}\n\n" if class_preference else "",
         candidates_json=json.dumps(candidates, indent=2),
     )
 
