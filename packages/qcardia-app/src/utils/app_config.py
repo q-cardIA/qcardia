@@ -66,7 +66,7 @@ def list_subjects() -> list[str]:
     return sorted(e.name for e in folder.iterdir() if e.is_dir() and e.name[0] != ".")
 
 
-# A patient list: per subject folder a made-up name and hospital ID (src/tools/make_patient_db.py). A
+# A patient list: per subject folder a made-up name and hospital ID (columns hospital_id,name,folder). A
 # chosen folder uses the patients.csv in it, if any, for the names.
 PATIENTS_CSV_NAME = "patients.csv"
 
