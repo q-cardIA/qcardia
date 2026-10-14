@@ -1,3 +1,4 @@
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,13 +16,18 @@ from qcardia.disambiguate import (
     select_perfusion_series,
     summarize_sequence_dir,
 )
+from qcardia.meshfit import export_for_cmrpro, fit_mesh
 from qcardia.series import CineSeries, LGESeries, PerfusionSeries
+from qcardia.utils import get_data_directory
 
 CARDISORT_WANDB_RUN_PATH = Path.cwd() / "wandb" / "new_cardisort"
 LGE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "lge-seg"
 CINE_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "cine-seg"
 LAX_SEG_WANDB_RUN_PATH = Path.cwd() / "wandb" / "CINE_4CH"
 PATH_TO_DATASET = Path.cwd() / "data"
+# cmrpro source checkout (no package metadata, so imported from its folder).
+CMRPRO_PATH = Path.home() / "Downloads" / "cmrpro-main"
+sys.path.insert(0, str(CMRPRO_PATH))
 
 patient_list = natsorted([f for f in PATH_TO_DATASET.iterdir() if f.is_dir()])
 
@@ -104,6 +110,20 @@ for patient in patient_list[:]:
         )
         cine_seq.save_predictions(Path(f"{cine_dir}_segmentation"))
         print(f"  {cine_dir} -> {cine_segmentation.shape}")
+
+        # cmrpro needs the 4CH view for the mitral valve and the long axis.
+        if cine_4ch_dir is None:
+            print(f"  {cine_dir}: no 4CH cine, skipping mesh fitting")
+            continue
+        lax_seq = CineSeries(get_data_directory(cine_4ch_dir))
+        lax_seq.predict_segmentation(LAX_SEG_WANDB_RUN_PATH)
+        meshfit_dir = Path(f"{cine_dir}_meshfit")
+        export_for_cmrpro(meshfit_dir / "segmentations", cine_seq, lax_seq)
+        fit_mesh(
+            meshfit_dir / "segmentations",
+            meshfit_dir / "meshfitting",
+            CMRPRO_PATH / "config.yaml",
+        )
 
     # db_lge_sax_dirs = [
     #     sequence_dir

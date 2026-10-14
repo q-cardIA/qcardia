@@ -8,6 +8,7 @@ dependencies = [
     "opencv-python==4.10.0.84",
     "requests>=2.31.0",
     "tqdm>=4.66.0",
+    "pyvista>=0.44",
     # ContextUNet2d/is_transformer_model (context-unet) and the LA-SAx intersection
     # geometry (context-la-sampling) haven't landed on either package's main branch
     # yet. Both imports are lazy (see qcardia.inference), so a plain-UNet install
