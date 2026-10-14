@@ -626,6 +626,7 @@ class MainWindow(QMainWindow):
         long as a whole run at the current speed."""
         self._play_range = (first, last)
         self.time_slider.setValue(first)
+        self.time_label.setText(f"Time Frame: {first + 1} / {self.time_slider.maximum() + 1}  (loop {first + 1}-{last + 1})")
         self._play_timer.start(self._play_interval())
 
     def log_screen(self):
