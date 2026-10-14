@@ -21,6 +21,7 @@ from qcardia.analysis import (
 from qcardia.cardisort import (
     classify_sequence_dir,
     get_sequence_dirs,
+    group_sequence_dirs,
     load_cardisort_model,
     load_series_datasets,
 )
@@ -29,6 +30,7 @@ from qcardia.disambiguate import (
     PERFUSION_SEQUENCE_NAMES,
     disambiguate_duplicates,
     select_flow_series,
+    select_lge_series,
     select_perfusion_series,
     summarize_sequence_dir,
 )
@@ -126,6 +128,7 @@ class DICOMModel:
         self._series_dirs: dict[str, Path] = {}
         self._perfusion_dirs: dict[str, list[Path]] = {}
         self._flow_dirs: dict[str, list[Path]] = {}
+        self._lge_dirs: dict[Path, list[Path]] = {}  # an LGE folder -> the folders of its acquisition
         self.analysis: dict[str, dict] = {}  # per segmented series, see _analyse
         self._load_segmentation_model()
 
@@ -170,8 +173,8 @@ class DICOMModel:
         self.series[series_key] = PerfusionSeries(folders)
         return self._process_temporal_volumes(series_key)
 
-    def load_lge_series(self, folder_path, series_key: str):
-        self.series[series_key] = LGESeries(Path(folder_path))
+    def load_lge_series(self, folders: list[Path], series_key: str):
+        self.series[series_key] = LGESeries([Path(f) for f in folders])
         return self._build_lge_volume(series_key)
 
     def _build_lge_volume(self, series_key: str):
@@ -500,16 +503,22 @@ class DICOMModel:
         model, config = self._get_cardisort_model()
         sequence_dirs = get_sequence_dirs(folder_path)
 
-        descriptors = []
-        for seq_dir in sequence_dirs:
+        # Siemens splits an acquisition into series (e.g. a perfusion run's slices and AIF): classified together.
+        prediction_by_dir = {}
+        for group in group_sequence_dirs(sequence_dirs):
             prediction = classify_sequence_dir(
-                seq_dir,
+                group,
                 model,
                 config["model"]["nr_input_channels"],
                 tuple(config["data"]["target_pixdim"]),
                 tuple(config["data"]["target_size"]),
                 config["data"]["image_grid_sample_mode"],
             )
+            prediction_by_dir.update(dict.fromkeys(group, prediction))
+
+        descriptors = []
+        for seq_dir in sequence_dirs:
+            prediction = prediction_by_dir[seq_dir]
             if prediction is None:
                 descriptors.append(SequenceDescriptor(seq_dir, None, None, None))
                 continue
@@ -534,6 +543,7 @@ class DICOMModel:
 
         classified: dict[str, Path] = {}
         resolved: dict[str, dict] = {}
+        self._lge_dirs = {}
         perfusion_entry = self._assign_perfusion_keys(descriptors, primary_by_key)
         if perfusion_entry is not None:
             resolved[PERFUSION_CACHE_KEY] = perfusion_entry
@@ -558,10 +568,15 @@ class DICOMModel:
                 for d in group:
                     d.is_primary = d.path == dirs[0]
                 continue
+            if key.startswith("LGE_"):  # a Siemens LGE is a magnitude and a PSIR series: one candidate
+                acquisitions = select_lge_series(dirs)
+                self._lge_dirs.update({p: a for a in acquisitions for p in a})
+                dirs = [a[0] for a in acquisitions]
             primary, confident = self._resolve_primary_dir(key, dirs, primary_by_key)
             classified[key] = primary
+            primary_dirs = self._lge_dirs.get(primary, [primary])
             for d in group:
-                d.is_primary = d.path == primary
+                d.is_primary = d.path in primary_dirs
             # A fallback guess must not be cached, or it can never be revisited.
             if len(dirs) > 1 and confident:
                 resolved[key] = {"candidates": sorted(p.name for p in dirs), "primary": primary.name}
@@ -690,7 +705,7 @@ class DICOMModel:
             volume = flow.get_velocity_array()[:, np.newaxis]  # (T, 1, H, W), as a cine
             info = {"volume": volume, "is_temporal": True, "num_frames": volume.shape[0]}
         else:
-            volume, _slice_positions = self.load_lge_series(seq_dir, key)
+            volume, _slice_positions = self.load_lge_series(self._lge_dirs.get(Path(seq_dir), [seq_dir]), key)
             info = {"volume": volume, "is_temporal": False, "num_frames": None}
         info["geometry"] = self.get_geometry(key)
         info["window"] = self._default_window(key, info["volume"])
@@ -719,6 +734,7 @@ class DICOMModel:
         self._series_dirs = {}
         self._perfusion_dirs = {}
         self._flow_dirs = {}
+        self._lge_dirs = {}
         self.analysis = {}
         self.subject_folder = None
         self.folder_path = None

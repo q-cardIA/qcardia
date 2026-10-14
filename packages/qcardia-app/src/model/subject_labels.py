@@ -6,6 +6,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 SIDECAR_NAME = ".cardisort.json"
+# Older labels are made again. 2: Siemens series of one protocol are classified together.
+# 3: the duplicate disambiguation prefers dark-blood LGE.
+LABELS_VERSION = 3
 
 
 @dataclass
@@ -27,12 +30,14 @@ def sidecar_path(subject_dir: Path) -> Path:
 
 
 def load_labels(subject_dir: Path) -> SubjectLabels | None:
-    """None if the subject has no sidecar yet, or it can't be parsed."""
+    """None if the subject has no sidecar yet, it can't be parsed, or it is from an older version."""
     path = sidecar_path(subject_dir)
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("version") != LABELS_VERSION:
+            return None
         series = [SeriesLabel(**s) for s in data.get("series", [])]
         return SubjectLabels(series=series, primary_by_key=data.get("primary_by_key", {}))
     except Exception:
@@ -40,7 +45,8 @@ def load_labels(subject_dir: Path) -> SubjectLabels | None:
 
 
 def save_labels(subject_dir: Path, labels: SubjectLabels) -> None:
-    data = {"series": [asdict(s) for s in labels.series], "primary_by_key": labels.primary_by_key}
+    data = {"version": LABELS_VERSION, "series": [asdict(s) for s in labels.series],
+            "primary_by_key": labels.primary_by_key}
     sidecar_path(subject_dir).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 

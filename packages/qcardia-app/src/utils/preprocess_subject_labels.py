@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from model.dicom_model import DICOMModel
-from model.subject_labels import save_labels, sidecar_path
+from model.subject_labels import load_labels, save_labels, sidecar_path
 from utils.app_config import data_dir
 
 
@@ -36,7 +36,7 @@ def main():
         if not folder.is_dir():
             print(f"{name}: folder not found, skipping")
             continue
-        if sidecar_path(folder).exists() and not args.force:
+        if load_labels(folder) is not None and not args.force:  # an older version is made again
             print(f"{name}: already cached, skipping")
             continue
         try:
