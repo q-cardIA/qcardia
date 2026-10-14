@@ -58,6 +58,20 @@ _FAILURE_MARKERS = ("failed", "not found", "not loaded", "out of range", "unknow
 # subject 3" instead of raw JSON — the exact parsed arguments are still
 # available on click, mirroring how agentic coding UIs collapse tool calls
 # to a summary line with an expandable detail underneath.
+def _time_series(a: dict) -> str:
+    """What a frame or playback call acts on: the cines, unless it names a perfusion run (see llm/tools.py)."""
+    key = str(a.get("series_key") or "")
+    if not key or key.upper() in ("CINE", "CINES"):
+        return "the cines"
+    return "the perfusion" if key.lower() == "perfusion" else key
+
+
+def _time_where(a: dict) -> str:
+    if a.get("panels"):
+        return f" in panel{'s' * (len(a['panels']) > 1)} {', '.join(map(str, a['panels']))}"
+    return f" of {_time_series(a)}" if a.get("series_key") else ""
+
+
 _TOOL_SUMMARY_FORMATTERS = {
     "search_patients": lambda a: "Search patient database" + (f": {a['query']}" if a.get("query") else ""),
     "load_subject": lambda a: f"Load {patient_name(a.get('subject_id'))}",
@@ -70,7 +84,7 @@ _TOOL_SUMMARY_FORMATTERS = {
         + (f", slice {a['slice']}" if a.get("slice") is not None else "")
         + (f", as panel {a['match_panel']}" if a.get("match_panel") is not None else "")
     ),
-    "set_time_frame": lambda a: f"Jump to time frame {a.get('frame')}",
+    "set_time_frame": lambda a: (f"Jump to time frame {a.get('frame')}" + _time_where(a)),
     "set_grid": lambda a: f"Set a {a.get('rows')}x{a.get('cols')} grid",
     "set_split_grid": lambda a: (f"Split: {a.get('left_rows')}x{a.get('left_cols')} left, "
                                  f"{a.get('right_rows')}x{a.get('right_cols')} right"),
@@ -80,8 +94,10 @@ _TOOL_SUMMARY_FORMATTERS = {
                              + (f" (panels {', '.join(map(str, a['panels']))})" if a.get("panels") else "")),
     "set_contours": lambda a: (f"{'Show' if a.get('shown') else 'Hide'} contours"
                                + (f" in panels {', '.join(map(str, a['panels']))}" if a.get("panels") else "")),
-    "set_playback": lambda a: ("Play the cines" if a.get("playing") else "Stop the cines")
-                              + (f" at {a['speed']:g}x" if a.get("speed") is not None else ""),
+    "set_playback": lambda a: (("Play" if a.get("playing") else "Stop") + " " + _time_series(a)
+                               + (f", frames {a.get('from_frame') or 1}-{a.get('to_frame') or 'end'}"
+                                  if a.get("playing") and (a.get("from_frame") or a.get("to_frame")) else "")
+                               + (f" at {a['speed']:g}x" if a.get("speed") is not None else "")),
     "save_segmentation": lambda a: "Save segmentation",
 }
 

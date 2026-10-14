@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
+from llm.tools import zero_based
 from test_cases import TestCase
 
 
@@ -26,6 +27,11 @@ class ValidationResult:
     actual: List[dict]
     call_matches: List[CallMatch]
     failure_summary: str = ""
+
+
+def _zero_based(call: dict) -> dict:
+    """The model numbers panels from 1, as the user sees them; the expected calls use the app's 0-based panels."""
+    return {**call, "arguments": zero_based(call.get("arguments") or {})}
 
 
 def _args_match(expected_args: dict, actual_args: dict) -> tuple[bool, str]:
@@ -68,7 +74,7 @@ def validate(test_case: TestCase, actual_tool_calls: list, screen: dict | None =
     expected = test_case.expected_tool_calls
     mode = test_case.match_mode
 
-    actual = [c for c in actual_tool_calls if isinstance(c, dict)]
+    actual = [_zero_based(c) for c in actual_tool_calls if isinstance(c, dict)]
     # A lookup is a free step toward the answer, scored only by a case that expects it.
     if not any(e.get("name") == "search_patients" for e in expected):
         actual = [c for c in actual if c.get("name") != "search_patients"]

@@ -438,6 +438,11 @@ QLabel[role="viewerMeta"] {
 	font-size: @fs_small;
 }
 
+QLabel[role="viewerIndex"] {
+	color: @text_faint;
+	font-size: @fs_tiny;
+}
+
 QLabel[role="divider"] {
 	background-color: @bg0;
 }

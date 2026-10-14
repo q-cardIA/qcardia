@@ -265,7 +265,7 @@ class CentralDisplayAreaWidget(QWidget):
         for i in range(len(cells)):
             if self._panel_series_key[i] is not None:
                 # Rebuilt panels start with the empty title.
-                self._panels[i].title_label.setText(f"{self._panel_series_key[i]} / {self._panel_axis[i]}")
+                self._panels[i].title_label.setText(self._panel_series_key[i])
                 self._panels[i].viewer.new_series(self._view_of(i))
                 self._update_panel(i)
         self._show_cine_time_if_unseen()
@@ -302,6 +302,9 @@ class CentralDisplayAreaWidget(QWidget):
         title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)  # clip, never widen the grid
         slice_lbl = QLabel("")
         slice_lbl.setProperty("role", "viewerMeta")
+        number = QLabel(str(idx + 1))  # the panel's number for the user and the assistant, from 1
+        number.setProperty("role", "viewerIndex")
+        hdr.addWidget(number)
         hdr.addWidget(title, 1)
         hdr.addWidget(slice_lbl)
 
@@ -423,7 +426,7 @@ class CentralDisplayAreaWidget(QWidget):
         # After the slice: the linked view is found on the panel's slice of the new series.
         self._panels[panel_idx].viewer.new_series(self._view_of(panel_idx))
 
-        self._panels[panel_idx].title_label.setText(f"{series_key} / {axis}")
+        self._panels[panel_idx].title_label.setText(series_key)
         self._update_panel(panel_idx)
         self._show_cine_time_if_unseen()
         self._show_selected()
@@ -517,12 +520,13 @@ class CentralDisplayAreaWidget(QWidget):
         self._show_selected()
 
     def get_thumbnail(self, series_key: str) -> np.ndarray | None:
-        """Representative 2D uint8 slice (center transverse slice, t=0) for a browser card."""
+        """Representative 2D uint8 slice (the middle slice at the middle frame) for a browser card."""
         if series_key not in self._volumes:
             return None
         n = self._n_slices(series_key, "transverse")
         mid = n // 2 if n > 0 else 0
-        return self._display(series_key, self._get_slice_2d(series_key, "transverse", mid, t=0))
+        t = self._volumes[series_key].shape[0] // 2 if self._is_temporal.get(series_key) else 0
+        return self._display(series_key, self._get_slice_2d(series_key, "transverse", mid, t=t))
 
     def _on_panel_series_dropped(self, panel_idx: int, series_key: str):
         if self.is_series_registered(series_key):

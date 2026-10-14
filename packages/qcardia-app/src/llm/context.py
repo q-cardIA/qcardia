@@ -22,6 +22,7 @@ def build_state_block(
     perfusion: dict[str, tuple[int, int]] | None = None,
     perfusion_playing: str | None = None,
     perfusion_speed: float = 1.0,
+    perfusion_events: dict[str, dict[str, int] | None] | None = None,  # None for a run: no CINE_SAX segmentation
 ) -> str:
     if time_frame:
         current, total = time_frame
@@ -32,12 +33,21 @@ def build_state_block(
         time_line += ("\nPerfusion frames: " + ", ".join(f"{k} {t + 1} / {n}" for k, (t, n) in perfusion.items())
                       + f"  (perfusion speed {perfusion_speed:g}x"
                       + (f", {perfusion_playing} playing)" if perfusion_playing in perfusion else ")"))
+        measured = {k: e for k, e in (perfusion_events or {}).items() if e and {"lv_peak", "myo_peak"} <= e.keys()}
+        if measured:  # 0-based frames, from the CINE_SAX segmentation on the perfusion slices
+            time_line += "\nPerfusion frames from the CINE_SAX segmentation: " + "; ".join(
+                f"{k} contrast arrives in the LV = frame {e['lv_arrival'] + 1}, LV peak = {e['lv_peak'] + 1}, "
+                f"arrives in the myocardium = {e['myo_arrival'] + 1}, myocardial peak = {e['myo_peak'] + 1}"
+                for k, e in measured.items())
+        elif any(e is None for e in (perfusion_events or {}).values()):
+            time_line += "\nPerfusion LV and myocardial peaks: need the CINE_SAX segmentation (ask whether to run it)"
 
     rows, cols = grid
     panel_lines = []
     for panel in panels:
-        where = split_position(split, panel["idx"]) if split else "row %d, col %d" % divmod(panel["idx"], cols)
-        line = f"  {panel['idx']} ({where}): "
+        row, col = divmod(panel["idx"], cols)  # numbered from 1, as the user sees them
+        where = split_position(split, panel["idx"]) if split else f"row {row + 1}, col {col + 1}"
+        line = f"  {panel['idx'] + 1} ({where}): "
         if panel["series_key"] is None:
             panel_lines.append(line + "empty")
             continue

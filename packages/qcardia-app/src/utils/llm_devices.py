@@ -29,6 +29,8 @@ _PROTOCOLS = ("ollama", "openai")
 
 # Gitignored, so your own file sits next to the example and still cannot be committed.
 _DEFAULT_DEVICES_PATH = Path(__file__).parents[2] / "config" / "llm_devices.json"
+# Keys and secrets by env-var name, for a computer without those env vars (git ignores it; see the example).
+CREDENTIALS_PATH = _DEFAULT_DEVICES_PATH.with_name("credentials.json")
 DEVICES_PATH: Path = Path(os.environ.get("QCARDIA_LLM_DEVICES", "") or _DEFAULT_DEVICES_PATH)
 
 
@@ -229,7 +231,8 @@ _tokens: dict[str, tuple[str, float]] = {}  # device id -> (token, time.monotoni
 
 
 def _env(name: str) -> str:
-    """An env var, falling back on Windows to the user's saved ones.
+    """A key or secret by its env-var name: the env var, on Windows the user's saved one, else the entry of
+    that name in config/credentials.json (the same on every computer, however the app is started).
 
     A process copies its env from its parent at start, so a variable set after the
     terminal or IDE opened stays invisible here until that parent restarts as well.
@@ -237,18 +240,20 @@ def _env(name: str) -> str:
     if not name:
         return ""
     value = os.environ.get(name, "").strip()
-    if value or sys.platform != "win32":
-        return value
-    import winreg
+    if not value and sys.platform == "win32":
+        import winreg
 
-    with suppress(OSError):
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            return str(winreg.QueryValueEx(key, name)[0]).strip()
-    return ""
+        with suppress(OSError):
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+                value = str(winreg.QueryValueEx(key, name)[0]).strip()
+    if not value:
+        with suppress(OSError, ValueError, AttributeError):
+            value = str(json.loads(CREDENTIALS_PATH.read_text(encoding="utf-8")).get(name) or "").strip()
+    return value
 
 
 def _key_source(device: Device) -> str:
-    """The env vars to name when the key is missing or rejected."""
+    """The env vars (or credentials.json entries) to name when the key is missing or rejected."""
     if device.token_url:
         return f"{device.client_id_env or 'client_id_env'} and {device.client_secret_env or 'client_secret_env'}"
     return device.api_key_env or "api_key_env"
@@ -331,7 +336,7 @@ def _readable_error(device: Device, exc: Exception) -> str:
     if isinstance(exc, requests.HTTPError) and exc.response is not None:
         code = exc.response.status_code
         if code in (401, 403):
-            return f"Rejected the API key (HTTP {code}). Check {_key_source(device)}."
+            return f"Rejected the API key (HTTP {code}). Check {_key_source(device)} (env vars or config/credentials.json)."
         return f"Answered with HTTP {code}."
     if isinstance(exc, requests.ConnectionError):
         if device.protocol == "openai":
@@ -363,7 +368,8 @@ def probe(device: Device, timeout: float = DEVICE_PROBE_TIMEOUT) -> ProbeResult:
         except (requests.RequestException, ValueError) as e:
             return ProbeResult(False, _readable_error(device, e))
         if not key:
-            return ProbeResult(False, f"No API key. Set the {_key_source(device)} environment variable(s).")
+            return ProbeResult(False, f"No API key. Set {_key_source(device)} as environment variable(s) or in "
+                                      "config/credentials.json.")
 
     try:
         models = _fetch_models(device, timeout)

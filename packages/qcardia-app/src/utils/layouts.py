@@ -28,7 +28,7 @@ def split_layout(split: tuple[int, int, int, int]) -> tuple[int, int, list[tuple
 
 
 def split_text(split: tuple[int, int, int, int]) -> str:
-    """'left 3x3 (panels 0-8), right one large panel (9)'."""
+    """'left 3x3 (panels 1-9), right one large panel (10)', numbered from 1 as the user sees them."""
     left_rows, left_cols, right_rows, right_cols = split
     n_left, n_right = left_rows * left_cols, right_rows * right_cols
 
@@ -37,14 +37,14 @@ def split_text(split: tuple[int, int, int, int]) -> str:
             return f"one large panel ({first})"
         return f"{rows}x{cols} (panels {first}-{first + n - 1})"
 
-    return (f"left {half(left_rows, left_cols, 0, n_left)}, "
-            f"right {half(right_rows, right_cols, n_left, n_right)}")
+    return (f"left {half(left_rows, left_cols, 1, n_left)}, "
+            f"right {half(right_rows, right_cols, n_left + 1, n_right)}")
 
 
 def split_position(split: tuple[int, int, int, int], panel: int) -> str:
-    """Where panel is in a split layout, e.g. 'left, row 1, col 0' or 'right, large'."""
+    """Where panel (0-based) is in a split layout, e.g. 'left, row 2, col 1' or 'right, large'; rows and columns from 1."""
     left_rows, left_cols, right_rows, right_cols = split
     side, rows, cols = "left", left_rows, left_cols
     if panel >= left_rows * left_cols:
         side, rows, cols, panel = "right", right_rows, right_cols, panel - left_rows * left_cols
-    return f"{side}, large" if rows * cols == 1 else f"{side}, row {panel // cols}, col {panel % cols}"
+    return f"{side}, large" if rows * cols == 1 else f"{side}, row {panel // cols + 1}, col {panel % cols + 1}"
