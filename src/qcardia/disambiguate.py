@@ -20,7 +20,7 @@ import numpy as np
 import pydicom
 import requests
 
-from qcardia.cardisort import read_series_header
+from qcardia.cardisort import group_sequence_dirs, read_series_header
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:8b"
@@ -368,3 +368,38 @@ def select_flow_series(labels: dict[Path, tuple[str | None, str | None]]) -> dic
         if acq["votes"] and _has_phase_images(dirs):
             selected[acq["votes"].most_common(1)[0][0]] = dirs  # a later acquisition replaces an earlier one
     return selected
+
+
+def select_lge_series(lge_dirs: list[Path]) -> list[list[Path]]:
+    """Finds the directories of each LGE acquisition, for `LGESeries`.
+
+    Siemens stores one LGE acquisition as a magnitude ("_MAG", ImageType[2]
+    "M") and a PSIR ("_PSIR") series with the same ProtocolName, and
+    `group_sequence_dirs` puts the series of a protocol in one group, in
+    series-number order. When the protocol was acquired more than once, its
+    group holds all acquisitions, so a magnitude series after the first series
+    starts a new acquisition. Philips and GE directories are each a group, and
+    so each an acquisition.
+
+    Selecting one acquisition is left to the caller (e.g. with
+    `disambiguate_duplicates`, on the first directory of each acquisition).
+
+    Args:
+        lge_dirs: the directories that cardisort gave one LGE label.
+
+    Returns:
+        The directories of each acquisition, in the order of their groups, and
+        in series-number order (magnitude first) within an acquisition.
+    """
+    acquisitions = []
+    for group in group_sequence_dirs(lge_dirs):
+        acquisitions.append([])
+        for d in group:
+            image_type = [
+                str(v).upper() for v in getattr(read_series_header(d), "ImageType", [])
+            ]
+            # A repeat of the protocol starts at its magnitude series.
+            if image_type[2:3] == ["M"] and acquisitions[-1]:
+                acquisitions.append([])
+            acquisitions[-1].append(d)
+    return acquisitions
