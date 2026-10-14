@@ -142,6 +142,7 @@ CLAUDE.md
 
 # your own LLM device list: host addresses, ssh aliases, gateway URLs
 config/llm_devices.json
+config/credentials.json
 
 # leftover from context-retrieval branch, not used here
 retrieval_index/

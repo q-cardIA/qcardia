@@ -30,7 +30,7 @@
       "api_key_env": "MY_GATEWAY_API_KEY",
       "model": "some-model",
       "patient_data_ok": false,
-      "note": "Any OpenAI-compatible /v1 endpoint. api_key_env names the environment variable holding the key, never the key itself. extra_body carries anything non-standard the gateway needs; this one stops vLLM models reasoning before they answer.",
+      "note": "Any OpenAI-compatible /v1 endpoint. api_key_env names the environment variable holding the key, never the key itself; without that variable the key comes from the entry of that name in config/credentials.json. extra_body carries anything non-standard the gateway needs; this one stops vLLM models reasoning before they answer.",
       "extra_body": {
         "chat_template_kwargs": {
           "enable_thinking": false
@@ -48,7 +48,7 @@
       "client_secret_env": "SPIKE_CLIENT_SECRET",
       "model": "some-model",
       "patient_data_ok": false,
-      "note": "An endpoint whose key is a short-lived token (Run:ai on SPIKE): set token_url and the two env-var names in place of api_key_env; the app gets and renews the token itself. Setup for a SPIKE endpoint: you get access_secrets.json (client_id, client_secret) and an example .py. From the .py, copy the URL up to /v1 into url and the model name into model. Save the id and secret as user env vars in PowerShell: [Environment]::SetEnvironmentVariable('SPIKE_CLIENT_ID', '<client_id>', 'User'), the same for SPIKE_CLIENT_SECRET. Then start the app (no reboot needed). Needs the TU/e VPN; patient data never goes here.",
+      "note": "An endpoint whose key is a short-lived token (Run:ai on SPIKE): set token_url and the two env-var names in place of api_key_env; the app gets and renews the token itself. Setup for a SPIKE endpoint: you get access_secrets.json (client_id, client_secret) and an example .py. From the .py, copy the URL up to /v1 into url and the model name into model. Put the id and secret in config/credentials.json (see credentials.example.json; the same on Windows and macOS), or save them as user env vars, in PowerShell: [Environment]::SetEnvironmentVariable('SPIKE_CLIENT_ID', '<client_id>', 'User'), the same for SPIKE_CLIENT_SECRET. Then start the app (no reboot needed). Needs the TU/e VPN; patient data never goes here.",
       "extra_body": {
         "chat_template_kwargs": {
           "enable_thinking": false
