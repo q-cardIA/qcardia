@@ -1164,9 +1164,13 @@ class PerfusionSeries(BaseSeries):
       `slice_data`.
     - Siemens stores each slice, and the low-resolution AIF, as a separate
       series. Pass all the folders of the acquisition; their slices are
-      combined, and the AIF slice is found in the same way.
+      combined, and the AIF slice is found in the same way. Only the frames
+      of the heartbeats in which every slice and the AIF have a frame are kept
+      (see `_match_frames_by_heartbeat`). This drops the proton-density frames
+      of the myocardial slices, which have no AIF frame.
 
-    All frames are kept, including the proton-density and baseline frames.
+    With a single folder (Philips), all frames are kept, including the
+    proton-density and baseline frames.
 
     Args:
         folders (Path | list[Path]): The folder of the acquisition, or the
@@ -1187,24 +1191,73 @@ class PerfusionSeries(BaseSeries):
             return super()._load_data()
 
         series = [BaseSeries(folder) for folder in self.folders]
-        frame_counts = {s.number_of_temporal_positions for s in series}
-        if len(frame_counts) > 1:
-            raise ValueError(
-                f"Perfusion series in {self.folders} have different numbers of "
-                f"frames: {sorted(frame_counts)}"
-            )
         all_slices = sorted(
             (data for s in series for data in s.slice_data.values()),
             key=lambda data: data["slice_position"],
             reverse=True,
         )
+        all_slices = self._match_frames_by_heartbeat(all_slices)
         slices_dict = {f"slice{i+1:02}": data for i, data in enumerate(all_slices)}
         # The image size of the myocardial slices, which outnumber the AIF slice.
         rows, columns = Counter(
             (data["meta_data"][0].Rows, data["meta_data"][0].Columns)
             for data in all_slices
         ).most_common(1)[0][0]
-        return slices_dict, len(all_slices), frame_counts.pop(), rows, columns
+        n_frames = len(all_slices[0]["pixel_array"])
+        return slices_dict, len(all_slices), n_frames, rows, columns
+
+    def _match_frames_by_heartbeat(self, slices: list[dict]) -> list[dict]:
+        """
+        Keep only the frames of the heartbeats in which every slice has a frame.
+
+        The heartbeat of a frame is its R-wave time: AcquisitionTime minus
+        TriggerTime. Frames of two slices are in the same heartbeat if each is
+        the other's nearest frame in R-wave time. The slice with the fewest
+        frames (on Siemens, the AIF) is the reference.
+
+        Args:
+            slices (list[dict]): `slice_data` values, one per slice.
+
+        Returns:
+            list[dict]: The slices, each with the same number of frames.
+        """
+
+        def r_wave_times(data: dict) -> np.ndarray:
+            return np.array(
+                [
+                    self._dicom_time_to_seconds(meta.AcquisitionTime)
+                    - float(getattr(meta, "TriggerTime", 0.0)) / 1000
+                    for meta in data["meta_data"]
+                ]
+            )
+
+        times = [r_wave_times(data) for data in slices]
+        reference = times[int(np.argmin([len(t) for t in times]))]
+
+        # matches[i][j]: the frame of slice i in the heartbeat of reference frame j.
+        matches = []
+        keep = np.ones(len(reference), dtype=bool)
+        for t in times:
+            distances = np.abs(t[:, None] - reference[None, :])
+            nearest_frame = distances.argmin(axis=0)
+            nearest_reference = distances.argmin(axis=1)
+            keep &= nearest_reference[nearest_frame] == np.arange(len(reference))
+            matches.append(nearest_frame)
+
+        n_dropped = sorted({len(t) - int(keep.sum()) for t in times})
+        if n_dropped != [0]:
+            print(
+                f"    {self.folder.parent.name}: kept {int(keep.sum())} frames that "
+                f"every slice has; dropped {n_dropped} frame(s) per slice."
+            )
+        return [
+            {
+                **data,
+                "pixel_array": [data["pixel_array"][i] for i in frames[keep]],
+                "meta_data": [data["meta_data"][i] for i in frames[keep]],
+            }
+            for data, frames in zip(slices, matches)
+        ]
 
     @staticmethod
     def _acquisition_signature(meta) -> tuple:

@@ -6,6 +6,7 @@ from natsort import natsorted
 from qcardia.cardisort import (
     classify_sequence_dir,
     get_sequence_dirs,
+    group_sequence_dirs,
     load_cardisort_model,
     load_series_datasets,
 )
@@ -30,10 +31,12 @@ cardisort_model, cardisort_config = load_cardisort_model(CARDISORT_WANDB_RUN_PAT
 for patient in patient_list[:]:
     sequence_dirs = get_sequence_dirs(patient)
 
+    # Directories are classified in groups (on Siemens, e.g. all series of a
+    # perfusion run), and each directory of a group gets the group's label.
     sequence_classifications = {}
-    for sequence_dir in sequence_dirs:
+    for group in group_sequence_dirs(sequence_dirs):
         prediction = classify_sequence_dir(
-            sequence_dir,
+            group,
             cardisort_model,
             cardisort_config["model"]["nr_input_channels"],
             tuple(cardisort_config["data"]["target_pixdim"]),
@@ -43,7 +46,8 @@ for patient in patient_list[:]:
         )
         if prediction is None:
             continue
-        sequence_classifications[sequence_dir] = prediction
+        for sequence_dir in group:
+            sequence_classifications[sequence_dir] = prediction
 
     # Multiple directories can land on the same (sequence, plane) class (e.g. a
     # low-res planning cine alongside the real diagnostic SAX stack). For each

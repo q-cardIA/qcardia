@@ -20,6 +20,8 @@ import numpy as np
 import pydicom
 import requests
 
+from qcardia.cardisort import read_series_header
+
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:8b"
 
@@ -181,13 +183,60 @@ def _summarize_perfusion_dir(sequence_dir: Path) -> dict | None:
     }
 
 
+# Siemens stores more than one reconstruction of each slice and of the AIF of a
+# run (e.g. "_LR" and "_HR_MOCO", "_AIF" and "_AIF_MOCO"), and derived series
+# ("_AIF_SEG"). These ImageType values mark the derived series.
+SIEMENS_DERIVED_IMAGE_TYPES = {"SEG", "DERIVED"}
+
+
+def _primary_siemens_perfusion_dirs(run_dirs: list[Path]) -> list[Path]:
+    """One series for each slice and for the AIF of a Siemens run.
+
+    Derived series (SIEMENS_DERIVED_IMAGE_TYPES) are dropped. Series with the
+    same slice position and matrix size are reconstructions of the same data;
+    of these, the motion-corrected one ("MOCO" in ImageType) is kept, then the
+    one with the finest pixel spacing. Runs from other vendors are returned as
+    they are.
+    """
+    headers = {d: read_series_header(d) for d in run_dirs}
+    if not all(
+        h is not None and "siemens" in str(getattr(h, "Manufacturer", "")).lower()
+        for h in headers.values()
+    ):
+        return run_dirs
+
+    def preference(d: Path) -> tuple:
+        header = headers[d]
+        return (
+            "MOCO" not in header.ImageType,
+            float(header.PixelSpacing[0]),
+            int(getattr(header, "SeriesNumber", 0) or 0),
+        )
+
+    by_slice = {}
+    for d, header in headers.items():
+        if SIEMENS_DERIVED_IMAGE_TYPES & set(header.ImageType):
+            continue
+        orientation = np.asarray(header.ImageOrientationPatient, dtype=float)
+        position = float(
+            np.dot(header.ImagePositionPatient, np.cross(orientation[:3], orientation[3:]))
+        )
+        key = (round(position, 1), int(header.Rows), int(header.Columns))
+        by_slice.setdefault(key, []).append(d)
+
+    primary = {min(dirs, key=preference) for dirs in by_slice.values()}
+    return [d for d in run_dirs if d in primary]
+
+
 def select_perfusion_series(perfusion_dirs: list[Path]) -> dict:
     """Finds the stress and rest perfusion runs among the directories that
     cardisort labelled as perfusion.
 
     Directories whose acquisition times overlap belong to the same run (Siemens
     stores each slice and the AIF of a run as a separate series). Test runs are
-    much shorter than the others, and stress is acquired before rest.
+    much shorter than the others, and stress is acquired before rest. Of a
+    Siemens run, one reconstruction of each slice and of the AIF is kept (see
+    `_primary_siemens_perfusion_dirs`).
 
     Returns:
         {"stress": [Path, ...], "rest": [Path, ...]}, the directories of each
@@ -220,7 +269,10 @@ def select_perfusion_series(perfusion_dirs: list[Path]) -> dict:
         )
         return {}
 
-    return {role: run["dirs"] for role, run in zip(("stress", "rest"), runs)}
+    return {
+        role: _primary_siemens_perfusion_dirs(run["dirs"])
+        for role, run in zip(("stress", "rest"), runs)
+    }
 
 
 FLOW_SEQUENCE_NAME = "PC"
