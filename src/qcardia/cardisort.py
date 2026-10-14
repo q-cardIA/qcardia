@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pydicom
+from pydicom.pixel_data_handlers.util import apply_modality_lut
 import skimage.transform
 import torch
 import torch.nn as nn
@@ -112,6 +113,74 @@ def get_sequence_dirs(patient: Path) -> list[Path]:
             and not f.name.endswith("_segmentation")
         ]
     )
+
+
+# Siemens series derived from an acquisition share its ProtocolName but are
+# grouped apart from it (case-insensitive): maps (e.g. "_MAP_PERF"; T1 maps have
+# "Map" after a space and stay with their protocol), and descriptions ending in
+# "seg" (e.g. "_AIF_SEG") or "rr" ("_RR" repeats).
+SIEMENS_SEPARATE_DESCRIPTION_PART = "_map"
+SIEMENS_SEPARATE_DESCRIPTION_ENDINGS = ("seg", "rr")
+
+
+def _siemens_group_key(header: pydicom.Dataset, sequence_dir: Path) -> tuple[str, str]:
+    """The ProtocolName, and the marker of a derived series (see
+    SIEMENS_SEPARATE_DESCRIPTION_PART), so derived series form their own group."""
+    protocol = str(getattr(header, "ProtocolName", "")) or sequence_dir.name
+    description = str(getattr(header, "SeriesDescription", "")).strip().lower()
+    if SIEMENS_SEPARATE_DESCRIPTION_PART in description:
+        return protocol, SIEMENS_SEPARATE_DESCRIPTION_PART
+    for ending in SIEMENS_SEPARATE_DESCRIPTION_ENDINGS:
+        if description.endswith(ending):
+            return protocol, ending
+    return protocol, ""
+
+
+def read_series_header(sequence_dir: Path) -> pydicom.Dataset | None:
+    """The header of the first DICOM image in a sequence directory."""
+    for f in natsorted(sequence_dir.rglob("*")):
+        if not f.is_file() or f.name.startswith("."):
+            continue
+        try:
+            ds = pydicom.dcmread(f, stop_before_pixels=True)
+        except Exception:
+            continue
+        if not str(getattr(ds, "SOPClassUID", "")).startswith(
+            SECONDARY_CAPTURE_SOP_CLASS_PREFIX
+        ):
+            return ds
+    return None
+
+
+def group_sequence_dirs(sequence_dirs: list[Path]) -> list[list[Path]]:
+    """The sequence directories that cardisort classifies together.
+
+    A Philips or GE directory is one series and is classified alone. Siemens
+    stores the parts of one acquisition (e.g. the AIF, LR and MoCo series of a
+    perfusion run) as separate series with the same ProtocolName, so Siemens
+    directories are grouped by ProtocolName and ordered by series number.
+    Derived series (see SIEMENS_SEPARATE_DESCRIPTION_PART) form a group of
+    their own within their protocol.
+
+    Returns:
+        The groups, each a list of directories.
+    """
+    groups = {}
+    series_numbers = {}
+    for d in sequence_dirs:
+        header = read_series_header(d)
+        if header is None or "siemens" not in str(
+            getattr(header, "Manufacturer", "")
+        ).lower():
+            groups[d] = [d]
+            continue
+        groups.setdefault(_siemens_group_key(header, d), []).append(d)
+        series_numbers[d] = int(getattr(header, "SeriesNumber", 0) or 0)
+
+    return [
+        sorted(group, key=lambda d: series_numbers.get(d, 0))
+        for group in groups.values()
+    ]
 
 
 # SOP Class UIDs for Secondary Capture Image Storage and its multi-frame
@@ -261,8 +330,28 @@ def print_class_probs(head_name: str, probs: torch.Tensor, class_names: dict) ->
         print(f"    {name:>16}: {probs[idx]:.4f}")
 
 
+def _is_psir(datasets: list[pydicom.Dataset]) -> bool:
+    """True if a series has negative values after its rescale, the test that
+    put PSIR after magnitude series in the Siemens training samples."""
+    for ds in datasets:
+        try:
+            if np.min(apply_modality_lut(ds.pixel_array, ds)) < 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def load_series_group_datasets(sequence_dirs: list[Path]) -> list[pydicom.Dataset]:
+    """The datasets of a group from `group_sequence_dirs`, one directory after
+    the other, with magnitude series before PSIR as in training."""
+    series = [load_series_datasets(d) for d in sequence_dirs]
+    series.sort(key=_is_psir)  # stable, so the series-number order is kept
+    return [ds for datasets in series for ds in datasets]
+
+
 def classify_sequence_dir(
-    sequence_dir: Path,
+    sequence_dirs: Path | list[Path],
     model: nn.Module,
     n_channels: int,
     target_pixdim: tuple[float, float],
@@ -270,11 +359,14 @@ def classify_sequence_dir(
     grid_sample_mode: str,
     verbose: bool = False,
 ) -> tuple[str, str] | None:
-    """Predicts the (sequence, plane) label pair for a sequence directory.
+    """Predicts the (sequence, plane) label pair for a sequence directory, or
+    for a group of directories from `group_sequence_dirs` classified as one.
     Returns None (instead of raising) if the series can't be classified, so
     one malformed series doesn't abort a batch run over many patients."""
+    if isinstance(sequence_dirs, Path):
+        sequence_dirs = [sequence_dirs]
     try:
-        datasets = load_series_datasets(sequence_dir)
+        datasets = load_series_group_datasets(sequence_dirs)
         if not datasets:
             return None
 
@@ -286,7 +378,7 @@ def classify_sequence_dir(
             seq_logits, plane_logits = model(input_tensor)
     except Exception as e:
         if verbose:
-            print(f"  Skipping {sequence_dir.name}: {e}")
+            print(f"  Skipping {[d.name for d in sequence_dirs]}: {e}")
         return None
 
     seq_probs = torch.softmax(seq_logits, dim=1).squeeze(0)
