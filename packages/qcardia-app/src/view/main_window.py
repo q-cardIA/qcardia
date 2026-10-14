@@ -669,6 +669,7 @@ class MainWindow(QMainWindow):
     def toggle_cine(self):
         """Play or pause the cine at the chosen speed, over all frames."""
         self._play_range = None
+        self.time_label.setText(f"Time Frame: {self.time_slider.value() + 1} / {self.time_slider.maximum() + 1}")
         if self._play_timer.isActive():
             self._play_timer.stop()
         elif self.time_slider.maximum() > 0:
