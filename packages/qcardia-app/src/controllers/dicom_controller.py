@@ -227,6 +227,9 @@ class DICOMController:
     def _register(self, key: str, info: dict):
         self._widget.register_series(key, info["volume"], is_temporal=info["is_temporal"],
                                      window=info["window"], geometry=info["geometry"])
+        # Its size, to score "mid level" or "last frame" from the log.
+        study_log.log("series_loaded", series=key, slices=self._widget.n_slices(key),
+                      frames=info["volume"].shape[0] if info["is_temporal"] else 1)
         if info.get("segmentation") is not None:  # cached: ready to show, its contours still off
             self._widget.set_segmentation(key, info["segmentation"])
         if key in ("CINE_SAX", "LGE_SAX"):  # a cached segmentation was analysed while it loaded
@@ -420,7 +423,7 @@ class DICOMController:
                 self._widget.set_panel_waiting(panel.idx, panel.key)
             else:
                 self._widget.set_panel_empty(panel.idx)
-        study_log.log("layout", preset=name, panels=self._widget.panel_assignments())
+        study_log.log("layout", preset=name, panels=self._widget.state()["panels"])  # 1-based, as the state events
         return filled, total
 
     def show_series_when_loaded(self, panel_idx: int, series_key: str, axis: str = "transverse"):

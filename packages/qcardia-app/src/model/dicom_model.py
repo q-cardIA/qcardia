@@ -36,6 +36,7 @@ from qcardia.disambiguate import (
 )
 from qcardia.series import BaseSeries, CineSeries, FlowSeries, LGESeries, PerfusionSeries
 
+from model.perfusion_regions import matching_frames, perfusion_events, project_labels, region_curves
 from model.subject_labels import (
     SeriesLabel,
     SubjectLabels,
@@ -130,6 +131,7 @@ class DICOMModel:
         self._flow_dirs: dict[str, list[Path]] = {}
         self._lge_dirs: dict[Path, list[Path]] = {}  # an LGE folder -> the folders of its acquisition
         self.analysis: dict[str, dict] = {}  # per segmented series, see _analyse
+        self._perfusion: dict[str, tuple] = {}  # run -> (volume, CINE_SAX segmentation, result), see perfusion_analysis
         self._load_segmentation_model()
 
     def _load_segmentation_model(self):
@@ -450,6 +452,34 @@ class DICOMModel:
             result.update(myo_ml=round(myo, 1), scar_ml=round(scar, 1), scar_slices=segmented_slices(seg, 0, 2))
         return result
 
+    def perfusion_analysis(self, run: str, volume: np.ndarray | None, cine_seg: np.ndarray | None) -> dict | None:
+        """Where to navigate in a perfusion run: the frames (0-based) of contrast arrival and peak in the LV blood
+        pool and the myocardium (see perfusion_regions), from the CINE_SAX segmentation mapped onto the perfusion
+        slices through patient coordinates, without registration. Measured once per run and segmentation."""
+        if volume is None or cine_seg is None:
+            return None
+        cached = self._perfusion.get(run)
+        if cached and cached[0] is volume and cached[1] is cine_seg:
+            return cached[2]
+        cine, perf = self.get_geometry("CINE_SAX"), self.get_geometry(run)
+        if cine is None or perf is None:
+            return None
+        try:
+            frames = matching_frames(self._trigger_times("CINE_SAX")[0], [t[0] for t in self._trigger_times(run)])
+            result = {"events": perfusion_events(region_curves(volume, project_labels(cine_seg, cine, frames, perf)))}
+        except Exception as e:  # e.g. no trigger times: the run just has no events
+            logging.warning(f"Could not measure the {run} frames from the CINE_SAX segmentation: {e}")
+            result = {"events": {}}
+        self._perfusion[run] = (volume, cine_seg, result)
+        return result
+
+    def _trigger_times(self, series_key: str) -> list[list[float]]:
+        """Per slice in display order (by slice position, as the volume), the trigger time of each frame in ms."""
+        series = self.series[series_key]
+        metas = [series.slice_data[k]["meta_data"] for k in sorted(series.slice_data)]
+        ordered = sorted(((self._extract_slice_position(m[0], i), m) for i, m in enumerate(metas)), key=lambda e: e[0])
+        return [[float(meta.TriggerTime) for meta in m] for _, m in ordered]
+
     def get_geometry(self, series_key: str) -> VolumeGeometry | None:
         series = self.series.get(series_key)
         if series is None:
@@ -736,6 +766,7 @@ class DICOMModel:
         self._flow_dirs = {}
         self._lge_dirs = {}
         self.analysis = {}
+        self._perfusion = {}  # run -> (volume, CINE_SAX segmentation, result), see perfusion_analysis
         self.subject_folder = None
         self.folder_path = None
         self.num_time_frames = 0

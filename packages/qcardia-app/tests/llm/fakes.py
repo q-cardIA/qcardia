@@ -26,6 +26,7 @@ PHANTOM_STACKS = {"CINE_SAX": (14, -137.3, 8.0), "LGE_SAX": (12, -142.0, 10.0),
                   "PERF_REST_SAX": (3, -115.0, 25.0)}
 CINE_FRAMES = 30
 PERFUSION_FRAMES = 60
+PERFUSION_EVENTS = {"lv_arrival": 18, "lv_peak": 24, "myo_arrival": 22, "myo_peak": 30}
 
 
 def phantom_depths(series_key: str) -> list[float]:
@@ -300,6 +301,7 @@ class FakeView:
     def __init__(self, display_area_widget: FakeDisplayAreaWidget, playing: bool = False):
         self.display_area_widget = display_area_widget
         self.playing = playing
+        self.play_range = None  # (first, last) of a loop, 0-based
         self.cine_speed = self.perfusion_speed = 1.0
 
     def is_playing(self) -> bool:
@@ -312,7 +314,11 @@ class FakeView:
         setattr(self, "perfusion_speed" if perfusion else "cine_speed", speed)
 
     def toggle_cine(self):
-        self.playing = not self.playing
+        self.playing, self.play_range = not self.playing, None
+
+    def play_frames(self, first: int, last: int):
+        self.playing, self.play_range = True, (first, last)
+        self.display_area_widget.set_time_index(first, self.display_area_widget.driven_time_axis)
 
 
 class FakeModel:
@@ -341,6 +347,10 @@ class FakeModel:
 
     def segment(self, series_key: str, cached_only: bool = False):
         return phantom_lge()[1] if series_key == "LGE_SAX" and series_key in self.analysis else None
+
+    def perfusion_analysis(self, run: str, volume, cine_seg):
+        """With a CINE_SAX segmentation, every run: LV arrival 18, LV peak 24, myocardium 22 and 30 (0-based)."""
+        return {"events": dict(PERFUSION_EVENTS)} if "CINE_SAX" in self.analysis and run in self.series else None
 
 
 class FakeDicomController:

@@ -43,6 +43,7 @@ GREYS = {
     "text": "#e6e6e8",
     "text_muted": "#a2a2aa",   # secondary text, 6.3:1 on bg2
     "text_faint": "#8e8e97",   # hints and metadata, 4.9:1 on bg2
+    "text_dim": "#77777f",     # the panel numbers: a step below the metadata
     "text_disabled": "#56565d",
 }
 
@@ -139,6 +140,7 @@ def _build_tokens() -> dict[str, str]:
         "accent_hover": accent.lighter(112).name(),
         "accent_soft": f"rgba({accent.red()}, {accent.green()}, {accent.blue()}, {soft.alpha()})",
         "on_accent": _on_accent(accent),
+        "fs_tiny": f"{round(body * 0.8)}px",
         "fs_small": f"{round(body * 0.9)}px",
         "fs_body": f"{body}px",
         "fs_large": f"{round(body * 1.3)}px",

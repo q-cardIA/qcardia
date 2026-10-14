@@ -27,7 +27,7 @@ from utils import study_log
 from utils.app_config import ICON_PATH, ISSUES_URL, REPO_URL, SETTINGS, WIKI_URL
 from utils.layouts import CINE_SPEEDS
 from view.central_display_area_widget import CentralDisplayAreaWidget
-from view.dialogs import pick_directory
+from view.dialogs import pick_patient
 from view.chat_widget import ChatWidget
 from view.loading_overlay import LoadingOverlay
 from view.results_widget import ResultsWidget
@@ -153,8 +153,9 @@ class MainWindow(QMainWindow):
         self._dock_titles_timer.timeout.connect(self._update_dock_titles)
         self.session_busy = lambda: None  # set by main: why the session cannot end yet, or None
         self._play_timer = QTimer(self)
-        self._play_timer.timeout.connect(lambda: self.step_time_frame(self._play_step))
+        self._play_timer.timeout.connect(self._play_tick)
         self._cine_speed, self._perfusion_speed, self._play_step = 1.0, 1.0, 1
+        self._play_range: tuple[int, int] | None = None  # (first, last) frame of a loop, see play_frames
         # One state record per burst of user input.
         self._screen_log_timer = QTimer(self, singleShot=True, interval=300, timeout=self.log_screen)
         self.full_screen_action = QAction("&Full Screen", self)
@@ -300,6 +301,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.sidebar_dock, self.series_dock, self.chat_dock],
                          [self.sidebar.minimumSizeHint().width(), theme.scaled(200), chat_width],
                          Qt.Horizontal)
+        self.results_dock.hide()  # also in the default layout
         self._default_dock_state = self.saveState()
         saved = SETTINGS.value("window/dock_state")
         if saved is not None:
@@ -308,6 +310,7 @@ class MainWindow(QMainWindow):
                 self._tab_results_with_chat()
             if self._assistant_disabled:
                 self.chat_dock.hide()
+            self.results_dock.hide()  # hidden at every start; View > Results opens it
 
     def _update_dock_titles(self):
         """A dock merged into tabs is named by its tab, so its own title bar goes."""
@@ -525,6 +528,15 @@ class MainWindow(QMainWindow):
                 action.setChecked(speed == (self._perfusion_speed if perfusion else self._cine_speed))
                 group.addAction(action)
                 action.triggered.connect(lambda _=False, s=speed, p=perfusion: self.set_cine_speed(s, p))
+        loops = menu.addMenu("&Loop from This Frame")
+        self.speed_menus.append(loops)
+        looping = self._play_range[1] - self._play_range[0] + 1 if self._play_range and self.is_playing() else None
+        for count in (3, 5, 7, 10):
+            action = loops.addAction(f"{count} frames")
+            action.setCheckable(True)
+            action.setChecked(count == looping)
+            action.setEnabled(self.time_slider.maximum() > 0)
+            action.triggered.connect(lambda _=False, c=count: self._loop_from_here(c))
         menu.addSeparator()
         menu.addAction("Go to &End-Diastole", lambda: self.phase_requested.emit("ED"))
         menu.addAction("Go to End-&Systole", lambda: self.phase_requested.emit("ES"))
@@ -553,7 +565,7 @@ class MainWindow(QMainWindow):
         return action
 
     def on_load_patient_clicked(self):
-        folder_path = pick_directory(self, "Select Patient Folder")
+        folder_path = pick_patient(self)
         if not folder_path:
             return
         self.load_patient_button_signal.emit(folder_path)
@@ -581,6 +593,7 @@ class MainWindow(QMainWindow):
     def show_time_axis(self, num_frames: int, frame: int):
         """Let the time slider drive another time axis (the cines, or a perfusion run) at its frame."""
         self._play_timer.stop()
+        self._play_range = None
         self.time_slider.blockSignals(True)  # the display already shows this frame
         self.time_slider.setMaximum(max(num_frames - 1, 0))
         self.time_slider.setValue(frame)
@@ -592,6 +605,28 @@ class MainWindow(QMainWindow):
         n = self.time_slider.maximum() + 1
         if n > 1:
             self.time_slider.setValue((self.time_slider.value() + step) % n)
+
+    def _play_tick(self):
+        if self._play_range is None:
+            self.step_time_frame(self._play_step)
+            return
+        first, last = self._play_range
+        frame = self.time_slider.value() + self._play_step
+        self.time_slider.setValue(frame if first <= frame <= last else first)
+
+    def _loop_from_here(self, count: int):
+        """Loop count frames from the frame shown, of the series the time slider drives."""
+        first = self.time_slider.value()
+        last = min(first + count - 1, self.time_slider.maximum())
+        if last > first:
+            self.play_frames(first, last)
+
+    def play_frames(self, first: int, last: int):
+        """Loop frames first to last (0-based) of the time axis that the time slider drives; one loop takes as
+        long as a whole run at the current speed."""
+        self._play_range = (first, last)
+        self.time_slider.setValue(first)
+        self._play_timer.start(self._play_interval())
 
     def log_screen(self):
         """The screen to the session log, as far as it changed since the last time."""
@@ -626,12 +661,14 @@ class MainWindow(QMainWindow):
         """ms per step: one heartbeat per second at speed 1, and a perfusion run (one contrast passage) in
         four seconds. At most 50 steps per second, so faster playback skips frames."""
         perfusion = self.display_area_widget.driven_time_axis.startswith("PERF_")
-        fps = (self.time_slider.maximum() + 1) * (self._perfusion_speed / 4 if perfusion else self._cine_speed)
+        frames = self._play_range[1] - self._play_range[0] + 1 if self._play_range else self.time_slider.maximum() + 1
+        fps = frames * (self._perfusion_speed / 4 if perfusion else self._cine_speed)
         self._play_step = max(1, math.ceil(fps / 50))
         return max(20, round(1000 * self._play_step / fps))
 
     def toggle_cine(self):
-        """Play or pause the cine at the chosen speed."""
+        """Play or pause the cine at the chosen speed, over all frames."""
+        self._play_range = None
         if self._play_timer.isActive():
             self._play_timer.stop()
         elif self.time_slider.maximum() > 0:
@@ -639,7 +676,8 @@ class MainWindow(QMainWindow):
 
     def on_time_slider_changed(self, value):
         max_val = self.time_slider.maximum()
-        self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}")
+        loop = f"  (loop {self._play_range[0] + 1}-{self._play_range[1] + 1})" if self._play_range else ""
+        self.time_label.setText(f"Time Frame: {value + 1} / {max_val + 1}{loop}")
         self.time_frame_changed_signal.emit(value)
 
     def show_error(self, title, message):

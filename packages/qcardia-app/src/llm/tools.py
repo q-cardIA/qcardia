@@ -10,6 +10,21 @@ doesn't exist rather than relying on it reading prose correctly.
 from __future__ import annotations
 
 import copy
+import re
+
+
+def zero_based(arguments: dict) -> dict:
+    """A tool call's panels as the app numbers them, from 0: the model numbers them from 1, as the user sees
+    them (panel_idx, match_panel, panels; some models send panels as text)."""
+    args = dict(arguments)
+    for key in ("panel_idx", "match_panel"):
+        try:
+            args[key] = int(float(args[key])) - 1
+        except (KeyError, TypeError, ValueError):
+            pass
+    if args.get("panels") is not None:
+        args["panels"] = [int(float(i)) - 1 for i in re.findall(r"-?\d+(?:\.\d+)?", str(args["panels"]))]
+    return args
 from dataclasses import dataclass
 
 from utils.hanging_protocols import available_presets
@@ -179,7 +194,7 @@ TOOL_SPECS = [
                         "type": "integer",
                         "description": (
                             "Show the slice nearest to the position of this panel's slice, e.g. LGE_SAX "
-                            "at the same depth as the CINE_SAX in panel 0 (slice numbers differ between "
+                            "at the same depth as the CINE_SAX in panel 1 (slice numbers differ between "
                             "stacks)."
                         ),
                     },
@@ -224,11 +239,11 @@ TOOL_SPECS = [
         "function": {
             "name": "set_grid",
             "description": (
-                "Change the panel layout to a rows x cols grid; panels are numbered 0, 1, 2 ... in "
+                "Change the panel layout to a rows x cols grid; panels are numbered 1, 2, 3 ... in "
                 "reading order (left to right, top to bottom). A panel keeps its series when its cell, "
                 "moved by shift_rows/shift_cols, is in the new grid; new panels are empty. Example: to "
                 "add a column on the left of a 2x3 layout, set_grid(rows=2, cols=4, shift_cols=1); then "
-                "panels 0 and 4 are the empty left column. For two halves with their own grids (e.g. one "
+                "panels 1 and 5 are the empty left column. For two halves with their own grids (e.g. one "
                 "large panel next to a 2x2), use set_split_grid."
             ),
             "parameters": {
@@ -355,14 +370,19 @@ TOOL_SPECS = [
         "function": {
             "name": "set_playback",
             "description": (
-                "Play the cines, or a perfusion run, as a movie or stop them, optionally at another speed. "
-                "The cines and the perfusion have a speed each."
+                "Play the cines, or a perfusion run, as a movie or stop them, optionally at another speed, or "
+                "loop a few frames of it (from_frame to to_frame). The cines and the perfusion have a speed each."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "playing": {"type": "boolean", "description": "true = play, false = stop."},
-                    "series_key": _TIME_SERIES_KEY,
+                    "series_key": {"type": "string", "description": (
+                        "What to play or stop, always given: 'cines', a perfusion run (PERF_STRESS_SAX, "
+                        "PERF_REST_SAX, PERF_SAX), or 'perfusion' for the first perfusion run.")},
+                    "from_frame": {"type": "integer", "description": "First frame of a loop (1-based); leave out "
+                                   "with to_frame to play all frames."},
+                    "to_frame": {"type": "integer", "description": "Last frame of a loop (1-based)."},
                     "speed": {
                         "type": "number",
                         "enum": list(CINE_SPEEDS),
@@ -373,7 +393,7 @@ TOOL_SPECS = [
                         ),
                     },
                 },
-                "required": ["playing"],
+                "required": ["playing", "series_key"],
             },
         },
     },
@@ -433,7 +453,7 @@ def build_tools(ctx: ToolContext) -> list[dict]:
             if not usable:
                 continue
             spec = _narrowed(spec, "series_key", usable)
-            spec["function"]["parameters"]["properties"]["panel_idx"]["minimum"] = 0
+            spec["function"]["parameters"]["properties"]["panel_idx"]["minimum"] = 1  # numbered from 1, as the user sees
             tools.append(spec)
             continue
 

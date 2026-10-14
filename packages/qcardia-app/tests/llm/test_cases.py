@@ -509,44 +509,44 @@ for i, prompt in enumerate([
 _m, _v = _loaded()
 _add(
     id="display_ex_001", category="display_explicit", description="CINE_SAX by exact key",
-    model=_m, view=_v, prompt="Show CINE_SAX in panel 2",
+    model=_m, view=_v, prompt="Show CINE_SAX in panel 3",
     expected_tool_calls=[display(2, "CINE_SAX")], match_mode="subset",
 )
 _m, _v = _loaded()
 _add(
     id="display_ex_002", category="display_explicit", description="LGE_SAX by exact key",
-    model=_m, view=_v, prompt="Display LGE_SAX in panel 0",
+    model=_m, view=_v, prompt="Display LGE_SAX in panel 1",
     expected_tool_calls=[display(0, "LGE_SAX")], match_mode="subset",
 )
 _m, _v = _loaded()
 _add(
     id="display_ex_003", category="display_explicit", description="PERF_SAX by exact key",
-    model=_m, view=_v, prompt="Put PERF_SAX in panel 1",
+    model=_m, view=_v, prompt="Put PERF_SAX in panel 2",
     expected_tool_calls=[display(1, "PERF_SAX")], match_mode="subset",
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_4CH"}])
 _add(
     id="display_ex_004", category="display_explicit", description="Fill panel 1 without touching filled panel 0",
-    model=_m, view=_v, prompt="Show CINE_SAX in panel 1",
+    model=_m, view=_v, prompt="Show CINE_SAX in panel 2",
     expected_tool_calls=[display(1, "CINE_SAX")], match_mode="subset",
     notes="Must not re-display panel 0 or call load_subject.",
 )
 _m, _v = _loaded()
 _add(
     id="display_ex_neg_001", category="display_explicit", description="Key that doesn't exist in any catalog",
-    model=_m, view=_v, prompt="Show CINE_5CH in panel 0",
+    model=_m, view=_v, prompt="Show CINE_5CH in panel 1",
     expected_tool_calls=[], match_mode="none",
 )
 _m, _v = _loaded()
 _add(
     id="display_ex_neg_002", category="display_explicit", description="Real sequence, not acquired for this patient",
-    model=_m, view=_v, prompt="Display T2STAR_SAX in panel 0",
+    model=_m, view=_v, prompt="Display T2STAR_SAX in panel 1",
     expected_tool_calls=[], match_mode="none",
 )
 _m, _v = _loaded(grid=(2, 2))
 _add(
     id="display_ex_neg_003", category="display_explicit", description="Panel index out of range for the grid",
-    model=_m, view=_v, prompt="Show LGE_SAX in panel 9",
+    model=_m, view=_v, prompt="Show LGE_SAX in panel 10",
     expected_tool_calls=[], match_mode="none",
 )
 
@@ -556,38 +556,38 @@ _add(
 _m, _v = _loaded()
 _add(
     id="display_nat_001", category="display_natural", description="'Short-axis cine' -> CINE_SAX",
-    model=_m, view=_v, prompt="Show the short-axis cine in panel 1",
+    model=_m, view=_v, prompt="Show the short-axis cine in panel 2",
     expected_tool_calls=[display(1, "CINE_SAX")], match_mode="subset",
 )
 _m, _v = _loaded()
 _add(
     id="display_nat_002", category="display_natural", description="'4-chamber cine view' -> CINE_4CH",
-    model=_m, view=_v, prompt="Display the 4-chamber cine view in panel 0",
+    model=_m, view=_v, prompt="Display the 4-chamber cine view in panel 1",
     expected_tool_calls=[display(0, "CINE_4CH")], match_mode="subset",
 )
 _m, _v = _loaded()
 _add(
     id="display_nat_003", category="display_natural", description="'Late gadolinium enhancement SAX' -> LGE_SAX",
-    model=_m, view=_v, prompt="Show the late gadolinium enhancement short axis in panel 0",
+    model=_m, view=_v, prompt="Show the late gadolinium enhancement short axis in panel 1",
     expected_tool_calls=[display(0, "LGE_SAX")], match_mode="subset",
 )
 _m, _v = _loaded(FULL_STRESS)
 _add(
     id="display_nat_004", category="display_natural", description="'Stress perfusion images' -> PERF_STRESS_SAX",
-    model=_m, view=_v, prompt="Show the stress perfusion images in panel 1",
+    model=_m, view=_v, prompt="Show the stress perfusion images in panel 2",
     expected_tool_calls=[display(1, "PERF_STRESS_SAX")], match_mode="subset",
     notes="Must pick the stress series over the plain PERF_SAX also in the catalog.",
 )
 _m, _v = _loaded()
 _add(
     id="display_nat_neg_001", category="display_natural", description="'T2 star mapping' — real sequence, not in catalog",
-    model=_m, view=_v, prompt="Show T2 star mapping in panel 0",
+    model=_m, view=_v, prompt="Show T2 star mapping in panel 1",
     expected_tool_calls=[], match_mode="none",
 )
 _m, _v = _loaded()
 _add(
     id="display_nat_neg_002", category="display_natural", description="'Myocardial oxygenation map' — no such thing",
-    model=_m, view=_v, prompt="Display the myocardial oxygenation map in panel 1",
+    model=_m, view=_v, prompt="Display the myocardial oxygenation map in panel 2",
     expected_tool_calls=[], match_mode="none",
 )
 
@@ -599,19 +599,19 @@ _add(
 # _m, _v = _loaded({**FULL, "T1MAP_POST_SAX": True})
 # _add(
 #     id="display_ex_t1_001", category="display_explicit", description="T1 map by exact key",
-#     model=_m, view=_v, prompt="Display T1MAP_POST_SAX in panel 2",
+#     model=_m, view=_v, prompt="Display T1MAP_POST_SAX in panel 3",
 #     expected_tool_calls=[display(2, "T1MAP_POST_SAX")], match_mode="subset",
 # )
 # _m, _v = _loaded({**FULL, "T1MAP_POST_SAX": True})
 # _add(
 #     id="display_nat_t1_001", category="display_natural", description="'T1 map'",
-#     model=_m, view=_v, prompt="Display the T1 map in panel 2",
+#     model=_m, view=_v, prompt="Display the T1 map in panel 3",
 #     expected_tool_calls=[display_any_panel("T1MAP_POST_SAX")], match_mode="subset",
 # )
 # _m, _v = _loaded({**FULL, "HASTE_SAX": True})
 # _add(
 #     id="display_nat_anat_001", category="display_natural", description="'Black blood anatomy'",
-#     model=_m, view=_v, prompt="Show the black blood anatomy scan in panel 0",
+#     model=_m, view=_v, prompt="Show the black blood anatomy scan in panel 1",
 #     expected_tool_calls=[display(0, "HASTE_SAX")], match_mode="subset",
 # )
 
@@ -621,7 +621,7 @@ _add(
 _m, _v = _loaded()
 _add(
     id="display_multi_001", category="display_multi", description="Two explicit series in two specific panels",
-    model=_m, view=_v, prompt="Show CINE_2CH in panel 0 and LGE_SAX in panel 1",
+    model=_m, view=_v, prompt="Show CINE_2CH in panel 1 and LGE_SAX in panel 2",
     expected_tool_calls=[display(0, "CINE_2CH"), display(1, "LGE_SAX")], match_mode="any_order",
 )
 _m, _v = _loaded(grid=(2, 2))
@@ -667,7 +667,7 @@ _add(
 _m, _v = _loaded()
 _add(
     id="display_multi_neg_003", category="display_multi", description="Two nonexistent keys — must refuse both",
-    model=_m, view=_v, prompt="Display CINE_5CH and CINE_6CH in panels 0 and 1",
+    model=_m, view=_v, prompt="Display CINE_5CH and CINE_6CH in panels 1 and 2",
     expected_tool_calls=[], match_mode="none",
 )
 
@@ -703,7 +703,7 @@ for i, (prompt, grid, idx, key) in enumerate([
     )
 
 for i, (prompt, grid) in enumerate([
-    ("Show CINE_SAX in panel 8", (2, 4)),
+    ("Show CINE_SAX in panel 9", (2, 4)),  # panels 1-8
     ("Show CINE_SAX in the 5th row", (2, 2)),
 ], start=1):
     _m, _v = _loaded(grid=grid)
@@ -853,13 +853,13 @@ _add(
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
     id="slice_001", category="slice", description="A slice number",
-    model=_m, view=_v, prompt="Show slice 5 of the cine SAX in panel 1",
+    model=_m, view=_v, prompt="Show slice 5 of the cine SAX in panel 2",
     expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(1, "CINE_SAX", 5)),
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "slice": 8}])
 _add(
     id="slice_002", category="slice", description="Another stack at the depth of a panel",
-    model=_m, view=_v, prompt="Show the LGE SAX in panel 1 at the same depth as panel 0",
+    model=_m, view=_v, prompt="Show the LGE SAX in panel 2 at the same depth as panel 1",
     expected_tool_calls=[], match_mode="state",
     expected_state=screen(panel_is(0, "CINE_SAX", 9), panel_is(1, "LGE_SAX", nearest("LGE_SAX", -73.3))),
     notes="display_series(1, LGE_SAX, match_panel=0).",
@@ -901,13 +901,13 @@ _add(
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
     id="slice_005", category="slice", description="The apex at the current frame",
-    model=_m, view=_v, prompt="Show the most apical cine SAX slice that still has LV, myocardium and RV in panel 0",
+    model=_m, view=_v, prompt="Show the most apical cine SAX slice that still has LV, myocardium and RV in panel 1",
     expected_tool_calls=[], match_mode="state", expected_state=screen(panel_is(0, "CINE_SAX", 3)),
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
     id="slice_neg_001", category="slice", description="Slice beyond the stack",
-    model=_m, view=_v, prompt="Show slice 20 of the cine SAX in panel 0",
+    model=_m, view=_v, prompt="Show slice 20 of the cine SAX in panel 1",
     expected_tool_calls=[], match_mode="none", notes="CINE_SAX has 14 slices.",
 )
 
@@ -1033,7 +1033,7 @@ for i, (prompt, slice_no) in enumerate([("Display the base slice", 11), ("Now sh
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"}])
 _add(
     id="nav_006", category="navigation", description="The basal slice of a stack with no LV range of its own",
-    model=_m, view=_v, prompt="Show the basal LGE SAX slice in panel 1",
+    model=_m, view=_v, prompt="Show the basal LGE SAX slice in panel 2",
     expected_tool_calls=[], match_mode="state",
     expected_state=screen(panel_is(1, "LGE_SAX", nearest("LGE_SAX", phantom_depths("CINE_SAX")[10]))),
     notes="The CINE_SAX LV range, mapped to the nearest LGE_SAX slice.",
@@ -1107,7 +1107,7 @@ def _own_window_only(panel: int):
 _m, _v = _segmented([{"idx": 0, "series_key": "LGE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"}], lge=True)
 _add(
     id="window_007", category="window", description="A window step in one panel only",
-    model=_m, view=_v, prompt="Make only panel 1 a bit darker",
+    model=_m, view=_v, prompt="Make only panel 2 a bit darker",
     expected_tool_calls=[], match_mode="state", expected_state=screen(_own_window_only(1)),
 )
 
@@ -1420,7 +1420,7 @@ _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "has_segmentation": T
                       {"idx": 1, "series_key": "CINE_SAX", "has_segmentation": True}])
 _add(
     id="contours_002", category="contours", description="Hide the contours in one panel",
-    model=_m, view=_v, prompt="Hide the segmentation in panel 1",
+    model=_m, view=_v, prompt="Hide the segmentation in panel 2",
     expected_tool_calls=[], match_mode="state",
     expected_state=lambda s: None if s["contours"][:2] == [True, False] else f"contours {s['contours']}",
 )
@@ -1527,6 +1527,51 @@ _add(
 )
 
 
+# === PERFUSION NAVIGATION — frames measured from the CINE_SAX segmentation (fakes.PERFUSION_EVENTS) ======
+
+_m, _v = _segmented(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="perf_nav_001", category="perfusion_nav", description="The maximum LV intensity of the stress run",
+    model=_m, view=_v, prompt="Go to the maximum LV intensity on the stress perfusion",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(perfusion_frames_are({"PERF_STRESS_SAX": 25})),
+    notes="LV peak = frame 25; the rest run keeps its frame.",
+)
+_m, _v = _segmented(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="perf_nav_002", category="perfusion_nav", description="Contrast arrival in the myocardium, rest run",
+    model=_m, view=_v, prompt="Show the rest perfusion where the contrast first reaches the myocardium",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(perfusion_frames_are({"PERF_REST_SAX": 23})),
+)
+_m, _v = _segmented(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="perf_nav_003", category="perfusion_nav", description="Peak myocardial enhancement, then loop 5 frames",
+    model=_m, view=_v, prompt="Go to peak myocardial enhancement on the stress run and loop the 5 frames from there",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(playing_is(True), lambda s: None if (s["driven"], s["play_range"]) == ("PERF_STRESS_SAX", (30, 34))
+                          else f"playing {s['driven']} frames {s['play_range']}, expected PERF_STRESS_SAX (30, 34) 0-based"),
+    notes="Myocardial peak = frame 31: loop frames 31 to 35.",
+)
+_m, _v = _segmented(_PERF_PANELS, catalog=STRESS_REST)
+_v.display_area_widget.driven_time_axis = "PERF_STRESS_SAX"  # the stress panel was selected last
+_add(
+    id="perf_nav_004", category="perfusion_nav", description="Loop cine frames while the slider drives perfusion",
+    model=_m, view=_v, prompt="Loop the cine frames 5 to 9",
+    expected_tool_calls=[], match_mode="state",
+    expected_state=screen(playing_is(True), lambda s: None if (s["driven"], s["play_range"]) == ("CINE", (4, 8))
+                          else f"playing {s['driven']} frames {s['play_range']}, expected CINE (4, 8) 0-based"),
+    notes="Found 2026-10-14: a loop without series_key played the series the slider drove (here perfusion).",
+)
+_m, _v = _displaying(_PERF_PANELS, catalog=STRESS_REST)
+_add(
+    id="perf_nav_neg_001", category="perfusion_nav", description="LV peak asked, CINE_SAX not segmented",
+    model=_m, view=_v, prompt="Go to the peak LV intensity in the stress perfusion",
+    expected_tool_calls=[], match_mode="none",
+    notes="The peaks need the CINE_SAX segmentation: say so and ask whether to run it.",
+)
+
+
 # === ZOOM ======================================================================
 
 _m, _v = _segmented([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_key": "LGE_SAX"},
@@ -1553,7 +1598,7 @@ _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}, {"idx": 1, "series_k
                       {"idx": 2, "series_key": "CINE_2CH"}])
 _add(
     id="zoom_004", category="zoom", description="A percentage on one panel",
-    model=_m, view=_v, prompt="Zoom panel 1 to 50%",
+    model=_m, view=_v, prompt="Zoom panel 2 to 50%",
     expected_tool_calls=[], match_mode="state",
     expected_state=screen(zoomed(("percent", 50.0), [1]), only_zoomed([1])),
 )
@@ -1596,13 +1641,13 @@ for i, prompt in enumerate(["Segment the cine SAX", "Show the segmentation"], st
 _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX"}])
 _add(
     id="segmentation_001", category="segmentation", description="Segment the displayed CINE panel",
-    model=_m, view=_v, prompt="Segment panel 0",
+    model=_m, view=_v, prompt="Segment panel 1",
     expected_tool_calls=[segment("CINE_SAX")], match_mode="exact",
 )
 _m, _v = _displaying([{"idx": 0, "series_key": "LGE_SAX"}])
 _add(
     id="segmentation_002", category="segmentation", description="Segment the displayed LGE panel",
-    model=_m, view=_v, prompt="Segment panel 0",
+    model=_m, view=_v, prompt="Segment panel 1",
     expected_tool_calls=[segment("LGE_SAX")], match_mode="exact",
     notes="run_segmentation offers every loaded CINE modality plus LGE_SAX — see build_tools().",
 )
@@ -1624,7 +1669,7 @@ _add(
 _m, _v = _displaying([{"idx": 0, "series_key": "PERF_SAX"}])
 _add(
     id="segmentation_neg_001", category="segmentation", description="Segment a panel showing an unsegmentable series",
-    model=_m, view=_v, prompt="Segment panel 0",
+    model=_m, view=_v, prompt="Segment panel 1",
     expected_tool_calls=[], match_mode="none",
     notes="PERF_SAX has no segmentation model, so it's absent from run_segmentation's enum.",
 )
@@ -1724,6 +1769,6 @@ _add(
 # _m, _v = _displaying([{"idx": 0, "series_key": "CINE_SAX", "has_segmentation": True}])
 # _add(
 #     id="analysis_001", category="analysis", description="Run analysis after segmentation",
-#     model=_m, view=_v, prompt="Analyse panel 0",
+#     model=_m, view=_v, prompt="Analyse panel 1",
 #     expected_tool_calls=[{"name": "run_analysis", "arguments": {"panel_idx": 0}}], match_mode="subset",
 # )

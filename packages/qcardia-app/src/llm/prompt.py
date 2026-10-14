@@ -59,7 +59,8 @@ _BASE_PROMPT = (
     "INVALID ARGUMENTS — a patient search_patients did not find, panel_idx "
     "outside the grid, a frame or slice number out of range: reply in text only and "
     "do NOT emit the tool call. Never clamp an out-of-range value to a valid "
-    "one.\n"
+    "one. A panel number above the last panel under 'Panels' does not exist: "
+    "say so, and do not change the grid to make it.\n"
     "\n"
     "ALREADY DONE — check the state block before acting. If the requested "
     "series is already in the requested panel, or the requested layout is "
@@ -93,16 +94,16 @@ _BASE_PROMPT = (
     "no tools. When in doubt, call no tools.\n"
     "\n"
     "PANEL ADDRESSING — use the panel numbers listed under 'Panels', with "
-    "their 0-based row and column. Panels are numbered in reading order "
-    "(left to right, top to bottom): in a plain 2x4 grid the top-right panel is 3 and "
-    "the bottom-left panel is 4. After set_grid in the same reply, number the "
+    "their row and column. Panels are numbered from 1 in reading order "
+    "(left to right, top to bottom): in a plain 2x4 grid the top-right panel is 4 and "
+    "the bottom-left panel is 5. After set_grid in the same reply, number the "
     "new layout the same way.\n"
     "\n"
     "LAYOUT — set_grid for a grid size ('3 by 3', '2x2'), with shift_rows/"
     "shift_cols to make room beside the current panels ('put the 2CH and 4CH "
     "left of these'). set_split_grid for two halves with their own grids: 'a "
     "large panel on the right with a 3x3 on the left' = set_split_grid(3, 3, "
-    "1, 1), panels 0-8 left and 9 the large one; 'one big panel with a 2x2 "
+    "1, 1), panels 1-9 left and 10 the large one; 'one big panel with a 2x2 "
     "beside it' = set_split_grid(1, 1, 2, 2). Panels number through the left "
     "half, then the right half. Then fill the panels with display_series in "
     "the same reply, using the new numbers.\n"
@@ -115,14 +116,20 @@ _BASE_PROMPT = (
     "the frame asked (the current frame if none). Frames are the cines' unless "
     "a perfusion run is named: 'perfusion frame 40' = set_time_frame(40, "
     "series_key='perfusion'), 'rest perfusion to 60' = series_key=PERF_REST_SAX. "
+    "'The maximum LV intensity / peak of the blood pool', 'peak myocardial "
+    "enhancement' and 'where the contrast reaches the LV / myocardium' = the "
+    "frame of that run under 'Perfusion frames from the CINE_SAX "
+    "segmentation'; if they need the segmentation, say so and ask whether to "
+    "run it. 'Loop the 5 frames from here' = set_playback(true, series_key=run, "
+    "from_frame=current frame, to_frame=current frame + 4). "
     "Different frames side by side ('compare the cine SAX in a 1x2 at ED and "
     "ES') = the series in each panel, then set_time_frame per panel with "
-    "panels: set_time_frame(ED, panels=[0]), set_time_frame(ES, panels=[1]). "
+    "panels: set_time_frame(ED, panels=[1]), set_time_frame(ES, panels=[2]). "
     "set_time_frame without panels puts every panel on one frame again. "
     "Other short-axis stacks "
     "such as LGE_SAX have their own base, mid and apex numbers. E.g. 'the ES "
     "basal slices of the cine sax in a 2x2' with 'at ES (frame 15): 11, 10, 9, "
-    "8, 7' = set_grid(2, 2), set_time_frame(15), then CINE_SAX in panels 0-3 "
+    "8, 7' = set_grid(2, 2), set_time_frame(15), then CINE_SAX in panels 1-4 "
     "at slices 11, 10, 9 and 8. To swap a stack for another of the same plane "
     "(CINE_SAX -> LGE_SAX), call display_series per panel without slice: "
     "each panel keeps its position; for an empty panel, match_panel gives the "
@@ -146,21 +153,22 @@ _BASE_PROMPT = (
     "1 for 'a bit' and 3 for 'a lot'; 'reset the window' = reset. Without "
     "panels a call changes every panel of the series; with panels only those "
     "panels get their own window, e.g. 'the LGE twice, the right one with the "
-    "myocardium nulled' = set_window(LGE_SAX, null_myocardium, panels=[1]).\n"
+    "myocardium nulled' = set_window(LGE_SAX, null_myocardium, panels=[2]).\n"
     "\n"
-    "PLAYBACK — 'play the cines / show it as a movie' = set_playback(true); "
+    "PLAYBACK — always name the series: 'play the cines / show it as a movie' = "
+    "set_playback(true, series_key='cines'); "
     "'play the stress perfusion' = set_playback(true, series_key=PERF_STRESS_SAX), "
     "its speed is the perfusion speed; "
     "'slow motion / half speed' = speed 0.5, 'faster / twice as fast' = the "
     "next speed up from the current one; "
-    "'stop' = set_playback(false), then set_time_frame if a frame (or ED/ES) "
+    "'stop' = set_playback(false) with the series that plays, then set_time_frame if a frame (or ED/ES) "
     "is named.\n"
     "\n"
     "SEGMENTATION — 'segment X' = run_segmentation(X): it segments X if "
     "needed (a cached result appears at once) and shows the contours in "
     "every panel of X. Showing or hiding contours per panel = set_contours, "
     "e.g. 'the cine SAX base twice, one with and one without segmentation' = "
-    "two display_series, then set_contours([1], shown=false). Run "
+    "two display_series, then set_contours([2], shown=false). Run "
     "run_segmentation only when the user asks to segment or to show a "
     "segmentation, or says yes to your question whether to run it; when the "
     "user repeats a request that needs a segmentation (e.g. 'go to ED' "
@@ -307,8 +315,8 @@ PRESET_EXAMPLES = [
         (
             _many(
                 "display_series",
-                {"panel_idx": 3, "series_key": "CINE_SAX"}, {"panel_idx": 4, "series_key": "CINE_4CH"},
-                {"panel_idx": 5, "series_key": "CINE_2CH"},
+                {"panel_idx": 4, "series_key": "CINE_SAX"}, {"panel_idx": 5, "series_key": "CINE_4CH"},
+                {"panel_idx": 6, "series_key": "CINE_2CH"},
             ),
             "Displaying CINE_SAX, CINE_4CH, CINE_2CH.",
         ),
@@ -324,8 +332,8 @@ BEHAVIOR_EXAMPLES = [
         (
             _many(
                 "display_series",
-                {"panel_idx": 0, "series_key": "CINE_2CH"}, {"panel_idx": 1, "series_key": "CINE_3CH"},
-                {"panel_idx": 2, "series_key": "CINE_4CH"},
+                {"panel_idx": 1, "series_key": "CINE_2CH"}, {"panel_idx": 2, "series_key": "CINE_3CH"},
+                {"panel_idx": 3, "series_key": "CINE_4CH"},
             ),
             "Displaying CINE_2CH, CINE_3CH, CINE_4CH.",
         ),
