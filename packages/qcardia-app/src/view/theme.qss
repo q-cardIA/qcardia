@@ -439,7 +439,7 @@ QLabel[role="viewerMeta"] {
 }
 
 QLabel[role="viewerIndex"] {
-	color: @text_dim;
+	color: @text_faint;
 	font-size: @fs_tiny;
 }
 
