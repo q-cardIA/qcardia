@@ -218,22 +218,7 @@ class BaseSeries:
 
         """
 
-        # Use natsorted to sort the files in the folder in natural order
-        files = natsorted(
-            [
-                # Loop through each file in the folder
-                f
-                for f in self.folder.iterdir()
-                if (
-                    # Check if the path is a file
-                    f.is_file()
-                    # Ignore hidden files that start with "."
-                    and not f.stem.startswith(".")
-                    # Ignore files with "dicomdir" in their name
-                    and "dicomdir" not in str(f).lower()
-                )
-            ]
-        )
+        files = self._dicom_files()
 
         all_dicom_data = []
         slice_position = []
@@ -256,11 +241,12 @@ class BaseSeries:
             # frame-major storage orders, and these values are only ever used as a
             # per-slice sort key below, so it is an exact substitute here.
             if int(getattr(the_ds, "NumberOfTemporalPositions", 0)) == 1:
-                temporal_positions.append(int(the_ds.InstanceNumber))
+                temporal_position = int(the_ds.InstanceNumber)
             elif hasattr(the_ds, "TemporalPositionIdentifier"):
-                temporal_positions.append(int(the_ds.TemporalPositionIdentifier))
+                temporal_position = int(the_ds.TemporalPositionIdentifier)
             else:
-                temporal_positions.append(int(the_ds.InstanceNumber))
+                temporal_position = int(the_ds.InstanceNumber)
+            temporal_positions.append(self._image_sort_key(the_ds, temporal_position))
 
         if not all_dicom_data:
             raise FileNotFoundError(f"No DICOM images with pixel data in {self.folder}")
@@ -330,6 +316,35 @@ class BaseSeries:
             all_dicom_data[0].Rows,
             all_dicom_data[0].Columns,
         )
+
+    def _dicom_files(self) -> list[Path]:
+        """The files `_load_data` reads: those in `self.folder`."""
+        return self._folder_files(self.folder)
+
+    @staticmethod
+    def _folder_files(folder: Path) -> list[Path]:
+        """
+        The files in a folder, in natural order, without hidden files and
+        DICOMDIR files.
+        """
+        return natsorted(
+            [
+                f
+                for f in folder.iterdir()
+                if (
+                    f.is_file()
+                    and not f.stem.startswith(".")
+                    and "dicomdir" not in str(f).lower()
+                )
+            ]
+        )
+
+    def _image_sort_key(self, ds: pydicom.Dataset, temporal_position: int):
+        """
+        The key that orders the images of a slice in `_load_data`. By default,
+        the temporal position.
+        """
+        return temporal_position
 
     def _get_slices_from_positions(
         self, positions: List[List[float]], orientations: List[List[float]]
@@ -943,10 +958,40 @@ class CineSeries(BaseSeries):
 
 
 class LGESeries(BaseSeries):
+    """
+    A late gadolinium enhancement series, with the magnitude and the PSIR image
+    of each slice.
 
-    def __init__(self, folder: Path, batch_size: int = 50):
-        super().__init__(folder, batch_size)
+    - Philips stores the magnitude and the PSIR in one series.
+    - Siemens stores them as two series (e.g. "_MAG" and "_PSIR") with the
+      same ProtocolName. Pass both folders; their images are combined before
+      they are split into slices, so each slice has both images.
+
+    In each slice, the magnitude image comes first (`pixel_array[0]`), and the
+    PSIR image is also in `psir_array`.
+
+    Args:
+        folders (Path | list[Path]): The folder of the series, or the folders
+            of the series of one acquisition.
+    """
+
+    def __init__(self, folders: Path | list[Path], batch_size: int = 50):
+        self.folders = [Path(folders)] if isinstance(folders, (str, Path)) else folders
+        super().__init__(self.folders[0], batch_size)
         self._extract_psir()
+
+    def _dicom_files(self) -> list[Path]:
+        """The files of all folders, one folder after the other."""
+        return [f for folder in self.folders for f in self._folder_files(folder)]
+
+    def _image_sort_key(self, ds: pydicom.Dataset, temporal_position: int):
+        """
+        The temporal position, then the magnitude before other images. The two
+        Siemens series give the images of a slice the same InstanceNumber.
+        """
+        image_type = [str(v).upper() for v in ds.get("ImageType", [])]
+        is_magnitude = len(image_type) > 2 and image_type[2].startswith("M")
+        return temporal_position, not is_magnitude
 
     def _compute_primary_slices(self):
         self.base_slice_num = 4
