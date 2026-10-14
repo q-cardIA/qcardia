@@ -229,7 +229,7 @@ class ChatController:
         def axis(key):  # the cines share one time axis; each perfusion run has its own
             return key if key and key.startswith("PERF_") else CINE_TIME_AXIS if key and key.startswith("CINE_") else None
         showing = {p["idx"] for p in self.view.display_area_widget.panel_assignments() if axis(p["series_key"]) in axes}
-        return bool(showing) and showing <= set(panels)
+        return bool(showing) and showing == set(panels)
 
     def _perfusion_runs(self) -> list[str]:
         """The loaded perfusion runs, stress first as in the perfusion preset."""
