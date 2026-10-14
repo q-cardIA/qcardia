@@ -235,7 +235,12 @@ class DICOMController:
     def _build_browser_cards(self, result, loading: bool = False) -> list[SeriesCardInfo]:
         """With loading, the series still load: no thumbnails yet, they come with the series."""
         cards = []
+        carded_keys = set()
         for entry in result.entries:
+            if entry.key is not None and entry.is_primary:
+                if entry.key in carded_keys:  # a Siemens perfusion run has a primary folder per slice: one card
+                    continue
+                carded_keys.add(entry.key)
             is_lge_like = entry.sequence_name in {"DBLGE", "WBLGE"}
             loaded_here = entry.key is not None and entry.is_primary and entry.key in result.loaded
 
