@@ -1,6 +1,6 @@
 [project]
 name = "qcardia-app"
-version = "0.1.0"
+version = "1.0.0"
 description = "Interactive DICOM viewer"
 authors = [
     {name = "Cian Scannell", email = "c.m.scannell@tue.nl"}
@@ -30,3 +30,5 @@ qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "siemens-c
 
 [tool.uv]
 environments = ["sys_platform == 'win32'", "sys_platform != 'win32'"]
+# qcardia-data pins matplotlib==3.9.1, which is yanked and has no Windows wheels.
+override-dependencies = ["matplotlib>=3.9.2,<3.11"]
