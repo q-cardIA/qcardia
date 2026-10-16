@@ -5,8 +5,19 @@ from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
-from qcardia_models.models import ContextUNet2d, UNet2d
-from qcardia_models.training_utils import is_transformer_model
+from qcardia_models.models import UNet2d
+
+# The public qcardia-models has no context-aware model. Plain UNets still load.
+try:
+    from qcardia_models.models import ContextUNet2d
+except ImportError:
+    ContextUNet2d = None
+
+
+def is_transformer_model(model_config: Dict) -> bool:
+    """Same rule as qcardia_models.training_utils.is_transformer_model."""
+    return bool(model_config.get("transformer_params"))
+
 
 from .config_handler import InferenceConfig, unwrap_wandb_config
 
@@ -49,6 +60,11 @@ def load_model_from_config(
     parsed = config if isinstance(config, InferenceConfig) else InferenceConfig(config)
 
     if determine_model_type(config) == "transformer":
+        if ContextUNet2d is None:
+            raise ImportError(
+                "This qcardia-models has no ContextUNet2d. Context-aware models "
+                "need the qcardia-models-dev context-unet branch."
+            )
         model = ContextUNet2d(
             nr_input_channels=parsed.nr_image_channels,
             channels_list=parsed.channels_list,
@@ -60,13 +76,20 @@ def load_model_from_config(
             la_vector_integration=parsed.la_vector_integration,
         )
     else:
+        # The public UNet2d takes no LA-vector arguments, so pass them only for
+        # an LA-conditioned model (which then needs qcardia-models-dev).
+        la_kwargs = {}
+        if parsed.la_vector_dim:
+            la_kwargs = {
+                "la_vector_dim": parsed.la_vector_dim,
+                "la_vector_integration": parsed.la_vector_integration,
+            }
         model = UNet2d(
             nr_input_channels=parsed.nr_image_channels,
             channels_list=parsed.channels_list,
             nr_output_classes=parsed.nr_classes,
             nr_output_scales=parsed.nr_output_scales,
-            la_vector_dim=parsed.la_vector_dim,
-            la_vector_integration=parsed.la_vector_integration,
+            **la_kwargs,
         )
 
     candidates = [wandb_run_path / name for name in WEIGHTS_NAMES]
