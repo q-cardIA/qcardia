@@ -1,0 +1,58 @@
+# Keeps `main` of the private research mirror (q-cardIA/qcardia-dev) equal to `main`
+# of this public repository.
+#
+# The file is in the public repo so that both `main` branches stay identical, but the
+# job only runs in the private mirror (see `if:` below). In the public repo it is
+# skipped.
+#
+# The sync is a fast-forward only. If private `main` has commits that are not on
+# public `main`, the job fails and does not change anything: research work belongs on
+# branches, not on private `main`.
+#
+# Token: GITHUB_TOKEN cannot push commits that change files in `.github/workflows/`.
+# For those, add a `SYNC_TOKEN` secret to the private repo: a fine-grained personal
+# access token for q-cardIA/qcardia-dev with "Contents" and "Workflows" read and write.
+# Without the secret the job uses GITHUB_TOKEN and fails only when upstream changes a
+# workflow file.
+name: Sync private mirror
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # every day at 05:00 UTC
+  workflow_dispatch: # manual run from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-private-mirror
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'q-cardIA/qcardia-dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out private main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - name: Fetch public main
+        run: git fetch --no-tags https://github.com/q-cardIA/qcardia.git main:refs/remotes/upstream/main
+
+      - name: Fast-forward private main
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse upstream/main)" ]; then
+            echo "Private main is already up to date."
+            exit 0
+          fi
+          if ! git merge --ff-only upstream/main; then
+            echo "::error::Private main has commits that are not on public main. Move them to a branch, then reset private main to public main."
+            exit 1
+          fi
+          git push origin main
+          echo "Private main fast-forwarded to $(git rev-parse --short HEAD)." >> "$GITHUB_STEP_SUMMARY"
