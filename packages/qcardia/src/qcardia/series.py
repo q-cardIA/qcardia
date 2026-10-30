@@ -10,6 +10,10 @@ Classes:
     BaseSeries: A base class for handling sequences of DICOM images.
 """
 
+from __future__ import annotations
+
+import re
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import List
@@ -27,6 +31,15 @@ from skimage.measure import find_contours
 from torch.nn import functional as F
 
 import qcardia.utils as utils
+from qcardia.disambiguate import is_phase_image
+from qcardia.inference import (
+    InferenceConfig,
+    InferencePredictor,
+    compute_la_vectors,
+    load_model_from_config,
+    resolve_lax_model_path,
+)
+from qcardia.inference.context_builder import from_slice_major_layout, to_slice_major_layout
 
 
 class BaseSeries:
@@ -64,6 +77,13 @@ class BaseSeries:
         self.apex_slice_num = 3
         self.rv_insertion_points = [[0, 0], [self.rows, 0]]
         self.lv_center_point = [[self.rows // 2, self.columns // 2]]
+        self._la_vectors = None
+
+    @property
+    def la_vectors(self) -> torch.Tensor | None:
+        """LA conditioning vectors computed by the last `predict_segmentation`
+        call, or None if that model wasn't LA-conditioned (or hasn't run yet)."""
+        return self._la_vectors
 
     def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
         """
@@ -98,41 +118,83 @@ class BaseSeries:
             seg_nib = nib.Nifti1Image(seg_prediction, np.eye(4))
             nib.save(seg_nib, output_path / "segmentation.nii")
 
-    def _run_model(self, wandb_run_path: Path, image_type: str = "pixel") -> None:
+    def _run_model(
+        self,
+        wandb_run_path: Path,
+        image_type: str = "pixel",
+        lax_dicom_dir: Path = None,
+        lax_model_path: Path = None,
+        withhold_la_conditioning: bool = False,
+    ) -> None:
         """
         Runs the model inference on preprocessed slices.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            image_type (str): Which cached array to segment ("pixel", "psir", ...).
+            lax_dicom_dir (Path): Long-axis (4CH) DICOM directory, required by
+                models trained with LA vector conditioning.
+            lax_model_path (Path): Weights used to pre-segment the long-axis view.
+                Defaults to the conditioned model's own `weights_path`.
+            withhold_la_conditioning (bool): Run a conditioned model without its
+                LA vectors on purpose, to measure how much they contribute.
+                Without this, doing so by omission raises.
         """
         preprocessed_slices = self._preproccess_slices(
             self._get_array(image_type=image_type)
         )
-        config = self._get_config(wandb_run_path)
+        raw_config = self._get_config(wandb_run_path)
+        config = InferenceConfig(raw_config)
 
-        self.inference_dict["target_pixdim"] = torch.tensor(
-            config["data"]["target_pixdim"]
-        )
-        self.inference_dict["target_size"] = torch.tensor(config["data"]["target_size"])
+        self.inference_dict["target_pixdim"] = torch.tensor(config.target_pixdim)
+        self.inference_dict["target_size"] = torch.tensor(config.target_size)
+        self.inference_dict["grid_sample_modes"] = [config.image_grid_sample_mode]
+        self.inference_dict["nr_output_classes"] = config.nr_classes
 
-        self.inference_dict["grid_sample_modes"] = [
-            config["data"]["image_grid_sample_mode"]
-        ]
-        self.inference_dict["nr_output_classes"] = config["unet"]["nr_output_classes"]
-        the_model = UNet2d(
-            nr_input_channels=config["unet"]["nr_image_channels"],
-            channels_list=config["unet"]["channels_list"],
-            nr_output_classes=config["unet"]["nr_output_classes"],
-            nr_output_scales=config["unet"]["nr_output_scales"],
-        ).to("cpu")
-        model_weights = torch.load(wandb_run_path / "files" / "last_model.pt")
-        the_model.load_state_dict(model_weights)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        the_model = load_model_from_config(raw_config, wandb_run_path, device=device)
 
         self.inference_dict["dimension_scale_factor"], rescaled_tensor = (
             self._rescale_tensor(preprocessed_slices)
         )
         standardised_tensor = utils.standardise(rescaled_tensor)
-        model_output = self._forward_model(the_model, standardised_tensor)
+
+        # (Z, T, H, W) as actually loaded — _get_array may trim frames, so this is
+        # the authoritative shape, not self.number_of_slices/_temporal_positions.
+        n_slices, n_frames = (int(x) for x in self.inference_dict["original_shape"][:2])
+        if config.needs_context():
+            standardised_tensor = to_slice_major_layout(
+                standardised_tensor, n_slices, n_frames
+            )
+
+        la_vectors = None
+        self._la_vectors = None
+        if config.la_vector_integration and not withhold_la_conditioning:
+            if lax_dicom_dir is None:
+                raise ValueError(
+                    f"Model at {wandb_run_path} was trained with "
+                    f"la_vector_integration='{config.la_vector_integration}' but no "
+                    f"lax_dicom_dir was given. Pass the long-axis DICOM directory, or "
+                    f"use a model without LA conditioning."
+                )
+            la_vectors = compute_la_vectors(
+                sax_dicom_dir=self.folder,
+                lax_dicom_dir=Path(lax_dicom_dir),
+                lax_model_path=resolve_lax_model_path(
+                    lax_model_path, raw_config, wandb_run_path
+                ),
+                n_samples=config.la_vector_dim,
+                device=device,
+            )
+            self._la_vectors = la_vectors
+
+        predictor = InferencePredictor(
+            the_model, config, device=device, batch_size=self.batch_size
+        )
+        model_output = predictor.predict(standardised_tensor, la_vectors=la_vectors)
+
+        if config.needs_context():
+            model_output, _, _ = from_slice_major_layout(model_output)
 
         rescale_model_output = self._invert_rescale_tensor(model_output)
         model_prediction = torch.argmax(
@@ -156,22 +218,7 @@ class BaseSeries:
 
         """
 
-        # Use natsorted to sort the files in the folder in natural order
-        files = natsorted(
-            [
-                # Loop through each file in the folder
-                f
-                for f in self.folder.iterdir()
-                if (
-                    # Check if the path is a file
-                    f.is_file()
-                    # Ignore hidden files that start with "."
-                    and not f.stem.startswith(".")
-                    # Ignore files with "dicomdir" in their name
-                    and "dicomdir" not in str(f).lower()
-                )
-            ]
-        )
+        files = self._dicom_files()
 
         all_dicom_data = []
         slice_position = []
@@ -181,13 +228,45 @@ class BaseSeries:
         # Read DICOM files and extract relevant information
         for file in files:
             the_ds = pydicom.dcmread(file)
+
+            if "PixelData" not in the_ds:
+                continue
+
             all_dicom_data.append(the_ds)
             slice_position.append(the_ds.ImagePositionPatient)
             slice_orientation.append(the_ds.ImageOrientationPatient)
-            if int(the_ds.NumberOfTemporalPositions) == 1:
-                temporal_positions.append(int(the_ds.InstanceNumber))
+
+            # TemporalPositionIdentifier is absent in many cine exports. Within a
+            # slice, InstanceNumber increases with time for both slice-major and
+            # frame-major storage orders, and these values are only ever used as a
+            # per-slice sort key below, so it is an exact substitute here.
+            if int(getattr(the_ds, "NumberOfTemporalPositions", 0)) == 1:
+                temporal_position = int(the_ds.InstanceNumber)
+            elif hasattr(the_ds, "TemporalPositionIdentifier"):
+                temporal_position = int(the_ds.TemporalPositionIdentifier)
             else:
-                temporal_positions.append(int(the_ds.TemporalPositionIdentifier))
+                temporal_position = int(the_ds.InstanceNumber)
+            temporal_positions.append(self._image_sort_key(the_ds, temporal_position))
+
+        if not all_dicom_data:
+            raise FileNotFoundError(f"No DICOM images with pixel data in {self.folder}")
+
+        # Scout/localiser images occasionally share a folder with the acquisition.
+        # They cannot be part of the same volume, and Rows/Columns below is taken
+        # from the first dataset, so keep a single image size.
+        all_shapes = [(ds.Rows, ds.Columns) for ds in all_dicom_data]
+        if len(set(all_shapes)) > 1:
+            dominant_shape = Counter(all_shapes).most_common(1)[0][0]
+            n_dropped = sum(1 for s in all_shapes if s != dominant_shape)
+            print(
+                f"    Warning: mixed image sizes in {self.folder}; keeping "
+                f"{dominant_shape[0]}x{dominant_shape[1]} and dropping {n_dropped} file(s)."
+            )
+            keep = [s == dominant_shape for s in all_shapes]
+            all_dicom_data = [d for d, k in zip(all_dicom_data, keep) if k]
+            slice_position = [p for p, k in zip(slice_position, keep) if k]
+            slice_orientation = [o for o, k in zip(slice_orientation, keep) if k]
+            temporal_positions = [t for t, k in zip(temporal_positions, keep) if k]
 
         # Gets unique positions from given positions and orientations.
         # assigns a slice index to each image based on its position.
@@ -237,6 +316,35 @@ class BaseSeries:
             all_dicom_data[0].Rows,
             all_dicom_data[0].Columns,
         )
+
+    def _dicom_files(self) -> list[Path]:
+        """The files `_load_data` reads: those in `self.folder`."""
+        return self._folder_files(self.folder)
+
+    @staticmethod
+    def _folder_files(folder: Path) -> list[Path]:
+        """
+        The files in a folder, in natural order, without hidden files and
+        DICOMDIR files.
+        """
+        return natsorted(
+            [
+                f
+                for f in folder.iterdir()
+                if (
+                    f.is_file()
+                    and not f.stem.startswith(".")
+                    and "dicomdir" not in str(f).lower()
+                )
+            ]
+        )
+
+    def _image_sort_key(self, ds: pydicom.Dataset, temporal_position: int):
+        """
+        The key that orders the images of a slice in `_load_data`. By default,
+        the temporal position.
+        """
+        return temporal_position
 
     def _get_slices_from_positions(
         self, positions: List[List[float]], orientations: List[List[float]]
@@ -314,12 +422,21 @@ class BaseSeries:
             ndarray: The pixel array for all slices/times.
         """
 
-        return np.asarray(
-            [
-                self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
-                for i in range(self.number_of_slices)
-            ]
-        )
+        arrays = [
+            self.slice_data[f"slice{i+1:02}"][f"{image_type}_array"]
+            for i in range(self.number_of_slices)
+        ]
+        # Slices can end up with different frame counts (dropped or extra images);
+        # np.asarray would then build a ragged object array that fails downstream.
+        frame_counts = [len(a) for a in arrays]
+        if len(set(frame_counts)) > 1:
+            dominant_n = Counter(frame_counts).most_common(1)[0][0]
+            print(
+                f"    Warning: inconsistent frame counts across slices "
+                f"{sorted(set(frame_counts))}; trimming to {dominant_n} frames."
+            )
+            arrays = [a[:dominant_n] for a in arrays if len(a) >= dominant_n]
+        return np.asarray(arrays)
 
     def _reshape_array(self, pa: np.ndarray):
         """
@@ -373,8 +490,17 @@ class BaseSeries:
             dict: The configuration loaded from the specified path.
         """
 
-        config_path = wandb_run_path / "files" / "config-copy.yaml"
-        return yaml.load(Path.open(config_path), Loader=yaml.FullLoader)
+        for config_path in (
+            wandb_run_path / "config-copy.yaml",
+            wandb_run_path / "config.yaml",
+            wandb_run_path / "files" / "config-copy.yaml",
+            wandb_run_path / "files" / "config.yaml",
+        ):
+            if config_path.exists():
+                return yaml.load(config_path.open(), Loader=yaml.FullLoader)
+        raise FileNotFoundError(
+            f"No config-copy.yaml or config.yaml found in {wandb_run_path}"
+        )
 
     def _get_pixel_spacing(self):
         """
@@ -383,11 +509,18 @@ class BaseSeries:
         Returns:
             torch.Tensor: A tensor containing the pixel spacing values.
         """
+        meta = self.slice_data["slice01"]["meta_data"][0]
+        # SpacingBetweenSlices is the centre-to-centre distance, which is what a
+        # voxel volume needs; SliceThickness is the acquired slab and differs from
+        # it whenever there is a slice gap or overlap.
+        slice_spacing = getattr(meta, "SpacingBetweenSlices", None)
+        if slice_spacing is None:
+            slice_spacing = meta.SliceThickness
         return torch.tensor(
             [
-                float(self.slice_data["slice01"]["meta_data"][0].PixelSpacing[0]),
-                float(self.slice_data["slice01"]["meta_data"][0].PixelSpacing[1]),
-                float(self.slice_data["slice01"]["meta_data"][0].SliceThickness),
+                float(meta.PixelSpacing[0]),
+                float(meta.PixelSpacing[1]),
+                float(slice_spacing),
             ],
             dtype=torch.float32,
         )
@@ -556,17 +689,33 @@ class CineSeries(BaseSeries):
     def __init__(self, folder: Path, batch_size: int = 50):
         super().__init__(folder, batch_size)
 
-    def predict_segmentation(self, wandb_run_path: Path) -> np.ndarray:
+    def predict_segmentation(
+        self,
+        wandb_run_path: Path,
+        lax_dicom_dir: Path = None,
+        lax_model_path: Path = None,
+        withhold_la_conditioning: bool = False,
+    ) -> np.ndarray:
         """
         Predict the segmentation for the DICOM data using the specified model.
 
         Args:
             wandb_run_path (Path): The path to the WandB run directory.
+            lax_dicom_dir (Path): Long-axis (4CH) DICOM directory, required by
+                models trained with LA vector conditioning.
+            lax_model_path (Path): Weights used to pre-segment the long-axis view.
+            withhold_la_conditioning (bool): Deliberately run a conditioned model
+                without its LA vectors, to measure their contribution.
 
         Returns:
             np.ndarray: The predicted segmentation for the DICOM data.
         """
-        self._run_model(wandb_run_path)
+        self._run_model(
+            wandb_run_path,
+            lax_dicom_dir=lax_dicom_dir,
+            lax_model_path=lax_model_path,
+            withhold_la_conditioning=withhold_la_conditioning,
+        )
         self._lv = 1.0 * (self._segmentation_prediction == 1)
         self._myo = 1.0 * (self._segmentation_prediction == 2)
         self._rv = 1.0 * (self._segmentation_prediction == 3)
@@ -809,10 +958,40 @@ class CineSeries(BaseSeries):
 
 
 class LGESeries(BaseSeries):
+    """
+    A late gadolinium enhancement series, with the magnitude and the PSIR image
+    of each slice.
 
-    def __init__(self, folder: Path, batch_size: int = 50):
-        super().__init__(folder, batch_size)
+    - Philips stores the magnitude and the PSIR in one series.
+    - Siemens stores them as two series (e.g. "_MAG" and "_PSIR") with the
+      same ProtocolName. Pass both folders; their images are combined before
+      they are split into slices, so each slice has both images.
+
+    In each slice, the magnitude image comes first (`pixel_array[0]`), and the
+    PSIR image is also in `psir_array`.
+
+    Args:
+        folders (Path | list[Path]): The folder of the series, or the folders
+            of the series of one acquisition.
+    """
+
+    def __init__(self, folders: Path | list[Path], batch_size: int = 50):
+        self.folders = [Path(folders)] if isinstance(folders, (str, Path)) else folders
+        super().__init__(self.folders[0], batch_size)
         self._extract_psir()
+
+    def _dicom_files(self) -> list[Path]:
+        """The files of all folders, one folder after the other."""
+        return [f for folder in self.folders for f in self._folder_files(folder)]
+
+    def _image_sort_key(self, ds: pydicom.Dataset, temporal_position: int):
+        """
+        The temporal position, then the magnitude before other images. The two
+        Siemens series give the images of a slice the same InstanceNumber.
+        """
+        image_type = [str(v).upper() for v in ds.get("ImageType", [])]
+        is_magnitude = len(image_type) > 2 and image_type[2].startswith("M")
+        return temporal_position, not is_magnitude
 
     def _compute_primary_slices(self):
         self.base_slice_num = 4
@@ -1015,3 +1194,352 @@ class LGESeries(BaseSeries):
             self._run_model(wandb_run_path, image_type="psir")
 
         return self._segmentation_prediction
+
+
+class PerfusionSeries(BaseSeries):
+    """
+    A first-pass perfusion series (one stress or rest acquisition).
+
+    The arterial input function (AIF) images of a dual-sequence acquisition are
+    kept apart from the myocardial slices, in `aif_data`:
+
+    - Philips stores the AIF slice in the same series, at or near the location
+      of the basal slice but with a different acquisition (slice spacing, and
+      sometimes phase-encoding direction). It is found and moved out of
+      `slice_data`.
+    - Siemens stores each slice, and the low-resolution AIF, as a separate
+      series. Pass all the folders of the acquisition; their slices are
+      combined, and the AIF slice is found in the same way. Only the frames
+      of the heartbeats in which every slice and the AIF have a frame are kept
+      (see `_match_frames_by_heartbeat`). This drops the proton-density frames
+      of the myocardial slices, which have no AIF frame.
+
+    With a single folder (Philips), all frames are kept, including the
+    proton-density and baseline frames.
+
+    Args:
+        folders (Path | list[Path]): The folder of the acquisition, or the
+            folders of its series (see `select_perfusion_series`).
+    """
+
+    def __init__(self, folders: Path | list[Path], batch_size: int = 50):
+        self.folders = [Path(folders)] if isinstance(folders, (str, Path)) else folders
+        super().__init__(self.folders[0], batch_size)
+        self.aif_data = self._extract_aif_slice()
+
+    def _load_data(self):
+        """
+        Load each folder as a BaseSeries and combine their slices, ordered by
+        slice position as in `BaseSeries._get_slices_from_positions`.
+        """
+        if len(self.folders) == 1:
+            return super()._load_data()
+
+        series = [BaseSeries(folder) for folder in self.folders]
+        all_slices = sorted(
+            (data for s in series for data in s.slice_data.values()),
+            key=lambda data: data["slice_position"],
+            reverse=True,
+        )
+        all_slices = self._match_frames_by_heartbeat(all_slices)
+        slices_dict = {f"slice{i+1:02}": data for i, data in enumerate(all_slices)}
+        # The image size of the myocardial slices, which outnumber the AIF slice.
+        rows, columns = Counter(
+            (data["meta_data"][0].Rows, data["meta_data"][0].Columns)
+            for data in all_slices
+        ).most_common(1)[0][0]
+        n_frames = len(all_slices[0]["pixel_array"])
+        return slices_dict, len(all_slices), n_frames, rows, columns
+
+    def _match_frames_by_heartbeat(self, slices: list[dict]) -> list[dict]:
+        """
+        Keep only the frames of the heartbeats in which every slice has a frame.
+
+        The heartbeat of a frame is its R-wave time: AcquisitionTime minus
+        TriggerTime. Frames of two slices are in the same heartbeat if each is
+        the other's nearest frame in R-wave time. The slice with the fewest
+        frames (on Siemens, the AIF) is the reference.
+
+        Args:
+            slices (list[dict]): `slice_data` values, one per slice.
+
+        Returns:
+            list[dict]: The slices, each with the same number of frames.
+        """
+
+        def r_wave_times(data: dict) -> np.ndarray:
+            return np.array(
+                [
+                    self._dicom_time_to_seconds(meta.AcquisitionTime)
+                    - float(getattr(meta, "TriggerTime", 0.0)) / 1000
+                    for meta in data["meta_data"]
+                ]
+            )
+
+        times = [r_wave_times(data) for data in slices]
+        reference = times[int(np.argmin([len(t) for t in times]))]
+
+        # matches[i][j]: the frame of slice i in the heartbeat of reference frame j.
+        matches = []
+        keep = np.ones(len(reference), dtype=bool)
+        for t in times:
+            distances = np.abs(t[:, None] - reference[None, :])
+            nearest_frame = distances.argmin(axis=0)
+            nearest_reference = distances.argmin(axis=1)
+            keep &= nearest_reference[nearest_frame] == np.arange(len(reference))
+            matches.append(nearest_frame)
+
+        n_dropped = sorted({len(t) - int(keep.sum()) for t in times})
+        if n_dropped != [0]:
+            print(
+                f"    {self.folder.parent.name}: kept {int(keep.sum())} frames that "
+                f"every slice has; dropped {n_dropped} frame(s) per slice."
+            )
+        return [
+            {
+                **data,
+                "pixel_array": [data["pixel_array"][i] for i in frames[keep]],
+                "meta_data": [data["meta_data"][i] for i in frames[keep]],
+            }
+            for data, frames in zip(slices, matches)
+        ]
+
+    @staticmethod
+    def _acquisition_signature(meta) -> tuple:
+        return (
+            int(meta.Rows),
+            int(meta.Columns),
+            tuple(float(x) for x in meta.PixelSpacing),
+            # The Philips AIF slice often has the same phase encoding and
+            # matrix as the myocardial slices, but its own slice spacing.
+            str(getattr(meta, "SpacingBetweenSlices", "")),
+            str(getattr(meta, "InPlanePhaseEncodingDirection", "")),
+            tuple(getattr(meta, "AcquisitionMatrix", ())),
+        )
+
+    def _extract_aif_slice(self) -> dict | None:
+        """
+        Move the slice whose acquisition differs from all other slices out of
+        `slice_data` and return it. Returns None if there is no such slice.
+        """
+        keys = list(self.slice_data)
+        signatures = [
+            self._acquisition_signature(self.slice_data[k]["meta_data"][0])
+            for k in keys
+        ]
+        counts = Counter(signatures)
+        if len(keys) < 3 or len(counts) != 2 or min(counts.values()) != 1:
+            if len(counts) > 1:
+                print(
+                    f"    Warning: slices in {self.folder} have {len(counts)} "
+                    f"different acquisitions; no AIF slice extracted."
+                )
+            return None
+
+        aif_signature = min(counts, key=counts.get)
+        aif_key = keys[signatures.index(aif_signature)]
+        aif_data = self.slice_data[aif_key]
+        myocardial_slices = [self.slice_data[k] for k in keys if k != aif_key]
+        self.slice_data = {
+            f"slice{i+1:02}": data for i, data in enumerate(myocardial_slices)
+        }
+        self.number_of_slices = len(myocardial_slices)
+        return aif_data
+
+    @staticmethod
+    def _dicom_time_to_seconds(dicom_time) -> float:
+        """Convert a DICOM TM value (HHMMSS.FFFFFF) to seconds after midnight."""
+        dicom_time = str(dicom_time)
+        return (
+            3600 * int(dicom_time[0:2])
+            + 60 * int(dicom_time[2:4])
+            + float(dicom_time[4:])
+        )
+
+    def _get_slice_times(self, slice_data: dict) -> np.ndarray:
+        """
+        The time of each frame of a slice, in seconds after its first frame.
+        Siemens gives one ContentTime for all frames, so AcquisitionTime is used,
+        and ContentTime only when AcquisitionTime does not change.
+        """
+        for tag in ("AcquisitionTime", "ContentTime"):
+            values = [getattr(meta, tag, None) for meta in slice_data["meta_data"]]
+            if None in values or len(set(values)) == 1:
+                continue
+            times = np.array([self._dicom_time_to_seconds(v) for v in values])
+            # A scan that continues past midnight starts again at zero.
+            return np.mod(times - times[0], 24 * 3600)
+        raise ValueError(f"No frame times in {self.folder}")
+
+    def get_times(self) -> np.ndarray:
+        """
+        Get the time of each frame of the myocardial slices.
+
+        Returns:
+            np.ndarray: The times in seconds after the first frame of each
+                slice, shape (Z, T).
+        """
+        return np.asarray(
+            [self._get_slice_times(data) for data in self.slice_data.values()]
+        )
+
+    def get_aif_times(self) -> np.ndarray | None:
+        """
+        Get the time of each frame of the AIF slice.
+
+        Returns:
+            np.ndarray: The times in seconds after the first AIF frame, shape (T,),
+                or None if there is no AIF slice.
+        """
+        if self.aif_data is None:
+            return None
+        return self._get_slice_times(self.aif_data)
+
+    def get_aif_array(self) -> np.ndarray | None:
+        """
+        Get the images of the AIF slice.
+
+        Returns:
+            np.ndarray: The AIF images, shape (T, H, W), or None if there is no
+                AIF slice.
+        """
+        if self.aif_data is None:
+            return None
+        return np.asarray(self.aif_data["pixel_array"])
+
+
+class FlowSeries(BaseSeries):
+    """
+    A 2D phase-contrast flow acquisition: one slice, with a magnitude and a
+    through-plane velocity image for each frame of the heart cycle.
+
+    - Philips stores one series with the magnitude (ImageType `M_FFE`), a
+      modulus (`M_PCA`, not used) and the phase, which the Real World Value
+      Mapping maps to cm/s.
+    - Siemens stores a reference (`M`), a modulus (`MAG`, not used) and a phase
+      (`P`) series. The VENC is in the sequence name (`*fl2d1_v150in` is
+      150 cm/s), and the phase maps -VENC..+VENC over the stored range.
+
+    `slice_data` holds the magnitude images, so they load like a cine;
+    `velocity_data` holds the velocities in cm/s, in the same frame order. The
+    sign is as the scanner stores it.
+
+    Args:
+        folders (Path | list[Path]): The folder of the acquisition, or the
+            folders of its series (see `select_flow_series`).
+    """
+
+    _MAGNITUDE_TYPES = ("M_FFE", "M")  # Philips, Siemens
+
+    def __init__(self, folders: Path | list[Path], batch_size: int = 50):
+        self.folders = [Path(folders)] if isinstance(folders, (str, Path)) else folders
+        super().__init__(self.folders[0], batch_size)
+
+    @staticmethod
+    def _image_kind(ds) -> str | None:
+        """"phase", a magnitude type from _MAGNITUDE_TYPES, or None."""
+        if is_phase_image(ds):
+            return "phase"
+        image_type = [str(v).upper() for v in ds.get("ImageType", [])]
+        return next((t for t in FlowSeries._MAGNITUDE_TYPES if t in image_type[2:3]), None)
+
+    @staticmethod
+    def _venc(ds) -> float | None:
+        """The velocity encoding in cm/s, or None if it cannot be read."""
+        philips = ds.get((0x2001, 0x101A))  # PC Velocity, one value per direction
+        if philips is not None:
+            return float(max(abs(float(v)) for v in philips.value))
+        match = re.search(r"_v(\d+)", str(ds.get("SequenceName", "")))
+        return float(match.group(1)) if match else None
+
+    @staticmethod
+    def _velocity(ds, venc: float) -> np.ndarray:
+        """The phase image of ds in cm/s."""
+        pixels = ds.pixel_array.astype(np.float32)
+        for item in ds.get("RealWorldValueMappingSequence", []):  # Philips
+            units = item.get("MeasurementUnitsCodeSequence")
+            if units and str(units[0].get("CodeValue", "")).lower() == "cm/s":
+                return pixels * float(item.RealWorldValueSlope) + float(item.RealWorldValueIntercept)
+        # Siemens: rescaled, the phase spans -2^BitsStored..+2^BitsStored.
+        rescaled = pixels * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+        return rescaled / 2 ** int(ds.BitsStored) * venc
+
+    def _load_data(self):
+        """
+        Read the images of all folders, split them into magnitude and phase,
+        and order both by trigger time. An image that is in two folders (a
+        series exported twice) is read once.
+        """
+        images = {}
+        seen = set()
+        for folder in self.folders:
+            for f in natsorted(folder.iterdir()):
+                if not f.is_file() or f.stem.startswith(".") or "dicomdir" in str(f).lower():
+                    continue
+                ds = pydicom.dcmread(f)
+                uid = ds.get("SOPInstanceUID")
+                if uid is not None and uid in seen:
+                    continue
+                seen.add(uid)
+                kind = self._image_kind(ds) if "PixelData" in ds else None
+                if kind is not None:
+                    images.setdefault(kind, []).append(ds)
+
+        magnitude_type = next((t for t in self._MAGNITUDE_TYPES if t in images), None)
+        if "phase" not in images or magnitude_type is None:
+            raise ValueError(
+                f"No phase and magnitude images in {self.folders}; found {sorted(images)}"
+            )
+        phase = sorted(images["phase"], key=lambda ds: float(ds.TriggerTime))
+        magnitude = sorted(images[magnitude_type], key=lambda ds: float(ds.TriggerTime))
+        if len(phase) != len(magnitude):
+            raise ValueError(
+                f"Flow series in {self.folders} have {len(magnitude)} magnitude and "
+                f"{len(phase)} phase images"
+            )
+
+        self.venc = self._venc(phase[0])
+        if self.venc is None:
+            raise ValueError(f"No velocity encoding found in {self.folders}")
+        self.velocity_data = {
+            "velocity_array": [self._velocity(ds, self.venc) for ds in phase],
+            "meta_data": phase,
+        }
+        _, positions = self._get_slices_from_positions(
+            [magnitude[0].ImagePositionPatient], [magnitude[0].ImageOrientationPatient]
+        )
+        slices_dict = {
+            "slice01": {
+                "pixel_array": [ds.pixel_array for ds in magnitude],
+                "slice_position": positions[0],
+                "meta_data": magnitude,
+            }
+        }
+        return slices_dict, 1, len(magnitude), magnitude[0].Rows, magnitude[0].Columns
+
+    def get_times(self) -> np.ndarray:
+        """
+        Get the time of each frame in the heart cycle.
+
+        Returns:
+            np.ndarray: The trigger times in seconds, shape (T,).
+        """
+        return np.asarray([float(ds.TriggerTime) for ds in self.slice_data["slice01"]["meta_data"]]) / 1000
+
+    def get_velocity_array(self) -> np.ndarray:
+        """
+        Get the through-plane velocities.
+
+        Returns:
+            np.ndarray: The velocities in cm/s, shape (T, H, W).
+        """
+        return np.asarray(self.velocity_data["velocity_array"])
+
+    def get_magnitude_array(self) -> np.ndarray:
+        """
+        Get the magnitude images.
+
+        Returns:
+            np.ndarray: The magnitude images, shape (T, H, W).
+        """
+        return np.asarray(self.slice_data["slice01"]["pixel_array"])

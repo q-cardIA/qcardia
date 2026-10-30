@@ -7,8 +7,13 @@ dependencies = [
     "scikit-image==0.22.0",
     "opencv-python==4.10.0.84",
     "requests>=2.31.0",
-    "qcardia-models@git+https://github.com/q-cardIA/qcardia-models",
-    "qcardia-data@git+https://github.com/q-cardIA/qcardia-data"
+    "tqdm>=4.66.0",
+    # Open dependencies only: the public qcardia-models and qcardia-data packages
+    # on this repo's main branch. They have no ContextUNet2d and no LA-SAx
+    # intersection geometry, so context-aware and LA-conditioned inference raise
+    # an ImportError. Plain-UNet inference works.
+    "qcardia-models@git+https://github.com/q-cardIA/qcardia@main#subdirectory=packages/qcardia-models",
+    "qcardia-data@git+https://github.com/q-cardIA/qcardia@main#subdirectory=packages/qcardia-data"
 ]
 
 [build-system]
