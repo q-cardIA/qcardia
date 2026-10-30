@@ -692,7 +692,24 @@ class CineSeries(BaseSeries):
         return self._deformations
 
     def compute_volume_curve(self, structure="lv"):
+        """
+        Compute the volume of a structure for each time frame.
 
+        The volume is the number of segmented voxels over all slices, times the voxel
+        volume. The voxel volume uses the pixel spacing and the slice thickness of the
+        first slice. Call predict_segmentation first.
+
+        Args:
+            structure (str): The structure: "lv" (left ventricle blood pool), "rv"
+                (right ventricle blood pool) or "myo" (left ventricle myocardium).
+                Defaults to "lv".
+
+        Returns:
+            np.ndarray: The volume in mL for each time frame.
+
+        Raises:
+            ValueError: If structure is not "lv", "rv" or "myo".
+        """
         pixdim = self._get_pixel_spacing()
         scale_factor = 0.001 * pixdim[0] * pixdim[1] * pixdim[2]
         if structure == "lv":
@@ -705,6 +722,20 @@ class CineSeries(BaseSeries):
             raise ValueError(f"Unknown structure: {structure}, should be lv, rv or myo")
 
     def compute_ejection_fraction(self, curve):
+        """
+        Compute the ejection fraction from a volume curve.
+
+        The first time frame is taken as end-diastole. End-systole is the frame with
+        the smallest volume; its index is stored in self.es_time.
+
+        Args:
+            curve (np.ndarray): The volume for each time frame, for example from
+                compute_volume_curve.
+
+        Returns:
+            float: The ejection fraction, (EDV - ESV) / EDV, as a fraction between 0
+                and 1.
+        """
         ed_vol = curve[0]
         self.es_time = np.argmin(curve)
         es_vol = curve[self.es_time]
