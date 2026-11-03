@@ -1,0 +1,21 @@
+# uv workspace for the packages in packages/. Each package keeps its own pyproject.toml
+# and installs on its own; the workspace gives them one environment and one lock file.
+[tool.uv.workspace]
+members = ["packages/*"]
+
+# Inside the workspace, the packages use each other from this repository.
+[tool.uv.sources]
+qcardia = { workspace = true }
+qcardia-data = { workspace = true }
+qcardia-models = { workspace = true }
+
+[tool.uv]
+# qcardia-data pins matplotlib==3.9.1, which is yanked and has no Windows wheels.
+override-dependencies = ["matplotlib>=3.9.2,<3.11"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+# Only the tests folders: qcardia_data/setup/test_splits.py holds data-split helpers, not tests.
+testpaths = ["packages/*/tests"]
