@@ -1,0 +1,34 @@
+[project]
+name = "qcardia-app"
+version = "1.0.0"
+description = "Interactive DICOM viewer"
+authors = [
+    {name = "Cian Scannell", email = "c.m.scannell@tue.nl"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyside6>=6.6.2",
+    "pydicom>=2.4.4",
+    "numpy>=1.26.3",
+    "torch>=2.3.0",
+    "scipy>=1.11.4",
+    "pyyaml>=6.0.1",
+    "requests>=2.31.0",
+    "qcardia",
+    "faster-whisper>=1.1",
+    "sounddevice>=0.4.6",
+    "nvidia-cublas-cu12; sys_platform == 'win32'",
+    "nvidia-cudnn-cu12>=9,<10; sys_platform == 'win32'",
+    "wandb>=0.30.0",
+]
+
+# qcardia-models/qcardia-data aren't imported here directly — they resolve
+# transitively through qcardia's own dependency spec, so nothing to override.
+[tool.uv.sources]
+qcardia = { git = "https://github.com/q-cardIA/qcardia.git", branch = "siemens-cardisort-grouping" }
+
+[tool.uv]
+environments = ["sys_platform == 'win32'", "sys_platform != 'win32'"]
+# qcardia-data pins matplotlib==3.9.1, which is yanked and has no Windows wheels.
+override-dependencies = ["matplotlib>=3.9.2,<3.11"]
