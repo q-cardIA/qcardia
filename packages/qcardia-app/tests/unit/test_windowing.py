@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from utils.windowing import null_myocardium_window, step_window  # noqa: E402
+from qcardia_app.utils.windowing import null_myocardium_window, step_window  # noqa: E402
 
 
 def _lge_phantom():

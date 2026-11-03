@@ -18,9 +18,7 @@ and the packages share one issue tracker, one test suite, and one release proces
 | [`qcardia-data`](packages/qcardia-data) | Data pipelines. PyTorch and MONAI based dataloaders, augmentation, caching, and reformatting for supported public datasets. Used to train models. |
 | [`qcardia-models`](packages/qcardia-models) | Model pipelines. U-Net and encoder-MLP architectures, losses, and metrics. Used to train models. |
 | [`qcardia`](packages/qcardia) | Analysis and deployment. Sorts and disambiguates DICOM studies with CardiSort, builds series objects, and applies trained models. |
-
-A desktop viewer, `qcardia-app`, is in development and will join this repository
-when it is released.
+| [`qcardia-app`](packages/qcardia-app) | Desktop viewer for cardiac MR studies: hanging protocols, cine, LGE, perfusion and flow, segmentation contours and results. Uses `qcardia`. |
 
 ## How the packages fit together
 
@@ -105,6 +103,7 @@ Each package has its own README with installation and usage detail:
 - [`qcardia-data` README](packages/qcardia-data/README.md) — data setup, supported datasets, configuration
 - [`qcardia-models` README](packages/qcardia-models/README.md) — model configuration and training
 - [`qcardia` README](packages/qcardia/README.md) — sorting and inference
+- [`qcardia-app` README](packages/qcardia-app/README.md) — the viewer: running it, data, model weights and plugins
 
 Worked examples are in `packages/qcardia-data/demo/` and `packages/qcardia-models/demo/`.
 
