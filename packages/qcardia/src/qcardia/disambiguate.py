@@ -13,10 +13,14 @@ the intended series instead of an arbitrary one.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
+import numpy as np
 import pydicom
 import requests
+
+from qcardia.cardisort import group_sequence_dirs, read_series_header
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen3:8b"
@@ -62,11 +66,25 @@ Given the metadata below for each candidate series, identify which ONE series \
 is the primary series for this class, and briefly classify the role of each \
 of the others (planning, repeat, or other).
 
-Candidates:
+{class_preference}Candidates:
 {candidates_json}
 
 Respond with the primary series name and a role + one-sentence reasoning for \
 every candidate, including the primary one."""
+
+# Extra guidance for some sequence classes, added to the prompt before the
+# candidates. It only decides between series that are otherwise suitable. The
+# cardisort sequence label (e.g. DBLGE or WBLGE) is not used for this: it is not
+# reliable enough.
+CLASS_PREFERENCES = {
+    "LGE": (
+        "For LGE, prefer a dark-blood (black-blood, DB, flow-independent "
+        "dark-blood, FIDDLE, etc.) series over a bright/white-blood one when both "
+        "look diagnostic. This preference applies only between otherwise suitable "
+        "series; the rules above still decide what is planning or a repeat. Judge "
+        "this only from the metadata given; sites name these series differently."
+    ),
+}
 
 
 def summarize_sequence_dir(sequence_dir: Path, datasets: list[pydicom.Dataset]) -> dict:
@@ -93,9 +111,11 @@ def disambiguate_duplicates(
     Raises RuntimeError if Ollama is unreachable or returns an unparsable response.
     """
     sequence_name, plane_name = class_label
+    class_preference = CLASS_PREFERENCES.get(sequence_name)
     prompt = PROMPT_TEMPLATE.format(
         sequence_name=sequence_name,
         plane_name=plane_name,
+        class_preference=f"{class_preference}\n\n" if class_preference else "",
         candidates_json=json.dumps(candidates, indent=2),
     )
 
@@ -128,3 +148,274 @@ def disambiguate_duplicates(
             f"expected one of {candidate_names}"
         )
     return result
+
+
+# Cardisort labels that a perfusion series (a stress, rest or test run, or one
+# slice or the AIF of a run that Siemens stores as separate series) can get.
+PERFUSION_SEQUENCE_NAMES = {"PERF", "TestPERF"}
+# A run with fewer dynamics than this fraction of the longest run is a test run.
+TEST_RUN_DYNAMICS_FRACTION = 0.5
+
+
+def _dicom_time_to_seconds(dicom_time) -> float:
+    dicom_time = str(dicom_time)
+    return 3600 * int(dicom_time[0:2]) + 60 * int(dicom_time[2:4]) + float(dicom_time[4:])
+
+
+def _summarize_perfusion_dir(sequence_dir: Path) -> dict | None:
+    """Header information used to group perfusion series into runs, or None if
+    the directory has no dynamic images that a series class can load."""
+    images_per_slice = Counter()
+    acquisition_times = []
+    for f in sequence_dir.iterdir():
+        if not f.is_file() or f.name.startswith(".") or "dicomdir" in f.name.lower():
+            continue
+        try:
+            ds = pydicom.dcmread(f, stop_before_pixels=True)
+        except Exception:
+            continue
+        # Enhanced (multi-frame) images have no per-file position, and
+        # BaseSeries cannot load them.
+        if "ImagePositionPatient" not in ds or "AcquisitionTime" not in ds:
+            continue
+        orientation = np.asarray(ds.ImageOrientationPatient, dtype=float)
+        position = float(
+            np.dot(ds.ImagePositionPatient, np.cross(orientation[:3], orientation[3:]))
+        )
+        # The images of one perfusion slice share a position and a trigger
+        # time. The Philips AIF slice can share its position with the basal
+        # slice, but not its trigger time.
+        images_per_slice[(round(position, 1), getattr(ds, "TriggerTime", None))] += 1
+        acquisition_times.append(_dicom_time_to_seconds(ds.AcquisitionTime))
+
+    # Cine frames, or single anatomy images, give one image per group.
+    if not images_per_slice or max(images_per_slice.values()) == 1:
+        return None
+    return {
+        "dir": sequence_dir,
+        "n_dynamics": max(images_per_slice.values()),
+        "start_time": min(acquisition_times),
+        "end_time": max(acquisition_times),
+    }
+
+
+# Siemens stores more than one reconstruction of each slice and of the AIF of a
+# run (e.g. "_LR" and "_HR_MOCO", "_AIF" and "_AIF_MOCO"), and derived series
+# ("_AIF_SEG"). These ImageType values mark the derived series.
+SIEMENS_DERIVED_IMAGE_TYPES = {"SEG", "DERIVED"}
+
+
+def _primary_siemens_perfusion_dirs(run_dirs: list[Path]) -> list[Path]:
+    """One series for each slice and for the AIF of a Siemens run.
+
+    Derived series (SIEMENS_DERIVED_IMAGE_TYPES) are dropped. Series with the
+    same slice position and matrix size are reconstructions of the same data;
+    of these, the motion-corrected one ("MOCO" in ImageType) is kept, then the
+    one with the finest pixel spacing. Runs from other vendors are returned as
+    they are.
+    """
+    headers = {d: read_series_header(d) for d in run_dirs}
+    if not all(
+        h is not None and "siemens" in str(getattr(h, "Manufacturer", "")).lower()
+        for h in headers.values()
+    ):
+        return run_dirs
+
+    def preference(d: Path) -> tuple:
+        header = headers[d]
+        return (
+            "MOCO" not in header.ImageType,
+            float(header.PixelSpacing[0]),
+            int(getattr(header, "SeriesNumber", 0) or 0),
+        )
+
+    by_slice = {}
+    for d, header in headers.items():
+        if SIEMENS_DERIVED_IMAGE_TYPES & set(header.ImageType):
+            continue
+        orientation = np.asarray(header.ImageOrientationPatient, dtype=float)
+        position = float(
+            np.dot(header.ImagePositionPatient, np.cross(orientation[:3], orientation[3:]))
+        )
+        key = (round(position, 1), int(header.Rows), int(header.Columns))
+        by_slice.setdefault(key, []).append(d)
+
+    primary = {min(dirs, key=preference) for dirs in by_slice.values()}
+    return [d for d in run_dirs if d in primary]
+
+
+def select_perfusion_series(perfusion_dirs: list[Path]) -> dict:
+    """Finds the stress and rest perfusion runs among the directories that
+    cardisort labelled as perfusion.
+
+    Directories whose acquisition times overlap belong to the same run (Siemens
+    stores each slice and the AIF of a run as a separate series). Test runs are
+    much shorter than the others, and stress is acquired before rest. Of a
+    Siemens run, one reconstruction of each slice and of the AIF is kept (see
+    `_primary_siemens_perfusion_dirs`).
+
+    Returns:
+        {"stress": [Path, ...], "rest": [Path, ...]}, the directories of each
+        run, or {} if there are not exactly two runs after the test runs are
+        removed.
+    """
+    summaries = [_summarize_perfusion_dir(d) for d in perfusion_dirs]
+    summaries = sorted(
+        (s for s in summaries if s is not None), key=lambda s: s["start_time"]
+    )
+
+    runs = []
+    for s in summaries:
+        if runs and s["start_time"] <= runs[-1]["end_time"]:
+            runs[-1]["dirs"].append(s["dir"])
+            runs[-1]["end_time"] = max(runs[-1]["end_time"], s["end_time"])
+            runs[-1]["n_dynamics"] = max(runs[-1]["n_dynamics"], s["n_dynamics"])
+        else:
+            runs.append({**s, "dirs": [s["dir"]]})
+    if not runs:
+        return {}
+
+    longest = max(run["n_dynamics"] for run in runs)
+    runs = [r for r in runs if r["n_dynamics"] >= TEST_RUN_DYNAMICS_FRACTION * longest]
+    if len(runs) != 2:
+        print(
+            f"    Warning: expected a stress and a rest perfusion run, found "
+            f"{len(runs)}: {[[d.name for d in r['dirs']] for r in runs]}; "
+            f"perfusion skipped."
+        )
+        return {}
+
+    return {
+        role: _primary_siemens_perfusion_dirs(run["dirs"])
+        for role, run in zip(("stress", "rest"), runs)
+    }
+
+
+FLOW_SEQUENCE_NAME = "PC"
+FLOW_VESSELS = {"AORTA": "aorta", "MPA": "pulmonary"}  # cardisort plane -> vessel
+# Siemens starts the series of one acquisition (reference, magnitude, phase) milliseconds apart.
+FLOW_SAME_ACQUISITION_SECONDS = 2.0
+
+
+def is_phase_image(ds) -> bool:
+    """The velocity image of a flow acquisition: P is the third (Siemens) or
+    fourth (Philips) value of ImageType."""
+    return "P" in [str(v).upper() for v in ds.get("ImageType", [])][2:4]
+
+
+def _has_phase_images(dirs: list[Path]) -> bool:
+    for d in dirs:
+        for f in d.iterdir():
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            try:
+                ds = pydicom.dcmread(f, stop_before_pixels=True, specific_tags=["ImageType"])
+            except Exception:
+                continue
+            if is_phase_image(ds):
+                return True
+    return False
+
+
+def _summarize_flow_dir(sequence_dir: Path) -> dict | None:
+    """The slice geometry and acquisition time of a series, from its first
+    image, or None if it has no image with a position."""
+    for f in sorted(sequence_dir.iterdir()):
+        if not f.is_file() or f.name.startswith(".") or "dicomdir" in f.name.lower():
+            continue
+        try:
+            ds = pydicom.dcmread(f, stop_before_pixels=True)
+        except Exception:
+            continue
+        if "ImagePositionPatient" not in ds or "AcquisitionTime" not in ds:
+            continue
+        return {
+            "geometry": (
+                tuple(round(float(v), 1) for v in ds.ImagePositionPatient),
+                tuple(round(float(v), 3) for v in ds.ImageOrientationPatient),
+            ),
+            "time": _dicom_time_to_seconds(ds.AcquisitionTime),
+        }
+    return None
+
+
+def _same_acquisition(a: dict, b: dict) -> bool:
+    return a["geometry"] == b["geometry"] and abs(a["time"] - b["time"]) <= FLOW_SAME_ACQUISITION_SECONDS
+
+
+def select_flow_series(labels: dict[Path, tuple[str | None, str | None]]) -> dict:
+    """Finds the phase-contrast flow acquisition of each vessel.
+
+    Siemens stores one acquisition as three series (reference, magnitude and
+    phase), and cardisort can label only some of them PC. So each PC series
+    starts an acquisition, and every series with the same slice and about the
+    same acquisition time joins it, whatever its label. The vessel is the
+    plane most of its PC series are labelled with. Acquisitions without phase
+    images (e.g. a valve cine labelled PC) are skipped, and when a vessel was
+    acquired more than once, the latest acquisition is kept.
+
+    Args:
+        labels: cardisort's (sequence_name, plane_name) for each series
+            directory of the subject.
+
+    Returns:
+        {"aorta": [Path, ...], "pulmonary": [Path, ...]}, the directories of
+        each vessel's acquisition, for the vessels that were found.
+    """
+    if not any(sequence == FLOW_SEQUENCE_NAME for sequence, _ in labels.values()):
+        return {}
+    summaries = {d: _summarize_flow_dir(d) for d in labels}
+    summaries = {d: s for d, s in summaries.items() if s is not None}
+
+    acquisitions = []
+    for d, (sequence, plane) in labels.items():
+        if sequence != FLOW_SEQUENCE_NAME or d not in summaries:
+            continue
+        acq = next((a for a in acquisitions if _same_acquisition(a, summaries[d])), None)
+        if acq is None:
+            acq = {**summaries[d], "votes": Counter()}
+            acquisitions.append(acq)
+        if plane in FLOW_VESSELS:
+            acq["votes"][FLOW_VESSELS[plane]] += 1
+
+    selected = {}
+    for acq in sorted(acquisitions, key=lambda a: a["time"]):
+        dirs = sorted(d for d, s in summaries.items() if _same_acquisition(acq, s))
+        if acq["votes"] and _has_phase_images(dirs):
+            selected[acq["votes"].most_common(1)[0][0]] = dirs  # a later acquisition replaces an earlier one
+    return selected
+
+
+def select_lge_series(lge_dirs: list[Path]) -> list[list[Path]]:
+    """Finds the directories of each LGE acquisition, for `LGESeries`.
+
+    Siemens stores one LGE acquisition as a magnitude ("_MAG", ImageType[2]
+    "M") and a PSIR ("_PSIR") series with the same ProtocolName, and
+    `group_sequence_dirs` puts the series of a protocol in one group, in
+    series-number order. When the protocol was acquired more than once, its
+    group holds all acquisitions, so a magnitude series after the first series
+    starts a new acquisition. Philips and GE directories are each a group, and
+    so each an acquisition.
+
+    Selecting one acquisition is left to the caller (e.g. with
+    `disambiguate_duplicates`, on the first directory of each acquisition).
+
+    Args:
+        lge_dirs: the directories that cardisort gave one LGE label.
+
+    Returns:
+        The directories of each acquisition, in the order of their groups, and
+        in series-number order (magnitude first) within an acquisition.
+    """
+    acquisitions = []
+    for group in group_sequence_dirs(lge_dirs):
+        acquisitions.append([])
+        for d in group:
+            image_type = [
+                str(v).upper() for v in getattr(read_series_header(d), "ImageType", [])
+            ]
+            # A repeat of the protocol starts at its magnitude series.
+            if image_type[2:3] == ["M"] and acquisitions[-1]:
+                acquisitions.append([])
+            acquisitions[-1].append(d)
+    return acquisitions

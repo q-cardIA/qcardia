@@ -2218,6 +2218,7 @@ dependencies = [
     { name = "requests" },
     { name = "scikit-image" },
     { name = "scipy" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
@@ -2228,6 +2229,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.31.0" },
     { name = "scikit-image", specifier = "==0.22.0" },
     { name = "scipy", specifier = "==1.12.0" },
+    { name = "tqdm", specifier = ">=4.66.0" },
 ]
 
 [[package]]
