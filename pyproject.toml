@@ -9,13 +9,31 @@ qcardia = { workspace = true }
 qcardia-data = { workspace = true }
 qcardia-models = { workspace = true }
 
-[tool.uv]
-# qcardia-data pins matplotlib==3.9.1, which is yanked and has no Windows wheels.
-override-dependencies = ["matplotlib>=3.9.2,<3.11"]
-
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 # Only the tests folders: qcardia_data/setup/test_splits.py holds data-split helpers, not tests.
 testpaths = ["packages/*/tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "PIE", "RET", "SIM", "NPY", "RUF"]
+# The formatter sets the line length of code. E501 then only fires on comments and
+# docstrings, which the formatter does not rewrap. 277 of the 278 are prose.
+ignore = ["E501"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.pep8-naming]
+# Qt virtual methods must keep the framework's camelCase to override anything.
+extend-ignore-names = ["*Event", "eventFilter", "styleHint", "showPopup"]
+
+[tool.ruff.lint.per-file-ignores]
+# Geometry and transform code: H, W, Z, T and friends are the conventional names.
+"**/la_conditioning.py" = ["N806"]
+"**/resampler.py" = ["N806"]
+"**/transformation_matrices.py" = ["N806"]
+"**/volume_geometry.py" = ["N806"]

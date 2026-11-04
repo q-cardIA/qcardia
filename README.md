@@ -146,4 +146,6 @@ If you use the CardiSort sorting model, please also cite:
 
 ## License
 
+Copyright 2023-2026 Cian Scannell and the q-cardIA contributors.
+
 Apache License 2.0. See [LICENSE](LICENSE).

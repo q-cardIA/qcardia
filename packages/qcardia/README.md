@@ -16,19 +16,15 @@ pip install -e .
 ### A note on companion packages
 
 `qcardia` depends on `qcardia-models` (model architectures) and `qcardia-data`
-(data utilities). The context-aware model (`ContextUNet2d`, routed via
-`is_transformer_model`) and the LA/SAx intersection geometry LA conditioning
-needs (`qcardia_data.pipeline.la_sa_intersection`) have not landed on either
-package's `main` branch yet — `pyproject.toml` currently pins them to the
-branches that have this code (`qcardia-models@context-unet`,
-`qcardia-data@context-la-sampling`). Once those branches merge upstream,
-update the pins back to bare `main`.
+(data utilities). Plain `UNet2d` inference works against the published
+packages. Two paths need code that has not landed in them yet:
 
-The LA-conditioning geometry import in `qcardia.inference.la_conditioning` is
-lazy, so plain `UNet2d` and context-aware-without-LA inference don't need that
-particular branch — but `qcardia_models.training_utils.is_transformer_model`
-is required unconditionally by model routing, so the `context-unet` pin (or
-its eventual merge to main) is needed for any inference at all.
+- **Context-aware models** need `ContextUNet2d` in `qcardia-models`. The import
+  in `qcardia.inference.model_loader` is guarded, so plain models still load.
+  Loading a context-aware model raises with a message naming what is missing.
+- **LA-conditioned models** need `qcardia_data.pipeline.la_sa_intersection`.
+  That import sits inside the function in `qcardia.inference.la_conditioning`,
+  so no other inference path is affected.
 
 ---
 
