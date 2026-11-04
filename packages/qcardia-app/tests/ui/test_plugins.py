@@ -84,3 +84,49 @@ def test_hold_start(app):
     assert not start.isEnabled()
     window.welcome_widget.hold_start("b", False)
     assert start.isEnabled()
+
+
+_QUIT_SCRIPT = '''
+import os
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+import qcardia_app.main as app_main
+from qcardia_app.plugins import Plugin
+
+calls = []
+
+class Recorder(Plugin):
+    name = "recorder"
+    def start_session(self, ctx): calls.append("start_session")
+    def end_session(self): calls.append("end_session")
+    def session_log_closed(self, path, study): calls.append("session_log_closed")
+    def shutdown(self): calls.append("shutdown")
+
+app_main.load_plugins = lambda: [Recorder()]
+exec_ = QApplication.exec
+
+def scripted_exec(self):
+    window = next(w for w in self.topLevelWidgets() if type(w).__name__ == "MainWindow")
+    QTimer.singleShot(0, window.welcome_widget.left_panel_single_patient_pushbutton.click)
+    QTimer.singleShot(300, window.close)  # quit during the session
+    QTimer.singleShot(600, self.quit)
+    return exec_()
+
+QApplication.exec = scripted_exec
+app_main.main()
+print("CALLS", ",".join(calls))
+'''
+
+
+def test_quit_during_session_order(tmp_path):
+    """Closing the window during a session ends it for plugins, and shutdown() comes last."""
+    import subprocess
+    import sys
+
+    script = tmp_path / "quit.py"
+    script.write_text(_QUIT_SCRIPT, encoding="utf-8")
+    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=120)
+    line = next((ln for ln in result.stdout.splitlines() if ln.startswith("CALLS ")), "")
+    calls = line.removeprefix("CALLS ").split(",")
+    assert calls == ["start_session", "session_log_closed", "end_session", "shutdown"], result.stderr[-2000:]

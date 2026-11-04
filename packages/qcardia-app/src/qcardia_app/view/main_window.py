@@ -427,9 +427,12 @@ class MainWindow(QMainWindow):
         return None
 
     def closeEvent(self, event):
-        if self._default_dock_state is not None:
+        if self._default_dock_state is not None:  # a session is open
             SETTINGS.setValue("window/dock_state", self.saveState())
             SETTINGS.sync()
+            self._play_timer.stop()
+            self.session_ended.emit()  # as when returning to the start screen, so plugins end the session too
+            self._default_dock_state = None
         super().closeEvent(event)
 
     def _build_menu_bar(self) -> QMenuBar:

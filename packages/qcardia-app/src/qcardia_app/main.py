@@ -44,8 +44,6 @@ def main():
     apply_theme(app)
     plugins = load_plugins()
     main_window = MainWindow(plugins)
-    for plugin in plugins:
-        app.aboutToQuit.connect(plugin.shutdown)
 
     model = DICOMModel()
     controller = DICOMController(main_window, model)
@@ -89,6 +87,10 @@ def main():
     main_window.session_started.connect(_start_study_log)
     main_window.session_ended.connect(_end_study_log)
     app.aboutToQuit.connect(_end_study_log)
+    # After _end_study_log: Qt calls the slots in the order they are connected, and a plugin
+    # may still need its resources in session_log_closed.
+    for plugin in plugins:
+        app.aboutToQuit.connect(plugin.shutdown)
 
     # After the analysis screen is built, while the start screen's choices are still readable.
     def _start_plugins():
