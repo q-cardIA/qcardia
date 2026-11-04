@@ -1,0 +1,581 @@
+/* =============================================================
+   q-cardIA theme. Every word that starts with @ is a token from theme.py: change
+   values there, and keep this file free of literal colours and sizes.
+   ============================================================= */
+
+/* ---- Base ---------------------------------------------------- */
+QWidget {
+	color: @text;
+	font-size: @fs_body;
+}
+
+QMainWindow, QDialog, QMessageBox {
+	background-color: @bg1;
+}
+
+/* Floating cards: each panel is a rounded card on the lighter base, like VS Code. */
+QMainWindow#mainWindow { background-color: @base; }
+QMainWindow::separator { background-color: transparent; width: 6px; height: 6px; }
+
+/* A dock is its title bar on top of its panel: together they form one card. */
+QWidget[role="dockTitle"] {
+	background-color: @bg1;
+	border-top-left-radius: @radius_panel;
+	border-top-right-radius: @radius_panel;
+}
+
+QLabel[role="dockTitleLabel"] {
+	color: @text_muted;
+	font-size: @fs_small;
+	font-weight: bold;
+}
+QDockWidget {
+	background-color: @bg1;
+	border-radius: @radius_panel;
+}
+QPushButton[role="dockClose"] {
+	background-color: transparent;
+	border: none;
+	border-radius: @radius;
+	min-width: 22px;
+	max-width: 22px;
+	min-height: 22px;
+	max-height: 22px;
+	padding: 0px;
+}
+QPushButton[role="dockClose"]:hover { background-color: @bg3; }
+
+/* Panels merged into tabs; no base line under the tab row. */
+QMainWindow QTabBar { qproperty-drawBase: 0; }
+QMainWindow QTabBar::tab {
+	background-color: transparent;
+	color: @text_muted;
+	padding: @sp1 @sp3;
+	margin-right: 2px;
+	border-top-left-radius: @radius_panel;
+	border-top-right-radius: @radius_panel;
+}
+QMainWindow QTabBar::tab:selected {
+	background-color: @bg1;
+	color: @text;
+	margin-bottom: -1px;  /* past the bar's edge: at fractional scaling its last row would be half base colour */
+}
+QMainWindow QTabBar::tab:hover:!selected { background-color: @bg3; }
+
+QMenuBar {
+	background-color: transparent;
+	spacing: 0px;
+}
+QMenuBar::item {
+	background-color: transparent;
+	color: @text_muted;
+	padding: @sp1 @sp2;
+	border-radius: @radius;
+}
+QMenuBar::item:selected, QMenuBar::item:pressed {
+	background-color: @bg3;
+	color: @text;
+}
+QMenu::indicator { width: 14px; height: 14px; padding-left: @sp1; }
+QMenu::indicator:checked { image: url(@icon_check_menu); }
+
+QToolTip {
+	color: @text;
+	background-color: @bg2;
+	border: 1px solid @line;
+	border-radius: @radius;
+	padding: @sp1 @sp2;
+}
+
+QMenu {
+	background-color: @bg2;
+	border: 1px solid @line;
+	border-radius: @radius;
+	padding: @sp1;
+}
+QMenu::item {
+	padding: @sp1 @sp4 @sp1 @sp3;
+	border-radius: @radius;
+}
+QMenu::item:selected { background-color: @bg3; }
+QMenu::item:disabled { color: @text_disabled; }
+QMenu::separator {
+	height: 1px;
+	background: @line;
+	margin: @sp1 @sp2;
+}
+
+QLabel { background-color: transparent; }
+QLabel[secondary="true"] {
+	color: @text_muted;
+	font-size: @fs_small;
+}
+
+QScrollArea { background-color: transparent; border: none; }
+QScrollArea > QWidget > QWidget { background-color: transparent; }
+
+/* ---- Buttons --------------------------------------------------- */
+QPushButton {
+	background-color: @bg2;
+	border: 1px solid @line;
+	border-radius: @radius;
+	padding: @sp1 @sp3;
+	min-height: 24px;
+}
+QPushButton:hover { background-color: @bg3; }
+QPushButton:pressed { background-color: @bg1; }
+QPushButton:focus { border: 1px solid @accent; }
+QPushButton:checked {
+	background-color: @accent_soft;
+	border: 1px solid @accent;
+	color: @accent;
+}
+QPushButton:disabled {
+	background-color: transparent;
+	border: 1px solid @bg3;
+	color: @text_disabled;
+}
+
+/* The one main action on a screen or in a dialog. */
+QPushButton[role="primary"] {
+	background-color: @accent;
+	border: 1px solid @accent;
+	color: @on_accent;
+	font-weight: bold;
+}
+QPushButton[role="primary"]:hover { background-color: @accent_hover; }
+
+/* Segmented control: one outlined group; the buttons inside have no border, the chosen one is filled. */
+QFrame[role="segmentGroup"] {
+	background-color: @bg2;
+	border: 1px solid @line;
+	border-radius: @radius;
+}
+QFrame[role="segmentGroup"] QPushButton {
+	background-color: transparent;
+	border: none;
+	border-radius: 4px;
+	padding: 2px @sp3;
+	min-height: 20px;
+}
+QFrame[role="segmentGroup"] QPushButton:hover { background-color: @bg3; }
+QFrame[role="segmentGroup"] QPushButton:checked {
+	background-color: @accent_soft;
+	color: @accent;
+}
+
+QPushButton[role="accentSwatch"] {
+	background-color: transparent;
+	border: 2px solid transparent;
+	border-radius: 17px;
+	min-width: 30px;
+	max-width: 30px;
+	min-height: 30px;
+	max-height: 30px;
+	padding: 0px;
+}
+QPushButton[role="accentSwatch"]:hover { border-color: @line; }
+QPushButton[role="accentSwatch"]:checked {
+	background-color: transparent;
+	border-color: @text;
+}
+
+QToolButton {
+	background-color: transparent;
+	border: none;
+	border-radius: @radius;
+	padding: 2px;
+}
+QToolButton:hover { background-color: @bg3; }
+
+/* ---- Inputs ---------------------------------------------------- */
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QKeySequenceEdit {
+	background-color: @bg2;
+	border: 1px solid @line;
+	border-radius: @radius;
+	padding: @sp1 @sp2;
+	selection-color: @on_accent;
+	selection-background-color: @accent;
+}
+QLineEdit:hover, QPlainTextEdit:hover, QTextEdit:hover { border-color: @text_disabled; }
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+	border-color: @accent;
+}
+QLineEdit:disabled {
+	background-color: transparent;
+	color: @text_disabled;
+	border-color: @bg3;
+}
+
+QComboBox {
+	background-color: @bg2;
+	border: 1px solid @line;
+	border-radius: @radius;
+	padding: @sp1 @sp2;
+	min-height: 22px;
+}
+QComboBox:hover { border-color: @text_disabled; }
+QComboBox:focus { border-color: @accent; }
+QComboBox::drop-down {
+	subcontrol-origin: padding;
+	subcontrol-position: center right;
+	width: 20px;
+	border: none;
+}
+QComboBox::down-arrow {
+	image: url(@icon_chevron);
+	width: 10px;
+	height: 10px;
+}
+QComboBox QAbstractItemView {
+	background-color: @bg2;
+	border: 1px solid @line;
+	padding: @sp1;
+	outline: none;
+	selection-background-color: @bg3;
+	selection-color: @text;
+}
+QComboBox QAbstractItemView::item {
+	min-height: 24px;
+	padding-left: @sp2;
+}
+
+QCheckBox { spacing: @sp2; }
+QCheckBox::indicator {
+	width: 14px;
+	height: 14px;
+	border: 1px solid @text_faint;
+	border-radius: 4px;
+	background: @bg2;
+}
+QCheckBox::indicator:hover { border-color: @text_muted; }
+QCheckBox::indicator:checked {
+	background: @accent;
+	border-color: @accent;
+	image: url(@icon_check);
+}
+
+/* ---- Scroll bars: quiet greys, colour is kept for meaning ------- */
+QScrollBar:vertical {
+	background: transparent;
+	width: 8px;
+	margin: 0px;
+}
+QScrollBar:horizontal {
+	background: transparent;
+	height: 8px;
+	margin: 0px;
+}
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+	background: @bg3;
+	border-radius: 4px;
+	min-height: 24px;
+	min-width: 24px;
+}
+QScrollBar::handle:hover { background: @text_disabled; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0px; height: 0px; border: none; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+
+/* ---- Sliders ----------------------------------------------------- */
+QSlider { min-height: 16px; }
+QSlider::groove:horizontal {
+	height: 4px;
+	border-radius: 2px;
+	background-color: @bg3;
+}
+QSlider::sub-page:horizontal {
+	border-radius: 2px;
+	background-color: @accent_soft;
+}
+QSlider::handle:horizontal {
+	background-color: @accent;
+	width: 12px;
+	height: 12px;
+	margin: -4px 0px;
+	border-radius: 6px;
+}
+QSlider::handle:horizontal:hover { background-color: @accent_hover; }
+QSlider::handle:horizontal:disabled { background-color: @text_disabled; }
+QSlider::sub-page:horizontal:disabled { background-color: @bg3; }
+
+/* Hairline indicator: ~3px so it reads as an underline, not a progress widget. */
+QProgressBar {
+	background-color: @bg3;
+	border: none;
+	border-radius: 2px;
+	max-height: 4px;
+	text-align: center;
+}
+QProgressBar::chunk {
+	background-color: @accent;
+	border-radius: 2px;
+}
+QProgressBar[role="thinLoadingBar"] { border-radius: 1px; }  /* height: thin_loading_bar() */
+
+/* =============================================================
+   Analysis screen
+   ============================================================= */
+
+/* ---- Top bar ---------------------------------------------- */
+QWidget[role="topBar"] {
+	background-color: transparent;
+}
+
+QLabel[role="appTitle"] {
+	color: @text_faint;
+	font-size: @fs_small;
+}
+
+
+/* Floating island over the images while contours are edited. */
+QFrame#contourIsland {
+	background-color: @bg2;
+	border: 1px solid @line;
+	border-radius: @radius_panel;
+}
+QFrame#contourIsland QPushButton { min-height: 20px; }
+
+/* ---- Side panels -------------------------------------------- */
+QFrame[role="dockPanel"] {
+	background-color: @bg1;
+	border: none;
+	border-radius: @radius_panel;
+}
+/* A docked panel's top corners meet what is above it (MainWindow sets top="..."). */
+QFrame[role="dockPanel"][top="title"] {
+	border-top-left-radius: 0px;
+	border-top-right-radius: 0px;
+}
+QFrame[role="dockPanel"][top="firstTab"] {
+	border-top-left-radius: 0px;
+}
+
+QLabel[role="sidebarSectionTitle"], QLabel[role="sectionTitle"] {
+	color: @text_faint;
+	font-size: @fs_small;
+	font-weight: bold;
+	padding: @sp2 @sp1 @sp1 @sp1;
+}
+
+QPushButton[role="sidebarButton"] {
+	background-color: transparent;
+	border: none;
+	text-align: left;
+	padding: @sp1 @sp2;
+	min-height: 28px;
+}
+QPushButton[role="sidebarButton"]:hover { background-color: @bg3; }
+QPushButton[role="sidebarButton"]:pressed {
+	background-color: @accent_soft;
+	color: @accent;
+}
+QPushButton[role="sidebarButton"]:disabled { color: @text_disabled; }
+
+QLabel[role="sidebarStatus"] {
+	color: @text_faint;
+	font-size: @fs_small;
+	padding: 0px @sp2 @sp1 @sp2;
+}
+QPushButton[role="sidebarButton"]:checked {
+	background-color: @bg2;
+	color: @text;
+}
+
+
+/* ---- Series browser ----------------------------------------- */
+/* Modality group header (CINE, LGE, ...): a quiet fold toggle, apart from the panel title. */
+QPushButton[role="seriesGroupHeader"] {
+	background-color: transparent;
+	border: none;
+	color: @text_faint;
+	font-size: @fs_small;
+	font-weight: bold;
+	text-align: left;
+	padding: @sp1 2px;
+	min-height: 18px;
+}
+QPushButton[role="seriesGroupHeader"]:hover { color: @text; }
+QPushButton[role="seriesGroupHeader"]:checked {
+	background-color: transparent;
+	border: none;
+	color: @text_faint;
+}
+QPushButton[role="seriesGroupHeader"]:checked:hover { color: @text; }
+
+QWidget[role="seriesCard"] { font-size: @fs_small; }
+
+/* ---- Image panels ---------------------------------------- */
+QFrame#viewerColumn {
+	background-color: @bg0;
+	border-radius: @radius_panel;
+}
+QWidget#centralDisplayArea {
+	background-color: transparent;
+}
+
+QWidget[role="viewerCard"] {
+	background-color: @bg0;
+	border: none;
+}
+
+QGraphicsView[role="imageViewport"] {
+	background-color: @viewport;
+	border: 1px solid transparent;
+	border-radius: 0px;
+}
+/* An empty panel is a free place, not a black image. */
+QGraphicsView[role="imageViewport"]:disabled { background-color: @bg1; }
+/* Keys act on the clicked panel, so show which one that is. */
+QGraphicsView[role="imageViewport"]:focus { border: 1px solid @accent; }
+
+QLabel[role="viewerTitle"] {
+	color: @text_muted;
+	font-size: @fs_body;
+	font-weight: 600;
+}
+QLabel[role="viewerMeta"] {
+	color: @text_faint;
+	font-size: @fs_small;
+}
+
+QLabel[role="viewerIndex"] {
+	color: @text_faint;
+	font-size: @fs_tiny;
+}
+
+QLabel[role="divider"] {
+	background-color: @bg0;
+}
+
+QSlider[role="sliceSlider"] { min-height: 16px; }
+
+QWidget[role="loadingOverlay"] {
+	background-color: @scrim;
+}
+QLabel[role="loadingOverlayLabel"] {
+	color: @text;
+	font-size: @fs_body;
+}
+
+/* Link / contour toggles in a panel's corner (shown on hover) */
+QToolButton[role="viewerOverlay"] {
+	background-color: transparent;
+	border: none;
+	border-radius: @radius;
+	padding: 0px;
+}
+QToolButton[role="viewerOverlay"]:hover { background-color: @hover_on_image; }
+
+/* =============================================================
+   Welcome screen
+   ============================================================= */
+QWidget#welcomeRoot {
+	background-color: @base;
+}
+
+QLabel[role="welcomeAppName"] {
+	color: @text;
+	font-size: @fs_hero;
+	font-weight: 600;
+}
+QLabel[role="welcomeHeadline"] {
+	color: @text_muted;
+	font-size: @fs_large;
+}
+QLabel[role="welcomeDescription"] {
+	color: @text_faint;
+	font-size: @fs_small;
+}
+
+QWidget[role="welcomeSidePanel"] {
+	background-color: @bg1;
+	border: none;
+	border-radius: @radius_panel;
+}
+
+QLabel[role="welcomeSectionTitle"] {
+	color: @text;
+	font-size: @fs_large;
+	font-weight: bold;
+}
+
+/* Main action + chevron options button, styled as one group.
+   [panelOpen="true"] is set in Python (WelcomeWidget._on_chevron_toggled). */
+QPushButton[role="welcomeMainAction"] {
+	min-height: 44px;  /* here, not in code: the general button min-height would win over code */
+	max-height: 44px;
+	background-color: @accent;
+	border: 1px solid @accent;
+	border-top-right-radius: 0px;
+	border-bottom-right-radius: 0px;
+	color: @on_accent;
+	font-weight: bold;
+	padding: 0px @sp5;
+	text-align: left;
+}
+QPushButton[role="welcomeMainAction"]:hover { background-color: @accent_hover; }
+QPushButton[role="welcomeMainAction"]:pressed { background-color: @accent; }
+QPushButton[role="welcomeMainAction"][panelOpen="true"] { border-bottom-left-radius: 0px; }
+
+QPushButton[role="welcomeChevron"] {
+	min-height: 44px;  /* here, not in code: the general button min-height would win over code */
+	max-height: 44px;
+	background-color: @accent;
+	border: 1px solid @accent;
+	border-left: 1px solid @bg1;
+	border-top-left-radius: 0px;
+	border-bottom-left-radius: 0px;
+	padding: 0px @sp3;
+}
+QPushButton[role="welcomeChevron"]:hover,
+QPushButton[role="welcomeChevron"]:checked { background-color: @accent_hover; }
+QPushButton[role="welcomeChevron"][panelOpen="true"] { border-bottom-right-radius: 0px; }
+
+QFrame[role="welcomeOptionsPanel"] {
+	background-color: @bg2;
+	border: 1px solid @accent;
+	border-top: none;
+	border-bottom-left-radius: @radius;
+	border-bottom-right-radius: @radius;
+}
+
+QLabel[role="welcomeOptionLabel"] {
+	color: @text_muted;
+	font-size: @fs_small;
+}
+
+/* ON/OFF pill that stands in for a checkbox in the options panel. */
+QPushButton[role="welcomeToggleSwitch"] {
+	background-color: @bg3;
+	border: 1px solid @line;
+	border-radius: 11px;
+	color: @text_muted;
+	font-size: @fs_small;
+	font-weight: bold;
+	min-width: 44px;
+	max-width: 44px;
+	min-height: 22px;
+	max-height: 22px;
+	padding: 0px;
+}
+QPushButton[role="welcomeToggleSwitch"]:hover:enabled { border-color: @text_faint; }
+QPushButton[role="welcomeToggleSwitch"]:checked {
+	background-color: @accent_soft;
+	border-color: @accent;
+	color: @accent;
+}
+QPushButton[role="welcomeToggleSwitch"]:disabled {
+	background-color: transparent;
+	border-color: @bg3;
+	color: @text_disabled;
+}
+
+QPushButton[role="welcomeInfoAction"] {
+	background-color: transparent;
+	border: 1px solid @line;
+	color: @text;
+	padding: @sp3 @sp4;
+	text-align: left;
+}
+QPushButton[role="welcomeInfoAction"]:hover { background-color: @bg3; }
+QPushButton[role="welcomeInfoAction"]:pressed { background-color: @bg1; }

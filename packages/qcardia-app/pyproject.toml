@@ -1,0 +1,27 @@
+[project]
+name = "qcardia-app"
+version = "1.0.0"
+description = "Interactive DICOM viewer"
+authors = [
+    {name = "Cian Scannell", email = "c.m.scannell@tue.nl"},
+    {name = "Marcus Vroemen", email = "m.j.vroemen@tue.nl"},
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.13"  # torch 2.3.1 (pinned by qcardia-models) has wheels up to cp312
+dependencies = [
+    "pyside6>=6.6.2",
+    "pydicom>=2.4.4",
+    "numpy>=1.26.3",
+    "torch>=2.3.0",
+    "scipy>=1.11.4",
+    "pyyaml>=6.0.1",
+    "qcardia",
+    "wandb>=0.30.0",
+]
+
+[project.scripts]
+qcardia-app = "qcardia_app.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
