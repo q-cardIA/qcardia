@@ -9,13 +9,112 @@ qcardia = { workspace = true }
 qcardia-data = { workspace = true }
 qcardia-models = { workspace = true }
 
-[tool.uv]
-# qcardia-data pins matplotlib==3.9.1, which is yanked and has no Windows wheels.
-override-dependencies = ["matplotlib>=3.9.2,<3.11"]
-
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "ty>=0.0.1a1"]
 
 [tool.pytest.ini_options]
 # Only the tests folders: qcardia_data/setup/test_splits.py holds data-split helpers, not tests.
 testpaths = ["packages/*/tests"]
+
+# One ruff and one ty configuration for every package. The workspace root is not a
+# package and has no requires-python, so the Python version is set here as well as in
+# each package's own requires-python. Change all of them together.
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+indent-width = 4
+# The six that ruff's own defaults do not already cover.
+extend-exclude = [
+    ".ipynb_checkpoints",
+    ".pyenv",
+    ".pytest_cache",
+    ".vscode",
+    "build",
+    "site-packages",
+]
+
+[tool.ruff.lint]
+select = [  # Enforce=conventions, Detect=identify issues, Prefer=recommend alternatives
+    "D",     # pydocstyle: Enforce consistent docstring conventions and formatting
+    "E",     # pycodestyle: Enforce consistent code style and statement layout
+    "F",     # Pyflakes: Detect undefined names, unused imports, and common code errors
+    "I",     # isort: Enforce import sorting and grouping
+    "UP",    # pyupgrade: Prefer modern Python syntax and avoid obsolete constructs
+    "N",     # pep8-naming: Enforce naming conventions
+    "ANN",   # flake8-annotations: Enforce type annotations
+    "BLE",   # flake8-blind-except: Detect blind exception handling
+    "FBT",   # flake8-boolean-trap: Detect ambiguous boolean arguments
+    "B",     # flake8-bugbear: Detect likely bugs and risky coding patterns
+    "A",     # flake8-builtins: Detect shadowing of Python built-ins
+    "C4",    # flake8-comprehensions: Prefer simpler comprehensions
+    "EM",    # flake8-errmsg: Prefer clearer exception messages
+    "ICN",   # flake8-import-conventions: Enforce conventional import aliases
+    "PIE",   # flake8-pie: Detect unnecessary code and error-prone patterns
+    "RET",   # flake8-return: Prefer simpler and more consistent return statements
+    "SIM",   # flake8-simplify: Prefer simpler alternatives to redundant or complex code
+    "TID",   # flake8-tidy-imports: Enforce import boundaries and hygiene
+    "TC",    # flake8-type-checking: Prefer type-checking blocks for typing-only imports
+    "ARG",   # flake8-unused-arguments: Detect unused function arguments
+    "PTH",   # flake8-use-pathlib: Prefer pathlib over os.path where appropriate
+    "PD",    # pandas-vet: Detect problematic pandas usage and suggest best practices
+    "NPY",   # NumPy-specific: Detect deprecated APIs and compatibility issues
+    "PGH",   # pygrep-hooks: Enforce rule codes in `# noqa` and `# type: ignore` comments
+    "RUF",   # Ruff-specific: Detect Python pitfalls and enforce more best practices
+    "PL",    # Pylint: Detect code errors, suspicious constructs, and design issues
+    "PERF",  # Perflint: Detect avoidable performance overhead
+]
+ignore = [
+    "E501",     # Allow lines to exceed threshold after automatic formatting
+    "RET503",   # Allow implicit None returns even when non-None return is possible
+    "RET504",   # Allow assigning a value before returning it
+    "PLR0912",  # Allow functions with more branches than the configured threshold
+    "PLR0913",  # Allow functions with more parameters than the configured threshold
+    "PLR0915",  # Allow functions with more statements than the configured threshold
+    "PERF401",  # Allow explicit loops instead of requiring list comprehensions
+    "PERF403",  # Allow explicit loops instead of requiring dict comprehensions
+]
+
+# No automatic fixes while the backlog is worked through by hand. Step 9 restores
+# fixable = ["ALL"] and runs `ruff check --fix` as one reviewable commit.
+fixable = []
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[\\p{XID_Continue}]*[\\p{XID_Continue}--_]+?))$"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pep8-naming]
+extend-ignore-names = [
+    "F",            # allow `import torch.nn.functional as F`
+    "*Event",       # Qt virtual methods: closeEvent, paintEvent, wheelEvent, ...
+    "eventFilter",  # the rest of the Qt overrides that the glob does not reach
+    "styleHint",
+    "showPopup",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Geometry and transform code: H, W, Z, T and friends are the conventional names.
+"**/la_conditioning.py" = ["N806"]
+"**/resampler.py" = ["N806"]
+"**/transformation_matrices.py" = ["N806"]
+"**/volume_geometry.py" = ["N806"]
+
+[tool.ruff.format]
+quote-style = "double"             # Like Black, use double quotes for strings.
+indent-style = "space"             # Like Black, indent with spaces, rather than tabs.
+skip-magic-trailing-comma = false  # Like Black, respect magic trailing commas.
+line-ending = "auto"               # Like Black, detect the appropriate line ending.
+docstring-code-format = true       # Format code examples inside docstrings.
+docstring-code-line-length = "dynamic"
+
+[tool.ty.environment]
+python-version = "3.11"  # the minimum, same as target-version above
+
+[tool.ty.rules]  # These rules are off by default. They find errors that can occur at runtime.
+blanket-ignore-comment = "warn"         # `# ty: ignore` without a rule code
+possibly-unresolved-reference = "warn"  # a variable that is only defined in some if/else or try branches
+possibly-missing-attribute = "warn"     # an attribute that is only defined in some branches
+possibly-missing-import = "warn"        # an import of a name that is only defined in some branches
+division-by-zero = "warn"               # a division by a literal 0

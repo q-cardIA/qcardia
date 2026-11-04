@@ -1,23 +1,56 @@
 [project]
 name = "qcardia-data"
-version = "1.0.0"
-requires-python = ">=3.10,<3.13"  # torch 2.3.1 has wheels up to Python 3.12
+version = "1.1.0"
+description = "PyTorch and MONAI based medical imaging data pipelines: dataloaders, augmentation, caching and dataset reformatting."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Cian Scannell", email = "c.m.scannell@tue.nl"},
+    {name = "Rob de Mooij", email = "r.a.j.d.mooij@tue.nl"},
+]
+requires-python = ">=3.11"
+keywords = ["deep learning", "medical image analysis", "cardiac MRI"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
 dependencies = [
-    "jupyter==1.0.0",
-    "matplotlib==3.9.1",
-    "monai==1.3.2",
-    "nibabel==5.2.1",
-    "numpy==1.26.3",
-    "pandas==2.2.2",
-    "Pillow==10.2.0",
-    "PyYAML==6.0.1",
-    "smallestenclosingcircle==0.0.1",
-    "torch==2.3.1",
-    "tqdm==4.66.4",
-    "pydicom==2.4.4",
-    "natsort==8.4.0"
+    "matplotlib>=3.9.2",
+    "monai>=1.3.2",
+    "natsort>=8.4",
+    "nibabel>=5.2",
+    "numpy>=1.26.3",
+    "pandas>=2.2",
+    "pillow>=10.2",
+    "pydicom>=2.4.4",
+    "pyyaml>=6.0.1",
+    "smallestenclosingcircle>=0.0.1",
+    "torch>=2.3",
+    "tqdm>=4.66",
 ]
 
+# Only the demo notebook needs jupyter. Nothing in src/ imports it.
+[project.optional-dependencies]
+demo = ["jupyter>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/q-cardIA/qcardia"
+Repository = "https://github.com/q-cardIA/qcardia"
+Issues = "https://github.com/q-cardIA/qcardia/issues"
+
 [build-system]
-requires = ["setuptools==69.5.1", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qcardia_data"]

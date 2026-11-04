@@ -1,21 +1,52 @@
 [project]
 name = "qcardia"
-version = "0.0.1"
-requires-python = ">=3.10,<3.13"  # torch 2.3.1 has wheels up to Python 3.12
+version = "0.2.0"
+description = "Deploy trained deep learning models for quantitative cardiac image analysis: CardiSort sorting, series objects and segmentation inference."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Cian Scannell", email = "c.m.scannell@tue.nl"},
+]
+requires-python = ">=3.11"
+keywords = ["deep learning", "medical image analysis", "cardiac MRI"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
 dependencies = [
-    "scipy==1.12.0",
-    "scikit-image==0.22.0",
-    "opencv-python==4.10.0.84",
-    "requests>=2.31.0",
-    "tqdm>=4.66.0",
-    # Open dependencies only: the public qcardia-models and qcardia-data packages
-    # on this repo's main branch. They have no ContextUNet2d and no LA-SAx
-    # intersection geometry, so context-aware and LA-conditioned inference raise
-    # an ImportError. Plain-UNet inference works.
-    "qcardia-models@git+https://github.com/q-cardIA/qcardia@main#subdirectory=packages/qcardia-models",
-    "qcardia-data@git+https://github.com/q-cardIA/qcardia@main#subdirectory=packages/qcardia-data"
+    "natsort>=8.4",
+    "nibabel>=5.2",
+    "numpy>=1.26.3",
+    "opencv-python>=4.10",
+    "pydicom>=2.4.4",
+    "pyyaml>=6.0.1",
+    "qcardia-data>=1.0,<2",
+    "qcardia-models>=1.0,<2",
+    "requests>=2.31",
+    "scikit-image>=0.22",
+    "scipy>=1.12",
+    "torch>=2.3",
+    "tqdm>=4.66",
 ]
 
+[project.urls]
+Homepage = "https://github.com/q-cardIA/qcardia"
+Repository = "https://github.com/q-cardIA/qcardia"
+Issues = "https://github.com/q-cardIA/qcardia/issues"
+
 [build-system]
-requires = ["setuptools==69.5.1", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qcardia"]

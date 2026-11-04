@@ -1,16 +1,47 @@
 [project]
 name = "qcardia-models"
-version = "1.0.0"
-requires-python = ">=3.10,<3.13"  # torch 2.3.1 has wheels up to Python 3.12
+version = "1.1.0"
+description = "PyTorch based medical imaging model pipelines: U-Net and encoder-MLP architectures, losses and metrics."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Cian Scannell", email = "c.m.scannell@tue.nl"},
+    {name = "Rob de Mooij", email = "r.a.j.d.mooij@tue.nl"},
+]
+requires-python = ">=3.11"
+keywords = ["deep learning", "medical image analysis", "cardiac MRI"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
 dependencies = [
-    "numpy==1.26.3",
-    "torch==2.3.1",
-    "tqdm==4.66.4",
+    "numpy>=1.26.3",
+    "torch>=2.3",
+    "tqdm>=4.66",
 ]
 
+# Only the demo notebooks need jupyter. Nothing in src/ imports it.
+[project.optional-dependencies]
+demo = ["jupyter>=1.0", "torchview>=0.2"]
+
+[project.urls]
+Homepage = "https://github.com/q-cardIA/qcardia"
+Repository = "https://github.com/q-cardIA/qcardia"
+Issues = "https://github.com/q-cardIA/qcardia/issues"
+
 [build-system]
-requires = [
-    "setuptools==69.5.1",
-    "wheel",
-]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qcardia_models"]
