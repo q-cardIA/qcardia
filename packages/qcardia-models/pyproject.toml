@@ -32,7 +32,7 @@ dependencies = [
 
 # Only the demo notebooks need jupyter. Nothing in src/ imports it.
 [project.optional-dependencies]
-demo = ["jupyter>=1.0"]
+demo = ["jupyter>=1.0", "torchview>=0.2"]
 
 [project.urls]
 Homepage = "https://github.com/q-cardIA/qcardia"
