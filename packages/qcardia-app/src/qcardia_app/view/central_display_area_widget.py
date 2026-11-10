@@ -703,6 +703,7 @@ class CentralDisplayAreaWidget(QWidget):
         self._selected = panel_idx
         self._set_time_axis(self._panel_time_axis(panel_idx) or CINE_TIME_AXIS)
         self._show_selected()
+        self._show_plane_lines()
 
     def _show_selected(self):
         """Whether the selected panel has frames, for the time bar; also after its series changes."""
@@ -820,6 +821,18 @@ class CentralDisplayAreaWidget(QWidget):
 
         n = self._n_slices(key, axis)
         p.slice_label.setText(f"Slice: {z + 1}/{n}" if n > 1 else "")
+        self._show_plane_lines()
+
+    def _show_plane_lines(self):
+        """The plane of the selected panel as a line in every panel it cuts, e.g. the 3CH in the SAX."""
+        source = self._selected
+        src_geom = self._transverse_geometry(source) if source is not None and source < self.n_panels else None
+        for i, panel in enumerate(self._panels):
+            geom = self._transverse_geometry(i) if src_geom is not None and i != source else None
+            line = None
+            if geom is not None and not src_geom.is_parallel_to(geom):
+                line = src_geom.intersection_line_in_image(geom, self._panel_slice_idx[source], self._panel_slice_idx[i])
+            panel.viewer.set_plane_line(line)
 
     def update_all_panels(self):
         for i in range(self.n_panels):

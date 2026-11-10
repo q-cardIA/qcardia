@@ -150,6 +150,9 @@ class CustomQGraphicsView(QGraphicsView):
         for line in (self.vertical_line, self.horizontal_line):
             line.setZValue(100)
             line.setVisible(False)
+        self.plane_line = self.scene.addLine(0, 0, 0, 0)  # where the plane of the selected panel cuts this image
+        self.plane_line.setZValue(100)
+        self.plane_line.setVisible(False)
 
     def __apply_theme(self):
         pen = QPen(theme.color("accent"), 1)
@@ -157,6 +160,9 @@ class CustomQGraphicsView(QGraphicsView):
         pen.setCosmetic(True)
         for line in (self.vertical_line, self.horizontal_line):
             line.setPen(pen)
+        solid = QPen(theme.color("accent"), 1)
+        solid.setCosmetic(True)
+        self.plane_line.setPen(solid)
         off, on = theme.color("text_muted").name(), theme.color("accent").name()
         for button, draw in self._toggle_draws:
             button.setIcon(_icon(draw, off, on))
@@ -490,6 +496,16 @@ class CustomQGraphicsView(QGraphicsView):
         """The position keeps following clicks while hidden, so it reappears in the right place."""
         for line in (self.vertical_line, self.horizontal_line):
             line.setVisible(shown and self.crosshair_pos is not None)
+        self.plane_line.setVisible(shown and self.plane_line.line().length() > 0)
+
+    def set_plane_line(self, line: tuple[tuple[float, float], tuple[float, float]] | None):
+        """Show the plane of another panel as a line between two (row, col) pixel points, or hide it."""
+        if line is None:
+            self.plane_line.setLine(0, 0, 0, 0)
+        else:
+            (r0, c0), (r1, c1) = line
+            self.plane_line.setLine(c0 + 0.5, r0 + 0.5, c1 + 0.5, r1 + 0.5)
+        self.show_crosshair(CustomQGraphicsView.crosshair_shown)
 
     def clear_display(self):
         self.image_2d_h = 0
@@ -499,6 +515,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.image_item.setPixmap(QPixmap())
         self.vertical_line.setVisible(False)
         self.horizontal_line.setVisible(False)
+        self.set_plane_line(None)
         self.clear_contours()
         self.setEnabled(False)
 
