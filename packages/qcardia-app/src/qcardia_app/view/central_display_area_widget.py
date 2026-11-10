@@ -116,6 +116,7 @@ class CentralDisplayAreaWidget(QWidget):
         self._time_index: dict[str, int] = {}
         self._time_axis = CINE_TIME_AXIS
         self._selected: int | None = None  # the panel last used, see _show_selected
+        self._focused: int | None = None  # the panel that fills the area, see toggle_focus
 
         # Live panel widgets (rebuilt by set_grid_size)
         self._panels: list[_Panel] = []
@@ -189,12 +190,29 @@ class CentralDisplayAreaWidget(QWidget):
         """The window in two equal halves, each its own grid (see utils.layouts.split_layout)."""
         self._set_layout(*split_layout(split), split=split)
 
+    def toggle_focus(self, panel_idx: int):
+        """The panel fills the whole area, hiding the others (their series and indices stay); again, back to the grid."""
+        if self._focused is None and self._panel_series_key[panel_idx] is None:
+            return
+        self._focused = None if self._focused is not None else panel_idx
+        for i, (p, (r, c, h, w)) in enumerate(zip(self._panels, self._cells)):
+            p.container.setVisible(self._focused in (None, i))
+            self._layout.removeWidget(p.container)
+            if self._focused == i:
+                self._layout.addWidget(p.container, 0, 0, 2 * self._grid_rows - 1, 2 * self._grid_cols - 1)
+            else:
+                self._layout.addWidget(p.container, 2 * r, 2 * c, 2 * h - 1, 2 * w - 1)
+        for divider in self._dividers:
+            divider.setVisible(self._focused is None)
+
     @property
     def split(self) -> tuple[int, int, int, int] | None:
         return self._split
 
     def _set_layout(self, rows: int, cols: int, cells, shift: tuple[int, int] = (0, 0), split=None):
         """Panels keep their series by grid cell, or by panel number when a split layout is set or left."""
+        if self._focused is not None:
+            self.toggle_focus(self._focused)  # a new layout starts from the grid
         by_number = split is not None or self._split is not None
         if cells == self._cells and split == self._split and not any(shift):
             return
@@ -993,6 +1011,8 @@ class CentralDisplayAreaWidget(QWidget):
             self.time_step_requested.emit(amount)
         elif action == "play":
             self.play_toggle_requested.emit()
+        elif action == "focus":
+            self.toggle_focus(panel_idx)
         elif key is None:
             return
         elif action == "slice":

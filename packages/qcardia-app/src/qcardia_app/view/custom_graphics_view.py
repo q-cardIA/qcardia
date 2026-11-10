@@ -422,7 +422,7 @@ class CustomQGraphicsView(QGraphicsView):
     def mouseDoubleClickEvent(self, event):
         in_place = (event.position() - self._press_pos).manhattanLength() <= 4
         if event.button() == Qt.LeftButton and not self.edit_mode and in_place:
-            self.__trigger("reset")
+            self.action_requested.emit("focus", 0)
         else:
             self.mousePressEvent(event)
 
