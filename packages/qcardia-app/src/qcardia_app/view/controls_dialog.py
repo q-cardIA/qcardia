@@ -136,7 +136,7 @@ class ControlsDialog(QDialog):
                 row += 1
         layout.addLayout(grid)
 
-        self._note = QLabel("Double-click a panel to reset its view.")
+        self._note = QLabel("Double-click a panel to show it alone, and again to go back.")
         self._note.setWordWrap(True)
         layout.addWidget(self._note)
 

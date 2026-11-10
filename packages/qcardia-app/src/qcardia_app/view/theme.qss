@@ -420,13 +420,13 @@ QWidget[role="viewerCard"] {
 
 QGraphicsView[role="imageViewport"] {
 	background-color: @viewport;
-	border: 1px solid transparent;
+	border: 2px solid transparent;
 	border-radius: 0px;
 }
 /* An empty panel is a free place, not a black image. */
 QGraphicsView[role="imageViewport"]:disabled { background-color: @bg1; }
 /* Keys act on the clicked panel, so show which one that is. */
-QGraphicsView[role="imageViewport"]:focus { border: 1px solid @accent; }
+QGraphicsView[role="imageViewport"]:focus { border: 2px solid @accent; }
 
 QLabel[role="viewerTitle"] {
 	color: @text_muted;
@@ -439,8 +439,9 @@ QLabel[role="viewerMeta"] {
 }
 
 QLabel[role="viewerIndex"] {
-	color: @text_faint;
-	font-size: @fs_tiny;
+	color: @text_muted;
+	font-size: @fs_large;
+	font-weight: 600;
 }
 
 QLabel[role="divider"] {

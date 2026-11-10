@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QSizePolicy,
     QSlider,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -117,6 +116,7 @@ class CentralDisplayAreaWidget(QWidget):
         self._time_index: dict[str, int] = {}
         self._time_axis = CINE_TIME_AXIS
         self._selected: int | None = None  # the panel last used, see _show_selected
+        self._focused: int | None = None  # the panel that fills the area, see toggle_focus
 
         # Live panel widgets (rebuilt by set_grid_size)
         self._panels: list[_Panel] = []
@@ -190,12 +190,29 @@ class CentralDisplayAreaWidget(QWidget):
         """The window in two equal halves, each its own grid (see utils.layouts.split_layout)."""
         self._set_layout(*split_layout(split), split=split)
 
+    def toggle_focus(self, panel_idx: int):
+        """The panel fills the whole area, hiding the others (their series and indices stay); again, back to the grid."""
+        if self._focused is None and self._panel_series_key[panel_idx] is None:
+            return
+        self._focused = None if self._focused is not None else panel_idx
+        for i, (p, (r, c, h, w)) in enumerate(zip(self._panels, self._cells)):
+            p.container.setVisible(self._focused in (None, i))
+            self._layout.removeWidget(p.container)
+            if self._focused == i:
+                self._layout.addWidget(p.container, 0, 0, 2 * self._grid_rows - 1, 2 * self._grid_cols - 1)
+            else:
+                self._layout.addWidget(p.container, 2 * r, 2 * c, 2 * h - 1, 2 * w - 1)
+        for divider in self._dividers:
+            divider.setVisible(self._focused is None)
+
     @property
     def split(self) -> tuple[int, int, int, int] | None:
         return self._split
 
     def _set_layout(self, rows: int, cols: int, cells, shift: tuple[int, int] = (0, 0), split=None):
         """Panels keep their series by grid cell, or by panel number when a split layout is set or left."""
+        if self._focused is not None:
+            self.toggle_focus(self._focused)  # a new layout starts from the grid
         by_number = split is not None or self._split is not None
         if cells == self._cells and split == self._split and not any(shift):
             return
@@ -290,9 +307,8 @@ class CentralDisplayAreaWidget(QWidget):
         container.series_dropped.connect(self._on_panel_series_dropped)
         container.setProperty("role", "viewerCard")
         container.setObjectName(f"panel_{idx}")
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(2, 2, 2, 2)
-        vbox.setSpacing(2)
+        grid = QGridLayout(container)  # the image fills the panel, the labels float over its top edge
+        grid.setContentsMargins(0, 0, 0, 0)
 
         hdr = QHBoxLayout()
         hdr.setContentsMargins(6, 4, 6, 4)
@@ -307,8 +323,10 @@ class CentralDisplayAreaWidget(QWidget):
         hdr.addWidget(number)
         hdr.addWidget(title, 1)
         hdr.addWidget(slice_lbl)
+        for label in (number, title, slice_lbl):
+            label.setAttribute(Qt.WA_TransparentForMouseEvents)  # clicks reach the image below
 
-        slider = QSlider(Qt.Horizontal)
+        slider = QSlider(Qt.Horizontal, container)  # holds the slice index, never shown
         slider.setMinimum(0)
         slider.setMaximum(0)
         slider.setEnabled(False)
@@ -329,9 +347,8 @@ class CentralDisplayAreaWidget(QWidget):
         viewer.view_changed.connect(lambda *view, i=idx: self._on_view_changed(i, view))
         viewer.focused.connect(lambda i=idx: self._select_time_axis(i))
 
-        vbox.addLayout(hdr)
-        vbox.addWidget(slider)
-        vbox.addWidget(viewer)
+        grid.addWidget(viewer, 0, 0)
+        grid.addLayout(hdr, 0, 0, Qt.AlignTop)
 
         overlay = LoadingOverlay(container)
 
@@ -420,7 +437,6 @@ class CentralDisplayAreaWidget(QWidget):
         sl.setMaximum(max(0, n - 1))
         sl.blockSignals(False)
         sl.setEnabled(n > 1)
-        sl.setVisible(n > 1)
         self._set_slice(panel_idx, n // 2 if slice_idx is None else min(slice_idx, max(0, n - 1)))
         self._panel_depth[panel_idx] = self._panel_slice_idx[panel_idx]
         # After the slice: the linked view is found on the panel's slice of the new series.
@@ -819,7 +835,7 @@ class CentralDisplayAreaWidget(QWidget):
         p.viewer.update_slice_view(self._display(key, slice_2d, panel_idx))
 
         n = self._n_slices(key, axis)
-        p.slice_label.setText(f"Slice: {z + 1}/{n}" if n > 1 else "")
+        p.slice_label.setText(f"{z + 1}/{n}" if n > 1 else "")
 
     def update_all_panels(self):
         for i in range(self.n_panels):
@@ -995,6 +1011,8 @@ class CentralDisplayAreaWidget(QWidget):
             self.time_step_requested.emit(amount)
         elif action == "play":
             self.play_toggle_requested.emit()
+        elif action == "focus":
+            self.toggle_focus(panel_idx)
         elif key is None:
             return
         elif action == "slice":

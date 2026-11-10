@@ -5,6 +5,7 @@ import numpy as np
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
+    QApplication,
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsPathItem,
@@ -12,6 +13,9 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsOpacityEffect,
     QGraphicsView,
+    QLineEdit,
+    QPlainTextEdit,
+    QTextEdit,
     QToolButton,
 )
 
@@ -25,6 +29,7 @@ _KEY_ACTIONS = {
     "frame_prev": ("frame", -1), "frame_next": ("frame", 1), "play": ("play", 0),
     "link": ("link", 0), "own_frame": ("own_frame", 0), "contours": ("contours", 0),
 }
+_TEXT_INPUTS = (QLineEdit, QTextEdit, QPlainTextEdit)  # hovering a panel never takes their focus
 _REPEATING = {"slice_prev", "slice_next", "frame_prev", "frame_next", "zoom_in", "zoom_out"}
 
 
@@ -210,6 +215,8 @@ class CustomQGraphicsView(QGraphicsView):
 
     def enterEvent(self, event):
         self.__show_toggles(True)
+        if self.isEnabled() and not isinstance(QApplication.focusWidget(), _TEXT_INPUTS):
+            self.setFocus(Qt.MouseFocusReason)  # keys act on the panel under the pointer, without a click
         super().enterEvent(event)
 
     def leaveEvent(self, event):
@@ -415,7 +422,7 @@ class CustomQGraphicsView(QGraphicsView):
     def mouseDoubleClickEvent(self, event):
         in_place = (event.position() - self._press_pos).manhattanLength() <= 4
         if event.button() == Qt.LeftButton and not self.edit_mode and in_place:
-            self.__trigger("reset")
+            self.action_requested.emit("focus", 0)
         else:
             self.mousePressEvent(event)
 
