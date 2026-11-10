@@ -1,4 +1,5 @@
 from functools import cache
+from math import cos, radians, sin
 
 import numpy as np
 
@@ -103,6 +104,7 @@ class CustomQGraphicsView(QGraphicsView):
         self._edit_tool = "move"
 
         self._zoom = 1.0  # relative to fit-to-panel
+        self._rotation = 0.0  # degrees, clockwise
         self._center: QPointF | None = None  # scene point at the panel centre; None = image centre
         self._actual_scale = 1.0  # screen pixels per image pixel
         self._drag: str | None = None
@@ -148,6 +150,9 @@ class CustomQGraphicsView(QGraphicsView):
         for line in (self.vertical_line, self.horizontal_line):
             line.setZValue(100)
             line.setVisible(False)
+        self.plane_line = self.scene.addLine(0, 0, 0, 0)  # where the plane of the selected panel cuts this image
+        self.plane_line.setZValue(100)
+        self.plane_line.setVisible(False)
 
     def __apply_theme(self):
         pen = QPen(theme.color("accent"), 1)
@@ -155,6 +160,9 @@ class CustomQGraphicsView(QGraphicsView):
         pen.setCosmetic(True)
         for line in (self.vertical_line, self.horizontal_line):
             line.setPen(pen)
+        solid = QPen(theme.color("accent"), 1)
+        solid.setCosmetic(True)
+        self.plane_line.setPen(solid)
         off, on = theme.color("text_muted").name(), theme.color("accent").name()
         for button, draw in self._toggle_draws:
             button.setIcon(_icon(draw, off, on))
@@ -233,13 +241,16 @@ class CustomQGraphicsView(QGraphicsView):
         if not self.image_2d_w or not self.image_2d_h:
             return
         view = self.viewport()
-        fit = min(view.width() / self.image_2d_w, view.height() / self.image_2d_h)
+        turned = abs(cos(radians(self._rotation))), abs(sin(radians(self._rotation)))
+        width = self.image_2d_w * turned[0] + self.image_2d_h * turned[1]  # the image as it is turned
+        height = self.image_2d_w * turned[1] + self.image_2d_h * turned[0]
+        fit = min(view.width() / width, view.height() / height)
         if self._frame is not None:
             (x0, y0, x1, y1), cover = self._frame
             scale = (max if cover else min)(view.width() / (x1 - x0), view.height() / (y1 - y0))
             self._zoom, self._center = scale / max(fit, 1e-6), QPointF((x0 + x1) / 2, (y0 + y1) / 2)
         self._actual_scale = max(fit, 1e-6) * self._zoom
-        self.setTransform(QTransform.fromScale(self._actual_scale, self._actual_scale))
+        self.setTransform(QTransform().scale(self._actual_scale, self._actual_scale).rotate(self._rotation))
         self.centerOn(self.__view_center())
         self.__refresh_pen_widths()
 
@@ -291,8 +302,14 @@ class CustomQGraphicsView(QGraphicsView):
     def zoom_out(self):
         self._zoom_by(0.8)
 
+    def rotate_by(self, degrees: float):
+        """Turn the image clockwise about the centre of the panel."""
+        self._rotation = (self._rotation + degrees) % 360
+        self.__apply_view()
+
     def reset_view(self):
         self._fit_view = self._frame = None
+        self._rotation = 0.0
         self.__show_fit_view()
         self.__emit_view()
 
@@ -313,7 +330,7 @@ class CustomQGraphicsView(QGraphicsView):
 
     def __pan(self, delta):
         self._frame = None
-        self._center = self.__view_center() - QPointF(delta.x(), delta.y()) * self.__px()
+        self._center = self.__view_center() - QTransform().rotate(-self._rotation).map(QPointF(delta)) * self.__px()
         self.centerOn(self._center)
         self.__emit_view()
 
@@ -453,6 +470,8 @@ class CustomQGraphicsView(QGraphicsView):
             self.zoom_in()
         elif action == "zoom_out":
             self.zoom_out()
+        elif action in ("rotate_left", "rotate_right"):
+            self.rotate_by(-90 if action == "rotate_left" else 90)
         elif action == "reset":
             self.reset_view()
             self.action_requested.emit("reset", 0)
@@ -477,6 +496,16 @@ class CustomQGraphicsView(QGraphicsView):
         """The position keeps following clicks while hidden, so it reappears in the right place."""
         for line in (self.vertical_line, self.horizontal_line):
             line.setVisible(shown and self.crosshair_pos is not None)
+        self.plane_line.setVisible(shown and self.plane_line.line().length() > 0)
+
+    def set_plane_line(self, line: tuple[tuple[float, float], tuple[float, float]] | None):
+        """Show the plane of another panel as a line between two (row, col) pixel points, or hide it."""
+        if line is None:
+            self.plane_line.setLine(0, 0, 0, 0)
+        else:
+            (r0, c0), (r1, c1) = line
+            self.plane_line.setLine(c0 + 0.5, r0 + 0.5, c1 + 0.5, r1 + 0.5)
+        self.show_crosshair(CustomQGraphicsView.crosshair_shown)
 
     def clear_display(self):
         self.image_2d_h = 0
@@ -486,6 +515,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.image_item.setPixmap(QPixmap())
         self.vertical_line.setVisible(False)
         self.horizontal_line.setVisible(False)
+        self.set_plane_line(None)
         self.clear_contours()
         self.setEnabled(False)
 

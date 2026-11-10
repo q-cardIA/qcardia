@@ -115,17 +115,17 @@ class VolumeGeometry:
         return abs(float(np.dot(self.normal, other.normal))) > 1.0 - tol
 
     def intersection_line_in_image(
-        self, other: VolumeGeometry, z_idx: int
+        self, other: VolumeGeometry, z_idx: int, other_z: int = 0
     ) -> tuple[tuple[float, float], tuple[float, float]] | None:
         """Pixel endpoints of the line where self's slice z_idx intersects other.
 
-        Returns two (row, col) points in other's pixel space, or None if the
+        The line lies in slice other_z of other. Returns two (row, col) points in its pixel space, or None if the
         planes are parallel or the intersection misses the image entirely.
         Used to draw scout lines across panels.
         """
         p_a = self.ipp_list[int(z_idx)]
         n_a = self.normal
-        p_b = other.ipp_list[0]
+        p_b = other.ipp_list[int(other_z)]
         dr_b, dc_b = other.pixel_spacing
 
         d0 = float(np.dot(p_b - p_a, n_a))
@@ -143,15 +143,13 @@ class VolumeGeometry:
             if 0.0 <= r <= H and 0.0 <= c <= W:
                 pts.append((r, c))
 
-        if abs(d_r) > 1e-9:
+        if abs(d_c) > 1e-9:  # crossing the top and bottom edge
             for r_val in (0.0, H):
-                if abs(d_c) > 1e-9:
-                    _add(r_val, (-d0 - d_r * r_val) / d_c)
+                _add(r_val, (-d0 - d_r * r_val) / d_c)
 
-        if abs(d_c) > 1e-9:
+        if abs(d_r) > 1e-9:  # crossing the left and right edge
             for c_val in (0.0, W):
-                if abs(d_r) > 1e-9:
-                    _add((-d0 - d_c * c_val) / d_r, c_val)
+                _add((-d0 - d_c * c_val) / d_r, c_val)
 
         if len(pts) < 2:
             return None
