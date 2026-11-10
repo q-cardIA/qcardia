@@ -566,11 +566,19 @@ class CentralDisplayAreaWidget(QWidget):
                 self._panel_window[i] = window
                 self._update_panel(i, contours=False)
             return
-        self._windows[series_key] = window
+        keys = self._sequence(series_key)
+        for key in keys:
+            self._windows[key] = window
         for i in range(self.n_panels):
-            if self._panel_series_key[i] == series_key:
+            if self._panel_series_key[i] in keys:
                 self._panel_window[i] = None
-        self._refresh_images(series_key)
+        for key in keys:
+            self._refresh_images(key)
+
+    def _sequence(self, series_key: str) -> list[str]:
+        """The series of one sequence, which share a window: CINE_SAX with CINE_2CH, CINE_3CH, ..."""
+        sequence = series_key.rsplit("_", 1)[0]
+        return [key for key in self._windows if key.rsplit("_", 1)[0] == sequence]
 
     def _narrowest_width(self, series_key: str) -> float:
         return self._default_windows[series_key][1] / 100
@@ -1051,8 +1059,9 @@ class CentralDisplayAreaWidget(QWidget):
             if panel is not None:
                 self.set_window(key, window, [panel])
             else:
-                self._windows[key] = window
-                self._refresh_images(key)
+                for same in self._sequence(key):
+                    self._windows[same] = window
+                    self._refresh_images(same)
 
     def _refresh_images(self, series_key: str):
         for i in range(self.n_panels):
