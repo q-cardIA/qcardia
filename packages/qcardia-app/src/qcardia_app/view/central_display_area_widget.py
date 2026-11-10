@@ -441,6 +441,18 @@ class CentralDisplayAreaWidget(QWidget):
             return None
         return src.nearest_slice(dst, z)
 
+    def _shifted_slice(self, series_key: str, z: int, source_key: str, from_z: int, to_z: int) -> int | None:
+        """The slice of series_key nearest to its slice z moved by the distance that source_key moved from
+        slice from_z to to_z, if both stacks have geometry and are parallel."""
+        src, dst = self._geometries.get(source_key), self._geometries.get(series_key)
+        if src is None or dst is None or not src.is_parallel_to(dst):
+            return None
+        if len(dst.ipp_list) != self._n_slices(series_key, "transverse"):
+            return None
+        shift = src.slice_position(to_z) - src.slice_position(from_z)
+        target = dst.slice_position(z) + shift * np.sign(np.dot(src.normal, dst.normal))
+        return int(np.argmin([abs(dst.slice_position(k) - target) for k in range(len(dst.ipp_list))]))
+
     def zoom_panels(self, panels: list[int], mode: str, percent: float = 100.0, analysis: dict | None = None) -> list[int]:
         """mode 'roi' frames the analyses' boxes (row0, col0, row1, col1) with ROI_PADDING, also in
         panels of a parallel series of the same plane; 'fill' fills the panel with the image, 'fit' shows
@@ -869,12 +881,19 @@ class CentralDisplayAreaWidget(QWidget):
         step = min(max(depth + step, min(depth, 0)), max(depth, n - 1)) - depth
         if not step:
             return
+        from_z, to_z = self._panel_slice_idx[source], min(max(0, depth + step), n - 1)
         stacks = Counter(zip(self._panel_series_key, self._panel_axis))
         for i in self._linked_with(source) if self._panel_linked[source] else [source]:
             stack = (self._panel_series_key[i], self._panel_axis[i])
             if (i != source and stack != (key, axis) and stacks[stack] == 1
                     and key in self._geometries and stack[0] in self._geometries):
                 continue
+            if i != source and stack != (key, axis):  # another series: by distance in mm, not by slices
+                moved = self._shifted_slice(stack[0], self._panel_slice_idx[i], key, from_z, to_z)
+                if moved is not None:
+                    if self._set_slice(i, moved):
+                        self._update_panel(i)
+                    continue
             new_depth = self._panel_depth[i] + step
             if self._set_slice(i, min(max(0, new_depth), self._n_slices(*stack) - 1)):
                 self._update_panel(i)
