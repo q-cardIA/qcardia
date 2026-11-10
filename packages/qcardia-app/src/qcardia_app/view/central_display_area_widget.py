@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QSizePolicy,
     QSlider,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -290,9 +289,8 @@ class CentralDisplayAreaWidget(QWidget):
         container.series_dropped.connect(self._on_panel_series_dropped)
         container.setProperty("role", "viewerCard")
         container.setObjectName(f"panel_{idx}")
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(2, 2, 2, 2)
-        vbox.setSpacing(2)
+        grid = QGridLayout(container)  # the image fills the panel, the labels float over its top edge
+        grid.setContentsMargins(0, 0, 0, 0)
 
         hdr = QHBoxLayout()
         hdr.setContentsMargins(6, 4, 6, 4)
@@ -307,8 +305,10 @@ class CentralDisplayAreaWidget(QWidget):
         hdr.addWidget(number)
         hdr.addWidget(title, 1)
         hdr.addWidget(slice_lbl)
+        for label in (number, title, slice_lbl):
+            label.setAttribute(Qt.WA_TransparentForMouseEvents)  # clicks reach the image below
 
-        slider = QSlider(Qt.Horizontal)
+        slider = QSlider(Qt.Horizontal, container)  # holds the slice index, never shown
         slider.setMinimum(0)
         slider.setMaximum(0)
         slider.setEnabled(False)
@@ -329,9 +329,8 @@ class CentralDisplayAreaWidget(QWidget):
         viewer.view_changed.connect(lambda *view, i=idx: self._on_view_changed(i, view))
         viewer.focused.connect(lambda i=idx: self._select_time_axis(i))
 
-        vbox.addLayout(hdr)
-        vbox.addWidget(slider)
-        vbox.addWidget(viewer)
+        grid.addWidget(viewer, 0, 0)
+        grid.addLayout(hdr, 0, 0, Qt.AlignTop)
 
         overlay = LoadingOverlay(container)
 
@@ -420,7 +419,6 @@ class CentralDisplayAreaWidget(QWidget):
         sl.setMaximum(max(0, n - 1))
         sl.blockSignals(False)
         sl.setEnabled(n > 1)
-        sl.setVisible(n > 1)
         self._set_slice(panel_idx, n // 2 if slice_idx is None else min(slice_idx, max(0, n - 1)))
         self._panel_depth[panel_idx] = self._panel_slice_idx[panel_idx]
         # After the slice: the linked view is found on the panel's slice of the new series.
@@ -819,7 +817,7 @@ class CentralDisplayAreaWidget(QWidget):
         p.viewer.update_slice_view(self._display(key, slice_2d, panel_idx))
 
         n = self._n_slices(key, axis)
-        p.slice_label.setText(f"Slice: {z + 1}/{n}" if n > 1 else "")
+        p.slice_label.setText(f"{z + 1}/{n}" if n > 1 else "")
 
     def update_all_panels(self):
         for i in range(self.n_panels):
