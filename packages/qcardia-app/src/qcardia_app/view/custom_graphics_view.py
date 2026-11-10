@@ -29,8 +29,8 @@ _REPEATING = {"slice_prev", "slice_next", "frame_prev", "frame_next", "zoom_in",
 
 
 @cache
-def _icon(draw, off: str, on: str) -> QIcon:
-    """16 px line icon in the off and on colours; draw paints it in a 32 x 32 box."""
+def _icon(draw, off: str, on: str, draw_off=None) -> QIcon:
+    """16 px line icon in the off and on colours; draw paints it in a 32 x 32 box (draw_off: the off state)."""
     icon = QIcon()
     for state, color in ((QIcon.Off, QColor(off)), (QIcon.On, QColor(on))):
         pixmap = QPixmap(32, 32)
@@ -38,7 +38,7 @@ def _icon(draw, off: str, on: str) -> QIcon:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QPen(color, 3))
-        draw(painter)
+        (draw_off if draw_off and state == QIcon.Off else draw)(painter)
         painter.end()
         icon.addPixmap(pixmap, QIcon.Normal, state)
     return icon
@@ -49,6 +49,13 @@ def _draw_link(painter):  # two chain links at 45 degrees
     painter.rotate(-45)
     painter.drawRoundedRect(QRectF(-14, -5, 16, 10), 5, 5)
     painter.drawRoundedRect(QRectF(-2, -5, 16, 10), 5, 5)
+
+
+def _draw_unlink(painter):  # the same links, pulled apart: a broken chain
+    painter.translate(16, 16)
+    painter.rotate(-45)
+    painter.drawRoundedRect(QRectF(-15, -5, 13, 10), 5, 5)
+    painter.drawRoundedRect(QRectF(2, -5, 13, 10), 5, 5)
 
 
 def _draw_clock(painter):  # a clock face at ten past
@@ -157,7 +164,7 @@ class CustomQGraphicsView(QGraphicsView):
             line.setPen(pen)
         off, on = theme.color("text_muted").name(), theme.color("accent").name()
         for button, draw in self._toggle_draws:
-            button.setIcon(_icon(draw, off, on))
+            button.setIcon(_icon(draw, off, on, _draw_unlink if draw is _draw_link else None))
 
     def __set_stylesheets(self):
         self.setProperty("role", "imageViewport")
