@@ -16,9 +16,9 @@ resolution-markers = [
 [manifest]
 members = [
     "qcardia",
-    "qcardia-app",
     "qcardia-data",
     "qcardia-models",
+    "qcardia-viewer",
 ]
 overrides = [{ name = "matplotlib", specifier = ">=3.9.2,<3.11" }]
 
@@ -2078,33 +2078,6 @@ requires-dist = [
 ]
 
 [[package]]
-name = "qcardia-app"
-version = "1.0.0"
-source = { editable = "packages/qcardia-app" }
-dependencies = [
-    { name = "numpy" },
-    { name = "pydicom" },
-    { name = "pyside6" },
-    { name = "pyyaml" },
-    { name = "qcardia" },
-    { name = "scipy" },
-    { name = "torch" },
-    { name = "wandb" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=1.26.3" },
-    { name = "pydicom", specifier = ">=2.4.4" },
-    { name = "pyside6", specifier = ">=6.6.2" },
-    { name = "pyyaml", specifier = ">=6.0.1" },
-    { name = "qcardia", editable = "packages/qcardia" },
-    { name = "scipy", specifier = ">=1.11.4" },
-    { name = "torch", specifier = ">=2.3.0" },
-    { name = "wandb", specifier = ">=0.30.0" },
-]
-
-[[package]]
 name = "qcardia-data"
 version = "1.0.0"
 source = { editable = "packages/qcardia-data" }
@@ -2156,6 +2129,33 @@ requires-dist = [
     { name = "numpy", specifier = "==1.26.3" },
     { name = "torch", specifier = "==2.3.1" },
     { name = "tqdm", specifier = "==4.66.4" },
+]
+
+[[package]]
+name = "qcardia-viewer"
+version = "1.0.0"
+source = { editable = "packages/qcardia-viewer" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pydicom" },
+    { name = "pyside6" },
+    { name = "pyyaml" },
+    { name = "qcardia" },
+    { name = "scipy" },
+    { name = "torch" },
+    { name = "wandb" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.26.3" },
+    { name = "pydicom", specifier = ">=2.4.4" },
+    { name = "pyside6", specifier = ">=6.6.2" },
+    { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "qcardia", editable = "packages/qcardia" },
+    { name = "scipy", specifier = ">=1.11.4" },
+    { name = "torch", specifier = ">=2.3.0" },
+    { name = "wandb", specifier = ">=0.30.0" },
 ]
 
 [[package]]

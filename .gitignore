@@ -225,7 +225,7 @@ __marimo__/
 # ---- qcardia ----
 # Model weights, placed by each user (see Model weights in README.md)
 wandb/
-# Session logs and UI screenshots of qcardia-app
+# Session logs and UI screenshots of qcardia-viewer
 logs/
 screenshots/
 # Segmentation and label caches written next to subject data
