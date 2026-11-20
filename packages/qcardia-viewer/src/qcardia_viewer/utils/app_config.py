@@ -27,12 +27,6 @@ WORKSPACE_DIR: Path = APP_DIR.parents[2]
 # Holds one folder per subject, any names; changed on the welcome screen.
 DEFAULT_DATA_DIR: Path = WORKSPACE_DIR / "data"
 SETTINGS = QSettings("q-cardIA", "qcardia-viewer")
-# One-time copy of the settings saved before the app was renamed from qcardia-app.
-if not SETTINGS.allKeys():
-    _old_settings = QSettings("q-cardIA", "qcardia-app")
-    for _key in _old_settings.allKeys():
-        SETTINGS.setValue(_key, _old_settings.value(_key))
-    SETTINGS.sync()
 
 COMMUNITY_URL = "https://github.com/q-cardIA"
 REPO_URL = "https://github.com/q-cardIA/qcardia"
