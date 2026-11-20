@@ -38,12 +38,15 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "link": ("Link zoom, pan and scrolling of a panel", "key"),
     "own_frame": ("Own time frame for a panel (e.g. ED next to ES)", "key"),
     "contours": ("Show / hide contours in a panel", "key"),
+    "crosshair_toggle": ("Show / hide the crosshair", "key"),
+    "sax_planes_toggle": ("Show / hide the short-axis slices on long-axis images", "key"),
 }
 
 _KEYS = {
     "slice_prev": "Up", "slice_next": "Down", "first_slice": "Home", "last_slice": "End",
     "frame_prev": "Left", "frame_next": "Right", "play": "Space",
-    "zoom_in": "+", "zoom_out": "-", "reset": "R", "link": "L", "own_frame": "T", "contours": "C",
+    "zoom_in": "+", "zoom_out": "-", "reset": "R", "link": "L", "own_frame": "T", "contours": "C", "crosshair_toggle": "X",
+    "sax_planes_toggle": "P",
     "rotate_left": "Ctrl+Left", "rotate_right": "Ctrl+Right",
 }
 # Cardiac: left stays free for crosshair and contours, right-drag windows (Medis, QMass, Segment).

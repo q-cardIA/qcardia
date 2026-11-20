@@ -73,6 +73,8 @@ class CentralDisplayAreaWidget(QWidget):
     time_axis_changed = Signal(int, int)  # (frames, frame) of the time axis the time slider now drives
     segmentation_requested = Signal(str)  # the contour toggle of a panel whose series has no segmentation yet
     panel_selected = Signal(bool)  # a panel was selected: whether its series has frames
+    crosshair_toggled = Signal(bool)  # the crosshair key was pressed: whether it is shown now
+    stack_toggled = Signal(bool)  # the short-axis slices key was pressed: whether they are shown now
     panels_moved = Signal(object)  # after a layout change: old panel index -> new, for the panels that stay
 
     def __init__(self, parent=None):
@@ -181,6 +183,12 @@ class CentralDisplayAreaWidget(QWidget):
         for p in self._panels:
             p.viewer.show_crosshair(shown)
 
+    def set_stack_shown(self, shown: bool):
+        CustomQGraphicsView.stack_shown = shown
+        for p in self._panels:
+            p.viewer.show_stack_lines(shown)
+        self._show_stack_lines()
+
     def set_grid_size(self, rows: int, cols: int, shift: tuple[int, int] = (0, 0)):
         """Panels are numbered in reading order. A panel keeps its series if its cell, moved by shift
         (rows, cols), is in the new grid."""
@@ -271,6 +279,7 @@ class CentralDisplayAreaWidget(QWidget):
         self._show_cine_time_if_unseen()
         self._selected = moves.get(self._selected)
         self._show_selected()
+        self._show_crosshairs()  # the panels above used the selected panel of the old layout
         self.panels_moved.emit(moves)
         QTimer.singleShot(0, self, self._relink_views)  # the new panels have their sizes after a layout pass
 
@@ -703,6 +712,7 @@ class CentralDisplayAreaWidget(QWidget):
         self._selected = panel_idx
         self._set_time_axis(self._panel_time_axis(panel_idx) or CINE_TIME_AXIS)
         self._show_selected()
+        self._show_crosshairs()
 
     def _show_selected(self):
         """Whether the selected panel has frames, for the time bar; also after its series changes."""
@@ -820,6 +830,55 @@ class CentralDisplayAreaWidget(QWidget):
 
         n = self._n_slices(key, axis)
         p.slice_label.setText(f"Slice: {z + 1}/{n}" if n > 1 else "")
+        self._show_crosshairs()
+
+    def _show_crosshairs(self):
+        """The crosshair of every panel. The selected panel has the plain horizontal and vertical lines. A panel
+        that its plane cuts has the line where the plane cuts it, and a line at 90 degrees to it at the same
+        position along it, e.g. the 3CH selected: in the SAX and in the 2CH."""
+        source = self._selected
+        src_geom = self._transverse_geometry(source) if source is not None and source < self.n_panels else None
+        point = self._world_crosshair
+        if point is None and src_geom is not None:  # no click yet: the centre of the selected panel
+            point = src_geom.pixel_to_world((src_geom.n_rows - 1) / 2, (src_geom.n_cols - 1) / 2,
+                                            self._panel_slice_idx[source])
+        for i, panel in enumerate(self._panels):
+            if self._panel_series_key[i] is None:
+                continue
+            geom = self._transverse_geometry(i)
+            if geom is None or point is None:
+                panel.viewer.set_plain_crosshair()  # no plane to show
+                continue
+            if src_geom is not None and i != source and not src_geom.is_parallel_to(geom):
+                cross = src_geom.crosshair_in_image(geom, self._panel_slice_idx[source], self._panel_slice_idx[i], point)
+                if cross is None:
+                    panel.viewer.hide_crosshair()
+                else:
+                    panel.viewer.set_rotated_crosshair(*cross)
+                continue
+            hit = geom.world_to_pixel(point)
+            if hit is not None:
+                row = max(0, min(int(round(hit[0])), geom.n_rows - 1))
+                col = max(0, min(int(round(hit[1])), geom.n_cols - 1))
+                panel.viewer.set_crosshair_from_volume_indices(row, col)
+        self._show_stack_lines()
+
+    def _show_stack_lines(self):
+        """The slices of the short-axis stack as lines in the panels it cuts, e.g. the 2CH and 4CH; the slice
+        of the short-axis panel thicker. With several short-axis panels, the selected one, else the first."""
+        sax = [i for i in range(self.n_panels)
+               if self._group(i) == ("SAX", "transverse") and self._transverse_geometry(i) is not None]
+        source = self._selected if self._selected in sax else (sax[0] if sax else None)
+        shown = CustomQGraphicsView.stack_shown
+        stack = self._transverse_geometry(source) if source is not None and shown else None  # none while hidden
+        for i, panel in enumerate(self._panels):
+            geom = self._transverse_geometry(i) if stack is not None and self._panel_series_key[i] else None
+            if geom is None or stack.is_parallel_to(geom):
+                panel.viewer.set_stack_lines([], None)
+                continue
+            lines = [stack.intersection_line_in_image(geom, z, self._panel_slice_idx[i])
+                     for z in range(len(stack.ipp_list))]
+            panel.viewer.set_stack_lines(lines, self._panel_slice_idx[source])
 
     def update_all_panels(self):
         for i in range(self.n_panels):
@@ -899,15 +958,13 @@ class CentralDisplayAreaWidget(QWidget):
             if result is None:
                 self._update_panel(i)
                 continue
-            r, c, new_z = result
-            row = max(0, min(int(round(r)), geom.n_rows - 1))
-            col = max(0, min(int(round(c)), geom.n_cols - 1))
+            new_z = result[2]
             n = self._n_slices(key, self._panel_axis[i])
             follows = n > 0 and (i == source or stacks[key, self._panel_axis[i]] == 1 and (
                 not scrolled or self._panel_linked[i] and self._panel_linked[source]))
             if follows and self._set_slice(i, max(0, min(int(round(new_z)), n - 1))):
                 self._update_panel(i)
-            self._panels[i].viewer.set_crosshair_from_volume_indices(row, col)
+        self._show_crosshairs()
 
     def _group(self, panel_idx: int) -> tuple[str, str] | None:
         """Panels of one plane link zoom and pan, e.g. CINE_SAX with LGE_SAX, PC_AORTA with PC_AORTA_MAG."""
@@ -953,8 +1010,9 @@ class CentralDisplayAreaWidget(QWidget):
 
     def _fit_scale(self, panel_idx: int, geom) -> float:
         """Screen pixels per image pixel with the whole image in the panel (as CustomQGraphicsView fits it)."""
-        port = self._panels[panel_idx].viewer.viewport()
-        return max(min(port.width() / geom.n_cols, port.height() / geom.n_rows), 1e-6)
+        viewer = self._panels[panel_idx].viewer
+        width, height = viewer.turned(geom.n_cols, geom.n_rows)
+        return max(min(viewer.viewport().width() / width, viewer.viewport().height() / height), 1e-6)
 
     def _on_view_changed(self, source: int, view: tuple[float, float, float]):
         group = self._group(source)
@@ -986,6 +1044,14 @@ class CentralDisplayAreaWidget(QWidget):
 
     def _on_viewer_action(self, panel_idx: int, action: str, amount: int):
         self._select_time_axis(panel_idx)  # a wheel scroll can come without focus
+        if action == "crosshair_toggle":
+            self.set_crosshair_shown(not CustomQGraphicsView.crosshair_shown)
+            self.crosshair_toggled.emit(CustomQGraphicsView.crosshair_shown)
+            return
+        if action == "sax_planes_toggle":
+            self.set_stack_shown(not CustomQGraphicsView.stack_shown)
+            self.stack_toggled.emit(CustomQGraphicsView.stack_shown)
+            return
         key = self._panel_series_key[panel_idx]
         if (action == "slice" and key and self._is_temporal.get(key)
                 and self._n_slices(key, self._panel_axis[panel_idx]) <= 1):

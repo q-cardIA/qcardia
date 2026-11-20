@@ -1,5 +1,5 @@
 from functools import cache
-from math import cos, radians, sin
+from math import cos, hypot, radians, sin
 
 import numpy as np
 
@@ -25,6 +25,7 @@ _KEY_ACTIONS = {
     "first_slice": ("first", 0), "last_slice": ("last", 0),
     "frame_prev": ("frame", -1), "frame_next": ("frame", 1), "play": ("play", 0),
     "link": ("link", 0), "own_frame": ("own_frame", 0), "contours": ("contours", 0),
+    "crosshair_toggle": ("crosshair_toggle", 0), "sax_planes_toggle": ("sax_planes_toggle", 0),
 }
 _REPEATING = {"slice_prev", "slice_next", "frame_prev", "frame_next", "zoom_in", "zoom_out"}
 
@@ -114,7 +115,6 @@ class CustomQGraphicsView(QGraphicsView):
         self._pixel_spacing_mm = (1.0, 1.0)
         self._contour_line_mm = 2.0
         self.crosshair_pos = None
-        self.dragging_crosshair = None
         self._needs_fit = True
         self._fit_view = None
         self._frame = None  # (box in scene coordinates, cover): kept filling the panel until a manual zoom or pan
@@ -150,13 +150,20 @@ class CustomQGraphicsView(QGraphicsView):
         for line in (self.vertical_line, self.horizontal_line):
             line.setZValue(100)
             line.setVisible(False)
+        self._crosshair_rotated = False  # the first line marks the plane of the selected panel
+        self._stack_items: list = []  # (line, is the current slice) per short-axis slice, see set_stack_lines
+        self._stack_drawn = ([], None)  # the arguments of the last set_stack_lines
 
     def __apply_theme(self):
-        pen = QPen(theme.color("accent"), 1)
-        pen.setDashPattern([6, 6])  # equal dash and gap
-        pen.setCosmetic(True)
-        for line in (self.vertical_line, self.horizontal_line):
-            line.setPen(pen)
+        self.__pens = {}
+        for name, value in theme.CROSSHAIR_COLORS.items():
+            for width in (1, 2):
+                pen = QPen(QColor(value), width)
+                pen.setCosmetic(True)  # thin and continuous at every zoom
+                self.__pens[name, width] = pen
+        self.__set_crosshair_pens(self._crosshair_rotated)
+        for item, current in self._stack_items:
+            item.setPen(self.__pens["stack", 2 if current else 1])
         off, on = theme.color("text_muted").name(), theme.color("accent").name()
         for button, draw in self._toggle_draws:
             button.setIcon(_icon(draw, off, on))
@@ -235,18 +242,22 @@ class CustomQGraphicsView(QGraphicsView):
         if not self.image_2d_w or not self.image_2d_h:
             return
         view = self.viewport()
-        turned = abs(cos(radians(self._rotation))), abs(sin(radians(self._rotation)))
-        width = self.image_2d_w * turned[0] + self.image_2d_h * turned[1]  # the image as it is turned
-        height = self.image_2d_w * turned[1] + self.image_2d_h * turned[0]
+        width, height = self.turned(self.image_2d_w, self.image_2d_h)
         fit = min(view.width() / width, view.height() / height)
         if self._frame is not None:
             (x0, y0, x1, y1), cover = self._frame
-            scale = (max if cover else min)(view.width() / (x1 - x0), view.height() / (y1 - y0))
+            box_w, box_h = self.turned(x1 - x0, y1 - y0)
+            scale = (max if cover else min)(view.width() / box_w, view.height() / box_h)
             self._zoom, self._center = scale / max(fit, 1e-6), QPointF((x0 + x1) / 2, (y0 + y1) / 2)
         self._actual_scale = max(fit, 1e-6) * self._zoom
         self.setTransform(QTransform().scale(self._actual_scale, self._actual_scale).rotate(self._rotation))
         self.centerOn(self.__view_center())
         self.__refresh_pen_widths()
+
+    def turned(self, width: float, height: float) -> tuple[float, float]:
+        """The width and height on screen of an image box of this size, as the image is turned."""
+        c, s = abs(cos(radians(self._rotation))), abs(sin(radians(self._rotation)))
+        return width * c + height * s, width * s + height * c
 
     def __px(self) -> float:
         """Image pixels per screen pixel."""
@@ -348,13 +359,6 @@ class CustomQGraphicsView(QGraphicsView):
         self._drag_last = event.position()
         if self._drag != "crosshair":
             return
-        self.dragging_crosshair = None
-        if self.crosshair_pos is not None:  # a press within 5 screen pixels of a line drags only that line
-            near = 5 * self.__px()
-            if abs(pos.x() - self.crosshair_pos[0]) <= near:
-                self.dragging_crosshair = "vertical"
-            elif abs(pos.y() - self.crosshair_pos[1]) <= near:
-                self.dragging_crosshair = "horizontal"
         self.__move_crosshair_to(pos)
 
     def __start_edit(self, pos) -> bool:
@@ -378,17 +382,12 @@ class CustomQGraphicsView(QGraphicsView):
         return False
 
     def __move_crosshair_to(self, pos):
-        if self.dragging_crosshair == "vertical":
-            pos = QPointF(pos.x(), self.crosshair_pos[1])
-        elif self.dragging_crosshair == "horizontal":
-            pos = QPointF(self.crosshair_pos[0], pos.y())
         self.updateCrosshairPosition(pos.x(), pos.y())
         volx, voly = self.__from_graphics_position_to_raw_volume_position(pos)
         self.coordinates_changed.emit(volx, voly)
 
     def mouseReleaseEvent(self, event):
         self._drag = None
-        self.dragging_crosshair = None
         self._active_handle = None
         self._active_contour_drag = None
 
@@ -477,14 +476,72 @@ class CustomQGraphicsView(QGraphicsView):
 
     crosshair_shown = True  # View > Crosshair, shared by every panel
 
-    def updateCrosshairPosition(self, x, y):
-        """Crosshair at scene (image) point x, y, spanning the image."""
+    def updateCrosshairPosition(self, x, y, direction=(1.0, 0.0), rotated=False):
+        """Crosshair at scene (image) point x, y, spanning the image. One line runs along direction (dx, dy), the
+        other is at 90 degrees to it; the default is the horizontal and vertical line. A rotated crosshair has its
+        first line in the colour of the selected plane, a plain one both lines in the colour of the position."""
         w, h = self.image_2d_w, self.image_2d_h
         x, y = min(max(0.0, x), w), min(max(0.0, y), h)
         self.crosshair_pos = (x, y)
-        self.vertical_line.setLine(x, 0, x, h)
-        self.horizontal_line.setLine(0, y, w, y)
+        if rotated != self._crosshair_rotated:
+            self.__set_crosshair_pens(rotated)
+        dx, dy = direction
+        norm = hypot(dx, dy) or 1.0
+        dx, dy = dx / norm, dy / norm
+        for line, (ux, uy) in ((self.horizontal_line, (dx, dy)), (self.vertical_line, (-dy, dx))):
+            line.setLine(*self.__clip_to_image(x, y, ux, uy))
         self.show_crosshair(CustomQGraphicsView.crosshair_shown)
+
+    def __clip_to_image(self, x, y, ux, uy):
+        """The part of the line through (x, y) with direction (ux, uy) that lies in the image, as x0, y0, x1, y1."""
+        lo, hi = -1e9, 1e9
+        for p, u, size in ((x, ux, self.image_2d_w), (y, uy, self.image_2d_h)):
+            if abs(u) > 1e-9:
+                t0, t1 = sorted(((0 - p) / u, (size - p) / u))
+                lo, hi = max(lo, t0), min(hi, t1)
+        return x + lo * ux, y + lo * uy, x + hi * ux, y + hi * uy
+
+    def set_rotated_crosshair(self, centre: tuple[float, float], direction: tuple[float, float]):
+        """Crosshair at the (row, col) pixel centre with its first line along the (row, col) direction."""
+        self.updateCrosshairPosition(centre[1] + 0.5, centre[0] + 0.5, (direction[1], direction[0]), rotated=True)
+
+    def __set_crosshair_pens(self, rotated: bool):
+        self._crosshair_rotated = rotated
+        self.horizontal_line.setPen(self.__pens["plane" if rotated else "position", 1])
+        self.vertical_line.setPen(self.__pens["position", 1])
+
+    stack_shown = False  # View > Short-Axis Slices, shared by every panel
+
+    def set_stack_lines(self, lines: list, current: int | None):
+        """The slices of the short-axis stack as lines between two (row, col) pixel points, None for a slice that
+        misses the image. The current slice is drawn thicker."""
+        if (lines, current) == self._stack_drawn:  # unchanged: keep the items
+            return
+        self._stack_drawn = (lines, current)
+        for item, _ in self._stack_items:
+            self.scene.removeItem(item)
+        self._stack_items = []
+        for i, line in enumerate(lines):
+            if line is None:
+                continue
+            (r0, c0), (r1, c1) = line
+            item = self.scene.addLine(c0 + 0.5, r0 + 0.5, c1 + 0.5, r1 + 0.5, self.__pens["stack", 2 if i == current else 1])
+            item.setZValue(99)  # under the crosshair
+            item.setVisible(CustomQGraphicsView.stack_shown)
+            self._stack_items.append((item, i == current))
+
+    def show_stack_lines(self, shown: bool):
+        for item, _ in self._stack_items:
+            item.setVisible(shown)
+
+    def set_plain_crosshair(self):
+        """Back to the horizontal and vertical line at the same point, e.g. when no plane is selected."""
+        if self._crosshair_rotated and self.crosshair_pos is not None:
+            self.updateCrosshairPosition(*self.crosshair_pos)
+
+    def hide_crosshair(self):
+        self.crosshair_pos = None
+        self.show_crosshair(False)
 
     def show_crosshair(self, shown: bool):
         """The position keeps following clicks while hidden, so it reappears in the right place."""
@@ -499,6 +556,7 @@ class CustomQGraphicsView(QGraphicsView):
         self.image_item.setPixmap(QPixmap())
         self.vertical_line.setVisible(False)
         self.horizontal_line.setVisible(False)
+        self.set_stack_lines([], None)
         self.clear_contours()
         self.setEnabled(False)
 

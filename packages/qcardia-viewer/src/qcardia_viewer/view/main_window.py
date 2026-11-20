@@ -461,9 +461,17 @@ class MainWindow(QMainWindow):
         crosshair = view_menu.addAction("&Crosshair")
         crosshair.setCheckable(True)
         crosshair.toggled.connect(self.display_area_widget.set_crosshair_shown)
+        self.display_area_widget.crosshair_toggled.connect(crosshair.setChecked)
         crosshair.toggled.connect(lambda on: SETTINGS.setValue("view/crosshair", on))
         crosshair.setChecked(SETTINGS.value("view/crosshair", True, type=bool))
         self.display_area_widget.set_crosshair_shown(crosshair.isChecked())
+        stack = view_menu.addAction("&Short-Axis Slices")  # on the long-axis images
+        stack.setCheckable(True)
+        stack.toggled.connect(self.display_area_widget.set_stack_shown)
+        self.display_area_widget.stack_toggled.connect(stack.setChecked)
+        stack.toggled.connect(lambda on: SETTINGS.setValue("view/sax_planes", on))
+        stack.setChecked(SETTINGS.value("view/sax_planes", False, type=bool))
+        self.display_area_widget.set_stack_shown(stack.isChecked())
         view_menu.addSeparator()
         self.zoom_menu = view_menu.addMenu("&Zoom")
         for text, mode in (("Zoom to &Heart", "roi"), ("&Fill Panels", "fill"), ("Fit &Whole Image", "fit")):

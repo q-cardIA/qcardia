@@ -114,18 +114,39 @@ class VolumeGeometry:
         """True if the two volumes have nearly the same slice orientation."""
         return abs(float(np.dot(self.normal, other.normal))) > 1.0 - tol
 
+    def crosshair_in_image(
+        self, other: VolumeGeometry, z_idx: int, other_z: int, world_pt: np.ndarray
+    ) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """The crosshair of a point in self's slice z_idx, as it appears in slice other_z of other.
+
+        Returns the (row, col) centre and the (row, col) direction of its first line, or None if the planes are
+        parallel or do not meet inside the image. The first line is where self's plane cuts other. The centre is
+        the point of that line nearest to world_pt, so the second line (at 90 degrees) marks the position along it.
+        """
+        line = self.intersection_line_in_image(other, z_idx, other_z)
+        if line is None:
+            return None
+        (r0, c0), (r1, c1) = line
+        a = other.pixel_to_world(r0, c0, other_z)
+        ab = other.pixel_to_world(r1, c1, other_z) - a
+        length2 = float(np.dot(ab, ab))
+        if length2 < 1e-12:
+            return None
+        t = min(max(float(np.dot(world_pt - a, ab)) / length2, 0.0), 1.0)
+        return (r0 + t * (r1 - r0), c0 + t * (c1 - c0)), (r1 - r0, c1 - c0)
+
     def intersection_line_in_image(
-        self, other: VolumeGeometry, z_idx: int
+        self, other: VolumeGeometry, z_idx: int, other_z: int = 0
     ) -> tuple[tuple[float, float], tuple[float, float]] | None:
         """Pixel endpoints of the line where self's slice z_idx intersects other.
 
-        Returns two (row, col) points in other's pixel space, or None if the
+        The line lies in slice other_z of other. Returns two (row, col) points in its pixel space, or None if the
         planes are parallel or the intersection misses the image entirely.
         Used to draw scout lines across panels.
         """
         p_a = self.ipp_list[int(z_idx)]
         n_a = self.normal
-        p_b = other.ipp_list[0]
+        p_b = other.ipp_list[int(other_z)]
         dr_b, dc_b = other.pixel_spacing
 
         d0 = float(np.dot(p_b - p_a, n_a))
@@ -143,15 +164,13 @@ class VolumeGeometry:
             if 0.0 <= r <= H and 0.0 <= c <= W:
                 pts.append((r, c))
 
-        if abs(d_r) > 1e-9:
+        if abs(d_c) > 1e-9:  # crossing the top and bottom edge
             for r_val in (0.0, H):
-                if abs(d_c) > 1e-9:
-                    _add(r_val, (-d0 - d_r * r_val) / d_c)
+                _add(r_val, (-d0 - d_r * r_val) / d_c)
 
-        if abs(d_c) > 1e-9:
+        if abs(d_r) > 1e-9:  # crossing the left and right edge
             for c_val in (0.0, W):
-                if abs(d_r) > 1e-9:
-                    _add((-d0 - d_c * c_val) / d_r, c_val)
+                _add((-d0 - d_c * c_val) / d_r, c_val)
 
         if len(pts) < 2:
             return None
