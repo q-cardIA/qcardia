@@ -20,6 +20,7 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "pan": ("Pan", "drag"),
     "window": ("Window / level", "drag"),
     "zoom_drag": ("Zoom", "drag"),
+    "rotate": ("Rotate the image (Shift: 15 degree steps)", "drag"),
     "slice_scroll": ("Scroll slices", "wheel"),
     "frame_scroll": ("Scroll time frames", "wheel"),
     "zoom_wheel": ("Zoom", "wheel"),
@@ -45,7 +46,7 @@ ACTIONS: dict[str, tuple[str, str]] = {
 _KEYS = {
     "slice_prev": "Up", "slice_next": "Down", "first_slice": "Home", "last_slice": "End",
     "frame_prev": "Left", "frame_next": "Right", "play": "Space",
-    "zoom_in": "+", "zoom_out": "-", "reset": "R", "link": "L", "own_frame": "T", "contours": "C", "crosshair_toggle": "X",
+    "zoom_in": "+", "zoom_out": "-", "reset": "0", "link": "L", "own_frame": "T", "contours": "C", "crosshair_toggle": "X",
     "sax_planes_toggle": "P",
     "rotate_left": "Ctrl+Left", "rotate_right": "Ctrl+Right",
 }
@@ -53,10 +54,10 @@ _KEYS = {
 # PACS: left-drag windows, right-drag zooms (OHIF, Horos).
 PRESETS: dict[str, dict[str, str]] = {
     "Cardiac": {"crosshair": "LeftDrag", "pan": "MiddleDrag", "window": "RightDrag",
-                "zoom_drag": "Ctrl+RightDrag", "slice_scroll": "Wheel",
+                "zoom_drag": "Ctrl+RightDrag", "rotate": "R+LeftDrag", "slice_scroll": "Wheel",
                 "frame_scroll": "Shift+Wheel", "zoom_wheel": "Ctrl+Wheel", **_KEYS},
     "PACS": {"crosshair": "Shift+LeftDrag", "pan": "MiddleDrag", "window": "LeftDrag",
-             "zoom_drag": "RightDrag", "slice_scroll": "Wheel",
+             "zoom_drag": "RightDrag", "rotate": "R+LeftDrag", "slice_scroll": "Wheel",
              "frame_scroll": "Shift+Wheel", "zoom_wheel": "Ctrl+Wheel", **_KEYS},
 }
 DEFAULT_PRESET = "Cardiac"

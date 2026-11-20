@@ -37,3 +37,18 @@ def test_reset_view_removes_the_rotation(panel):
     panel.rotate_by(90)
     panel.reset_view()
     assert panel.transform().m12() == pytest.approx(0)
+
+
+def test_rotate_drag_turns_freely_and_snaps_with_shift(panel):
+    drag = panel._CustomQGraphicsView__rotate_drag
+    drag(60, snap=False)  # half a degree per pixel
+    assert panel._rotation == pytest.approx(30)
+    drag(40, snap=True)  # 20 degrees, snapped to 15
+    assert panel._rotation == pytest.approx(15)
+
+
+def test_default_bindings_do_not_conflict():
+    from qcardia_viewer.utils import bindings
+    for preset in bindings.PRESETS.values():
+        pairs = [(a, b) for a in preset for b in preset if a < b]
+        assert not [(a, b) for a, b in pairs if bindings.conflicts(preset[a], preset[b])]

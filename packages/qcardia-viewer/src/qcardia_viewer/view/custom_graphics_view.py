@@ -106,6 +106,7 @@ class CustomQGraphicsView(QGraphicsView):
 
         self._zoom = 1.0  # relative to fit-to-panel
         self._rotation = 0.0  # degrees, clockwise
+        self._rotate_from = 0.0  # the rotation when a rotate drag started
         self._center: QPointF | None = None  # scene point at the panel centre; None = image centre
         self._actual_scale = 1.0  # screen pixels per image pixel
         self._drag: str | None = None
@@ -307,6 +308,12 @@ class CustomQGraphicsView(QGraphicsView):
     def zoom_out(self):
         self._zoom_by(0.8)
 
+    def __rotate_drag(self, dx: float, snap: bool):
+        """Half a degree per screen pixel dragged to the right, clockwise; in 15 degree steps with snap."""
+        angle = self._rotate_from + 0.5 * dx
+        self._rotation = (round(angle / 15) * 15 if snap else angle) % 360
+        self.__apply_view()
+
     def rotate_by(self, degrees: float):
         """Turn the image clockwise about the centre of the panel."""
         self._rotation = (self._rotation + degrees) % 360
@@ -357,6 +364,7 @@ class CustomQGraphicsView(QGraphicsView):
             return
         self._drag = bindings.action_for(binding)
         self._drag_last = event.position()
+        self._rotate_from = self._rotation  # a rotate drag turns from here
         if self._drag != "crosshair":
             return
         self.__move_crosshair_to(pos)
@@ -419,6 +427,8 @@ class CustomQGraphicsView(QGraphicsView):
             self.__pan(delta)
         elif self._drag == "zoom_drag":
             self._zoom_by(1.01 ** delta.y(), self._press_pos)
+        elif self._drag == "rotate":
+            self.__rotate_drag(event.position().x() - self._press_pos.x(), bool(event.modifiers() & Qt.ShiftModifier))
         elif self._drag == "window":
             self.window_dragged.emit(delta.x(), delta.y())
 
