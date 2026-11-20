@@ -33,7 +33,6 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "play": ("Play / pause cine", "key"),
     "zoom_in": ("Zoom in", "key"),
     "zoom_out": ("Zoom out", "key"),
-    "reset": ("Reset view", "key"),
     "rotate_left": ("Rotate the image 90 degrees left", "key"),
     "rotate_right": ("Rotate the image 90 degrees right", "key"),
     "link": ("Link zoom, pan and scrolling of a panel", "key"),
@@ -46,7 +45,7 @@ ACTIONS: dict[str, tuple[str, str]] = {
 _KEYS = {
     "slice_prev": "Up", "slice_next": "Down", "first_slice": "Home", "last_slice": "End",
     "frame_prev": "Left", "frame_next": "Right", "play": "Space",
-    "zoom_in": "+", "zoom_out": "-", "reset": "0", "link": "L", "own_frame": "T", "contours": "C", "crosshair_toggle": "X",
+    "zoom_in": "+", "zoom_out": "-", "link": "L", "own_frame": "T", "contours": "C", "crosshair_toggle": "X",
     "sax_planes_toggle": "P",
     "rotate_left": "Ctrl+Left", "rotate_right": "Ctrl+Right",
 }
