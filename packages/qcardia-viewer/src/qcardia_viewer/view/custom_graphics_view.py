@@ -489,7 +489,7 @@ class CustomQGraphicsView(QGraphicsView):
     def updateCrosshairPosition(self, x, y, direction=(1.0, 0.0), rotated=False):
         """Crosshair at scene (image) point x, y, spanning the image. One line runs along direction (dx, dy), the
         other is at 90 degrees to it; the default is the horizontal and vertical line. A rotated crosshair has its
-        first line in the colour of the selected plane, a plain one both lines in the colour of the position."""
+        first line in the colour of the selected plane and the other in that of the position, a plain one both blue."""
         w, h = self.image_2d_w, self.image_2d_h
         x, y = min(max(0.0, x), w), min(max(0.0, y), h)
         self.crosshair_pos = (x, y)
@@ -517,8 +517,8 @@ class CustomQGraphicsView(QGraphicsView):
 
     def __set_crosshair_pens(self, rotated: bool):
         self._crosshair_rotated = rotated
-        self.horizontal_line.setPen(self.__pens["plane" if rotated else "position", 1])
-        self.vertical_line.setPen(self.__pens["position", 1])
+        self.horizontal_line.setPen(self.__pens["plane" if rotated else "plain", 1])
+        self.vertical_line.setPen(self.__pens["position" if rotated else "plain", 1])
 
     stack_shown = False  # View > Short-Axis Slices, shared by every panel
 

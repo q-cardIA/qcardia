@@ -84,7 +84,7 @@ def test_rotated_crosshair_has_a_plane_and_a_position_colour(display):
     rotated, plain = display._panels[0].viewer, display._panels[1].viewer
     assert colour(rotated.horizontal_line) == CROSSHAIR_COLORS["plane"]
     assert colour(rotated.vertical_line) == CROSSHAIR_COLORS["position"]
-    assert colour(plain.horizontal_line) == colour(plain.vertical_line) == CROSSHAIR_COLORS["position"]
+    assert colour(plain.horizontal_line) == colour(plain.vertical_line) == CROSSHAIR_COLORS["plain"]
 
 
 def test_short_axis_slices_on_the_long_axis(display):

@@ -51,8 +51,9 @@ STATUS = {"success": "#5ec27e", "warning": "#e8b04a", "error": "#ef6b73"}
 
 # Okabe-Ito colours: told apart with the common forms of colour blindness.
 LABEL_COLORS = {1: "#e69f00", 2: "#56b4e9", 3: "#cc79a7"}
-# Crosshair: the plane of the selected panel, the position on it, and the slices of the short-axis stack.
-CROSSHAIR_COLORS = {"plane": "#f0e442", "position": "#5ec27e", "stack": "#c8c8c8"}
+# Crosshair: the selected panel (blue); in the other panels the plane of the selected panel (yellow) and the position
+# on it (green); the slices of the short-axis stack (grey).
+CROSSHAIR_COLORS = {"plain": "#4f8ff7", "plane": "#f0e442", "position": "#5ec27e", "stack": "#c8c8c8"}
 
 ACCENTS = {
     "Blue": "#85aaff",
