@@ -527,6 +527,7 @@ class CentralDisplayAreaWidget(QWidget):
         p.viewer.clear_display()
         self._show_cine_time_if_unseen()
         self._show_selected()
+        self._show_crosshairs()  # the other panels lose the lines of this one
 
     def get_thumbnail(self, series_key: str) -> np.ndarray | None:
         """Representative 2D uint8 slice (the middle slice at the middle frame) for a browser card."""

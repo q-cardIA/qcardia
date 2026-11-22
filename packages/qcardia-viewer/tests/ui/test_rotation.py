@@ -52,3 +52,15 @@ def test_default_bindings_do_not_conflict():
     for preset in bindings.PRESETS.values():
         pairs = [(a, b) for a in preset for b in preset if a < b]
         assert not [(a, b) for a, b in pairs if bindings.conflicts(preset[a], preset[b])]
+
+
+def test_shift_held_before_the_press_still_starts_a_rotate_drag(panel, monkeypatch):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QMouseEvent
+    from qcardia_viewer.utils import bindings
+    monkeypatch.setitem(bindings._current, "rotate", "R+LeftDrag")
+    monkeypatch.setattr(bindings, "held", "R")
+    pos = QPointF(50, 50)
+    press = QMouseEvent(QEvent.MouseButtonPress, pos, pos, Qt.LeftButton, Qt.LeftButton, Qt.ShiftModifier)
+    panel.mousePressEvent(press)
+    assert panel._drag == "rotate"

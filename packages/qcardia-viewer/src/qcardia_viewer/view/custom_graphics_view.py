@@ -363,6 +363,9 @@ class CustomQGraphicsView(QGraphicsView):
             self.__trigger(click)
             return
         self._drag = bindings.action_for(binding)
+        if self._drag is None and event.modifiers() & Qt.ShiftModifier:  # Shift held before the press: a snapped rotate
+            plain = bindings.drag_binding(event.button(), event.modifiers() & ~Qt.ShiftModifier, bindings.held)
+            self._drag = "rotate" if bindings.action_for(plain) == "rotate" else None
         self._drag_last = event.position()
         self._rotate_from = self._rotation  # a rotate drag turns from here
         if self._drag != "crosshair":

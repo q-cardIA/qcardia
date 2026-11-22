@@ -174,4 +174,5 @@ class VolumeGeometry:
 
         if len(pts) < 2:
             return None
-        return pts[0], pts[-1]
+        # a line through a corner meets two edges there: take the two points farthest apart
+        return max(((a, b) for a in pts for b in pts), key=lambda ab: (ab[0][0] - ab[1][0]) ** 2 + (ab[0][1] - ab[1][1]) ** 2)

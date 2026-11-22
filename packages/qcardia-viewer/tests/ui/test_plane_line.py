@@ -100,3 +100,19 @@ def test_short_axis_slices_on_the_long_axis(display):
     assert display._panels[0].viewer._stack_items == []  # none in the short axis itself
     display._on_viewer_action(1, "sax_planes_toggle", 0)
     assert not any(item.isVisible() for item, _ in display._panels[1].viewer._stack_items)
+
+
+def test_emptying_the_short_axis_removes_its_lines_from_the_long_axis(display):
+    display._on_viewer_action(1, "sax_planes_toggle", 0)
+    display._select_time_axis(0)
+    assert display._panels[1].viewer._stack_items
+    display.set_panel_empty(0)
+    assert display._panels[1].viewer._stack_items == []
+
+
+def test_a_line_through_two_corners_has_two_distinct_ends():
+    # The plane x + y = 63 cuts a 64 x 64 axial image along its diagonal, through two corners.
+    plane = _geometry((0, 0, 1), (1 / np.sqrt(2), -1 / np.sqrt(2), 0), [(63, 0, 0)])
+    axial = _geometry((1, 0, 0), (0, 1, 0), [(0, 0, 0)])
+    ends = plane.intersection_line_in_image(axial, 0, 0)
+    assert sum(sorted(ends), ()) == pytest.approx((0, 63, 63, 0))
