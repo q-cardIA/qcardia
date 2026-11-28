@@ -88,7 +88,9 @@ class InferencePredictor:
                     else la_flat[start:end].float().to(self.device)
                 )
                 output[start:end] = _first(
-                    self.model(tensor[start:end].to(self.device), la_vectors=la_batch)
+                    self.model(
+                        tensor[start:end].to(self.device), **_la_kwargs(la_batch)
+                    )
                 ).cpu()
         return output
 
@@ -116,7 +118,7 @@ class InferencePredictor:
                             )
 
                         prediction = _first(
-                            self.model(context.to(self.device), la_vectors=la_vec)
+                            self.model(context.to(self.device), **_la_kwargs(la_vec))
                         )
                         if self.config.decode_all_context and prediction.dim() > 4:
                             prediction = prediction[:, 0, ...]
@@ -138,3 +140,8 @@ def _first(model_output):
     while isinstance(model_output, (tuple, list)):
         model_output = model_output[0]
     return model_output
+
+
+def _la_kwargs(la_vectors):
+    """Pass la_vectors only when present, so models without LA support still work."""
+    return {} if la_vectors is None else {"la_vectors": la_vectors}
